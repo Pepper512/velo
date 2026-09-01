@@ -151,3 +151,19 @@
   **Lesson:** the scope error came from re-deriving batch membership from the P-item narrative instead
   of reading the delegation map (§3), and then repeating that guess in `HANDOFF.md` and to Jim. Read
   the map.
+- **2026-09-01** — **Jim: pull the P12 real-SQLite test harness forward into Batch B.** ("yes pull the
+  sqlite harness into batch b".) The audit sequences the harness late, but **P6's acceptance criteria
+  cannot be met without it** — P6 is a destructive one-shot repair (`migrations.ts:898-923`) that
+  deletes IMAP attachments and `folder_sync_state`, runs on every launch, and has zero tests; without
+  a harness it would be "fixed" with nothing that ever executes it. It is also a **one-way door**: no
+  down migrations exist, so users on the fixed build cannot be downgraded.
+  **What already exists** (landed in D0, ADR-001): the `better-sqlite3` devDependency, a hand-written
+  `src/test/better-sqlite3.d.ts`, and a smoke test at `src/test/sqliteHarness.test.ts`. **What Batch B
+  adds** is the reusable harness itself — an in-memory DB that `runMigrations` can be pointed at — plus
+  the P6 tests it exists to enable: fresh DB applies all migrations; a second run applies zero
+  (idempotent); a simulated failure between the repair's DELETEs and its flag write leaves **nothing**
+  deleted and the flag unset. No new dependency: ADR-001 already covers this use.
+  **Consequence for scope:** Batch B is now P5 + P6 + P10 + the harness, which makes it materially
+  larger than Batch A. Sequenced first within the batch, since P6's tests depend on it.
+  Note this also unblocks **P8** (FTS5 quoting, Batch C), whose acceptance is likewise written against
+  real SQLite — C gets cheaper as a side effect, but P8 stays in C.

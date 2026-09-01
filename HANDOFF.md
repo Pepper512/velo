@@ -16,7 +16,8 @@ Write the brief the way Batch A's was written
 (`docs/briefs/2026-09-01-batch-a-rust-security.md` is the template that worked), get Jim's approval,
 then build → PR → gates → merge.
 
-**Scope — P5, P6, P10** (per the audit's delegation map §3, which is authoritative):
+**Scope — P5, P6, P10, plus the P12 harness pulled forward** (delegation map §3 is authoritative
+on the P-items; the harness is Jim's 2026-09-01 addition):
 - **P5** credential decrypt falls through to using ciphertext as the password (`accounts.ts:39-75`)
 - **P6** `runMigrations` destructive one-shot repair, untested, runs every launch (`migrations.ts:898-923`)
 - **P10** LLM output boundary — model text reaches the composer via a regex tag-strip; email bodies
@@ -27,13 +28,16 @@ then build → PR → gates → merge.
 > — it is Tier 2 and it is the LLM-output boundary, so losing it would have been the expensive kind
 > of mistake. The delegation map in the audit, not this file, is the authority on batch membership.
 
-**One open question for Jim, plus one that resolved itself once the scope was corrected:**
-1. **P6 needs the P12 in-memory SQLite harness, which the audit schedules in a later batch.**
-   (P8 does too, but P8 is Batch C.) Their acceptance criteria are written against real SQL, and today
-   **no test in the repo executes SQL at all** — 53 of 133 test files mock `services/db/*`.
-   `better-sqlite3` is already approved and landed in D0 (ADR-001), so the harness is buildable now.
-   **Recommendation: pull it forward into B** — otherwise P6, a destructive migration path, gets
-   "fixed" with no test that ever runs it.
+**Both prior questions are now settled — nothing is blocking the brief:**
+1. **P12's real-SQLite harness is pulled forward into Batch B — decided by Jim 2026-09-01.**
+   Build it *first* within the batch; P6's tests depend on it. Already in place from D0 (ADR-001):
+   the `better-sqlite3` devDependency, `src/test/better-sqlite3.d.ts`, and a smoke test at
+   `src/test/sqliteHarness.test.ts`. **B adds** the reusable in-memory harness `runMigrations` can be
+   pointed at, plus P6's tests: fresh DB applies all migrations · a second run applies zero · a
+   simulated failure between the repair's DELETEs and its flag write leaves **nothing** deleted and
+   the flag unset. **No new dependency** — ADR-001 already covers this use.
+   Side effect: this also unblocks **P8** (FTS5, Batch C), whose acceptance is likewise written
+   against real SQLite. P8 stays in C; C just gets cheaper.
 2. **`zod` — already approved, and the question was mine, not yours.** `LOG.md` (2026-09-01, item 3)
    records: *"Approved dependency: `zod` — boundary validation per the global standard; **first use is
    P10 (LLM output)**. Dependency block required in the Batch B brief."* An earlier draft of this file
