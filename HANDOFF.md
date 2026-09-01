@@ -4,18 +4,20 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main` @ `3576093`. **Last commit that changed code: `d704ea0`** ("fix: IMAP sync
-  authenticated OAuth accounts with an empty password (#18)"). Use that second SHA when checking
-  whether work has landed since — docs-only commits on top are expected and harmless.
+- **Branch:** `main`. **Last commit that changed code: `4eac24a`** ("fix(email): make links in
+  plain-text mail clickable and surface failed opens (F-2) (#20)"). This wrap-up commit sits directly
+  on top of it. Check against **that** SHA, not this file's own — docs-only commits above it are
+  expected and harmless.
 - **Open PRs:** none. Working tree clean. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 - **⚠️ A parallel session owns a worktree here.** `git worktree list` shows
-  `.claude/worktrees/f2-email-links-open` (branch `fix/f2-email-links-open` @ `1bf2184`, **locked**).
-  **Do not touch it.** It is gitignored (`.gitignore:51`) but **not excluded from vitest**, so a bare
+  `.claude/worktrees/f2-email-links-open`, **locked** — and it has already been re-pointed to a
+  *different* branch (`fix/f1-snooze-survives-sync`), so **the directory name lags the work inside
+  it**. Trust `git worktree list`, not the path. **Do not touch it.** It is gitignored (`.gitignore:51`) but **not excluded from vitest**, so a bare
   `npx vitest run` at the repo root also runs *that* branch's tests and reports ~200 failures that
   have nothing to do with `main`. Always scope your run — see §1. CI is unaffected (clean checkout).
-- **State:** frontend **1,757** tests (144 files) · Rust **47** · **0** prod npm advisories
+- **State:** frontend **1,784** tests (149 files) · Rust **47** · **0** prod npm advisories
   · **0** import cycles containing a service · EX-001/002/004 closed; EX-003/005/006/007 open.
 
 ---
@@ -55,14 +57,15 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo       # gh otherwise resolves PR numbers against upstream
 ```
 
-Expected: **144 test files, 1,757 tests, all passing.** Any other file count means the exclude was
-dropped or the worktree changed.
+Expected: **149 test files, 1,784 tests, all passing.** A wildly higher file count means the exclude
+was dropped and you are running the parallel worktree's tests.
 
 ### Re-verify before acting — these may have gone stale
 
-- **Has real work landed since?** `git log --oneline -5`. Docs-only commits are wrap-ups; anything
-  else means someone has pushed and this file is behind.
-- **Is the parallel worktree still there?** `git worktree list`. If `f2-email-links-open` is gone the
+- **Has real work landed since `4eac24a`?** `git log --oneline -5`. Docs-only commits are wrap-ups;
+  anything else means someone has pushed and this file is behind. **A second session is actively
+  landing work in this repo** — expect `main` to move under you and rebase before merging.
+- **Is the parallel worktree still there, and on what branch?** `git worktree list`. If it is gone the
   vitest exclude is no longer needed — but leaving it in is harmless.
 - **Upstream drift:** `git fetch upstream && git log --oneline main..upstream/main`. Empty all
   session; if security-relevant `src-tauri/` commits appear, rebase the plan on them first.
@@ -276,7 +279,7 @@ brief's numbers the same way you verify the audit's — including your own.**
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`3576093`** (last code commit **`d704ea0`**) · no open PRs · clean · CI green.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main`, last code commit **`4eac24a`** (#20) · clean · CI green.
 **Status:** audit backlog (20 items) merged. **E2/P15 session pooling is written and reviewed but NOT built** — it is blocked on Jim, not on engineering.
 
 **Next action — tell Jim these two are waiting on him:**
@@ -290,15 +293,17 @@ brief's numbers the same way you verify the audit's — including your own.**
 bug** (§2c — a `UID MOVE` that timed out after succeeding gets COPY'd again, duplicating the message;
 ships today) · (C) low-risk cleanup: P16 (1)(2)(4)(5), P13 (c)(d)(e), P14 remainder.
 
-**Verify first:** `git log --oneline -5` shows nothing past `3576093` · `git worktree list` — a
-**locked parallel worktree** `f2-email-links-open` belongs to another session, **do not touch** ·
+**Verify first:** `git log --oneline -5` shows nothing past `4eac24a` · `git worktree list` — a
+**locked parallel worktree** under `.claude/worktrees/` belongs to another session (its directory
+name lags its branch), **do not touch** · another session is landing work, so **rebase before
+merging** ·
 `git fetch upstream && git log --oneline main..upstream/main` empty · `gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped**.
 
 **Get running:**
 ```bash
 git checkout main && git pull origin main && npm ci
 npx tsc --noEmit
-npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # expect 144 files / 1,757 tests
+npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # expect 149 files / 1,784 tests
 npm run graph:check && npm run docs:check
 (cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)
 ```
