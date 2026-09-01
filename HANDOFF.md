@@ -2,14 +2,32 @@
 
 > Living document, edited in place. Pinned to repo state at the top; next step first.
 
-- **Branch:** `main` @ `f7e890b` — "fix(imap,oauth): Batch A — Rust security hardening (P1–P4, closes EX-002) (#4)"
-- **Open PRs:** none (besides the one landing this edit). D0, the handoff, the release guard, and **Batch A** are all merged.
+- **Branch:** `main` @ `9a206e7` — Batch B is built and in review on `feat/batch-b-credentials-migrations-llm`.
+- **Open PRs:** the **Batch B** PR. D0, the handoff, the release guard, the merge rule, **Batch A** and the Batch B brief are merged.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 
 ---
 
-## 1. Exact next step — write the **Batch B** brief (audit P5–P8)
+## 1. Exact next step — review and land the **Batch B** PR, then start **Batch C**
+
+Batch B (P5 credentials, P6 migrations, P10 LLM boundary, plus the P12 real-SQLite harness pulled
+forward) is **built, tested and pushed**. Frontend suite **1,562 → 1,610**. Plan was approved before
+code, per `02-work-loop.md`.
+
+**Batch C is next: P7, P8, P9, P14.** Two notes that change how it should be planned:
+- **P8 is now cheap.** Its acceptance is written against real SQLite, and the harness Batch B built
+  (`src/test/sqliteHarness.ts`) is exactly what it needed.
+- **P9 is half of the biggest open risk in the codebase.** The sanitizer has no adversarial tests and
+  still allows the `style` attribute, feeding an iframe with `sandbox="allow-same-origin"`, inside a
+  webview whose flat `capabilities/default.json` grants **every** window `sql:*`, `fs` write, and
+  `http://*`. The other half is **P11, which sits in Batch G**. One sanitizer bypass reaches the whole
+  local mail DB and unrestricted exfil. **Consider pulling P11 forward into C** so the chain closes in
+  one batch instead of staying open across two.
+
+---
+
+## 1a. Superseded — the Batch B brief (kept for the audit trail)
 
 Batch B is **Tier 2** on all three counts (P5 credentials, P6 migrations, P10 LLM boundary).
 Write the brief the way Batch A's was written

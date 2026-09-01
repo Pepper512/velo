@@ -21,11 +21,18 @@ vi.mock("./connection", () => ({
   selectFirstBy: vi.fn(),
 }));
 
-vi.mock("@/utils/crypto", () => ({
-  encryptValue: vi.fn((val: string) => Promise.resolve(`enc:${val}`)),
-  decryptValue: vi.fn((val: string) => Promise.resolve(val.replace("enc:", ""))),
-  isEncrypted: vi.fn((val: string) => val.startsWith("enc:")),
-}));
+// The error classes are the REAL ones -- a stub would let a test pass while the
+// production code threw something else entirely.
+vi.mock("@/utils/crypto", async () => {
+  const actual = await vi.importActual<typeof import("@/utils/crypto")>("@/utils/crypto");
+  return {
+    CredentialDecryptError: actual.CredentialDecryptError,
+    KeyFileError: actual.KeyFileError,
+    encryptValue: vi.fn((val: string) => Promise.resolve(`enc:${val}`)),
+    decryptValue: vi.fn((val: string) => Promise.resolve(val.replace("enc:", ""))),
+    isEncrypted: vi.fn((val: string) => val.startsWith("enc:")),
+  };
+});
 
 import { selectFirstBy } from "./connection";
 
@@ -281,5 +288,108 @@ describe("accounts", () => {
       expect(sql).toContain("UPDATE accounts SET history_id");
       expect(params).toEqual(["history-999", "acc-1"]);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Audit P5: credential decryption must fail closed.
+// ---------------------------------------------------------------------------
+
+describe("decryptAccountTokens fails closed (P5)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  /**
+   * Every credential column, and the exact failure the old code swallowed.
+   * Previously each of these logged "using raw value" and returned the AES
+   * ciphertext, which the IMAP/SMTP client then sent to the mail server as the
+   * user's password.
+   */
+  const CREDENTIAL_FIELDS = [
+    "access_token",
+    "refresh_token",
+    "imap_password",
+    "oauth_client_secret",
+    "caldav_password",
+  ] as const;
+
+  it.each(CREDENTIAL_FIELDS)(
+    "throws CredentialDecryptError when %s cannot be decrypted",
+    async (field) => {
+      const { decryptValue } = await import("@/utils/crypto");
+      const { CredentialDecryptError } = await vi.importActual<
+        typeof import("@/utils/crypto")
+      >("@/utils/crypto");
+
+      vi.mocked(decryptValue).mockRejectedValueOnce(new Error("bad key"));
+
+      const account = { ...createMockImapAccount(), [field]: "enc:whatever" };
+      mockSelectFirstBy.mockResolvedValue(account);
+
+      await expect(getAccount(account.id)).rejects.toThrow(CredentialDecryptError);
+    },
+  );
+
+  it("never returns a value that still looks like ciphertext", async () => {
+    const { decryptValue } = await import("@/utils/crypto");
+    // Simulate decryptValue "succeeding" but handing back the input unchanged --
+    // the belt-and-braces guard in decryptAccountTokens.
+    vi.mocked(decryptValue).mockResolvedValueOnce("enc:still-encrypted");
+
+    mockSelectFirstBy.mockResolvedValue({
+      ...createMockImapAccount(),
+      imap_password: "enc:secret",
+    });
+
+    await expect(getAccount("acct-1")).rejects.toThrow(/IMAP password/);
+  });
+
+  it("names the field but never leaks the value", async () => {
+    const { decryptValue } = await import("@/utils/crypto");
+    vi.mocked(decryptValue).mockRejectedValueOnce(new Error("bad key"));
+
+    mockSelectFirstBy.mockResolvedValue({
+      ...createMockImapAccount(),
+      imap_password: "enc:hunter2-super-secret",
+    });
+
+    await expect(getAccount("acct-1")).rejects.toThrow(/IMAP password/);
+    await expect(
+      getAccount("acct-1").catch((e: Error) => e.message),
+    ).resolves.not.toContain("hunter2");
+  });
+
+  it("getAllAccounts rejects rather than yielding a partly-decrypted list", async () => {
+    const { decryptValue } = await import("@/utils/crypto");
+    const { CredentialDecryptError } = await vi.importActual<
+      typeof import("@/utils/crypto")
+    >("@/utils/crypto");
+
+    // First account decrypts fine, second fails. The old code would have
+    // returned both, the second carrying ciphertext as its password.
+    vi.mocked(decryptValue)
+      .mockResolvedValueOnce("good-password")
+      .mockRejectedValueOnce(new Error("bad key"));
+
+    mockSelect.mockResolvedValue([
+      { ...createMockImapAccount(), id: "a1", imap_password: "enc:one" },
+      { ...createMockImapAccount(), id: "a2", imap_password: "enc:two" },
+    ]);
+
+    await expect(getAllAccounts()).rejects.toThrow(CredentialDecryptError);
+  });
+
+  it("leaves plaintext (non-encrypted) values untouched", async () => {
+    const { decryptValue } = await import("@/utils/crypto");
+
+    mockSelectFirstBy.mockResolvedValue({
+      ...createMockImapAccount(),
+      imap_password: "plain-text-password",
+    });
+
+    const account = await getAccount("acct-1");
+    expect(account?.imap_password).toBe("plain-text-password");
+    expect(decryptValue).not.toHaveBeenCalled();
   });
 });

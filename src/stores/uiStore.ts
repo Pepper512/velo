@@ -34,6 +34,8 @@ interface UIState {
   sidebarNavConfig: SidebarNavItem[] | null;
   reduceMotion: boolean;
   isOnline: boolean;
+  /** Set when stored credentials could not be decrypted (audit P5). */
+  credentialError: string | null;
   pendingOpsCount: number;
   isSyncingFolder: string | null;
   setTheme: (theme: Theme) => void;
@@ -57,6 +59,7 @@ interface UIState {
   restoreSidebarNavConfig: (config: SidebarNavItem[]) => void;
   setReduceMotion: (reduce: boolean) => void;
   setOnline: (online: boolean) => void;
+  setCredentialError: (message: string | null) => void;
   setPendingOpsCount: (count: number) => void;
   setSyncingFolder: (folder: string | null) => void;
 }
@@ -79,6 +82,7 @@ export const useUIStore = create<UIState>((set) => ({
   sidebarNavConfig: null,
   reduceMotion: false,
   isOnline: true,
+  credentialError: null,
   pendingOpsCount: 0,
   isSyncingFolder: null,
 
@@ -154,6 +158,7 @@ export const useUIStore = create<UIState>((set) => ({
     set({ reduceMotion });
   },
   setOnline: (isOnline) => set({ isOnline }),
+  setCredentialError: (credentialError) => set({ credentialError }),
   setPendingOpsCount: (pendingOpsCount) => set({ pendingOpsCount }),
   setSyncingFolder: (isSyncingFolder) => set({ isSyncingFolder }),
 }));

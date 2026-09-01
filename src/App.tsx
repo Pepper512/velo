@@ -68,6 +68,8 @@ import { useTaskStore } from "./stores/taskStore";
 import { ContextMenuPortal } from "./components/ui/ContextMenuPortal";
 import { MoveToFolderDialog } from "./components/email/MoveToFolderDialog";
 import { OfflineBanner } from "./components/ui/OfflineBanner";
+import { CredentialErrorBanner } from "./components/ui/CredentialErrorBanner";
+import { CredentialDecryptError, KeyFileError } from "./utils/crypto";
 import { UpdateToast } from "./components/ui/UpdateToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { formatSyncError } from "./utils/networkErrors";
@@ -358,6 +360,15 @@ export default function App() {
         startUpdateChecker();
       } catch (err) {
         console.error("Failed to initialize:", err);
+        // A credential that cannot be decrypted is not a generic startup
+        // failure -- it has a specific cause and a specific remedy, and the
+        // user previously saw it as "wrong password" from their mail server
+        // (audit P5). Surface it instead of leaving an empty account list.
+        if (err instanceof CredentialDecryptError || err instanceof KeyFileError) {
+          useUIStore.getState().setCredentialError(
+            `${err.message} Restore velo.key from a backup, or remove and re-add the account.`,
+          );
+        }
       }
       setInitialized(true);
       invoke("close_splashscreen").catch(() => {});
@@ -542,6 +553,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen overflow-hidden text-text-primary">
       <OfflineBanner />
+      <CredentialErrorBanner />
       {/* Animated gradient blobs for glassmorphism effect */}
       <div className="animated-bg" aria-hidden="true">
         <div className="blob" />
