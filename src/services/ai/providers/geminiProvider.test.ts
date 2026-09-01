@@ -175,4 +175,18 @@ describe("geminiProvider", () => {
     await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toBe(true);
     expect(lastRequest().body).toMatchObject({ generationConfig: { maxOutputTokens: 10 } });
   });
+
+  it("still reports a working connection when the tiny budget was all spent on thinking", async () => {
+    // The default model is a thinking model; on Gemini 2.5 thinking tokens come
+    // out of the same maxOutputTokens budget, so a 10-token liveness check can
+    // legitimately return a 200 with no text part. That is a working key, not a
+    // broken one — strictness about text belongs to complete(), not here.
+    mockFetch.mockResolvedValue(reply({ text: "private reasoning", thought: true }));
+    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toBe(true);
+
+    mockFetch.mockResolvedValue(
+      jsonResponse(200, { candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }] }),
+    );
+    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toBe(true);
+  });
 });

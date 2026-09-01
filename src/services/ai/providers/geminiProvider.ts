@@ -69,11 +69,20 @@ function errorForStatus(status: number): AiError {
   return new AiError("NETWORK_ERROR", `Gemini request failed with HTTP ${status}`);
 }
 
-async function generateContent(
+/**
+ * POST a `generateContent` request and return the parsed body.
+ *
+ * Proves the key, the model and the connection: any non-2xx or transport
+ * failure is a typed `AiError`. Deliberately does NOT demand a text part —
+ * that is `complete()`'s concern. A thinking model can spend a small
+ * `maxOutputTokens` budget entirely on thinking and return a 200 with no text,
+ * which is still a working connection.
+ */
+async function postGenerateContent(
   apiKey: string,
   modelId: string,
   body: GenerateContentBody,
-): Promise<string> {
+): Promise<unknown> {
   // The SDK accepts both `gemini-…` and `models/gemini-…`; so do we.
   const model = modelId.startsWith("models/") ? modelId : `models/${modelId}`;
 
@@ -89,31 +98,33 @@ async function generateContent(
   }
   if (!response.ok) throw errorForStatus(response.status);
 
-  let parsed: unknown;
   try {
-    parsed = await response.json();
+    return await response.json();
   } catch {
     throw new AiError("NETWORK_ERROR", "Gemini returned a non-JSON response");
   }
-
-  const text = extractText(parsed);
-  if (text === null) throw new AiError("NETWORK_ERROR", "Gemini returned no text");
-  return text;
 }
 
 export function createGeminiProvider(apiKey: string, modelId: string): AiProviderClient {
   return {
-    complete(req: AiCompletionRequest): Promise<string> {
-      return generateContent(apiKey, modelId, {
+    async complete(req: AiCompletionRequest): Promise<string> {
+      const parsed = await postGenerateContent(apiKey, modelId, {
         systemInstruction: { parts: [{ text: req.systemPrompt }] },
         contents: [{ role: "user", parts: [{ text: req.userContent }] }],
         generationConfig: { maxOutputTokens: req.maxTokens ?? DEFAULT_MAX_TOKENS },
       });
+
+      // Strict only here: `undefined` must never flow onward into the compose path.
+      const text = extractText(parsed);
+      if (text === null) throw new AiError("NETWORK_ERROR", "Gemini returned no text");
+      return text;
     },
 
     async testConnection(): Promise<boolean> {
       try {
-        await generateContent(apiKey, modelId, {
+        // A 2xx already proves the key works; do not require a text part —
+        // on a thinking model this budget may be spent entirely on thinking.
+        await postGenerateContent(apiKey, modelId, {
           contents: [{ role: "user", parts: [{ text: "Say hi" }] }],
           generationConfig: { maxOutputTokens: CONNECTION_TEST_MAX_TOKENS },
         });
