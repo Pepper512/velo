@@ -338,3 +338,46 @@
   compromised or mistaken peer, because the corroborating PR comment is posted through the
   same account the relaying session controls. The mitigation is that relays must be durably
   recorded, so a wrong one is visible after the fact rather than only in a transcript.
+- **2026-09-01 22:30 UTC → 2026-09-02 01:30 UTC (hard expiry)** — **Jim delegated his decision
+  authority for this repo to session `velo-build-f1` for a three-hour window** (Jim, in-session,
+  22:30 UTC: *"you are in charge, you are me"*; he is away for the window and asked that work
+  continue). **Scope:** the four open decisions in `HANDOFF.md` §1 and any judgment call the E2/P15
+  and dependency-PR-C builds raise. **After expiry nothing further is decided in his name.** Every
+  decision made under it is listed here marked *(delegated)* and is **subject to Jim's retroactive
+  review on return — anything he reverses is reverted, not argued.**
+  **What this does not change:** *no self-approval* (the proxy's own build still needs an
+  opposite-line EX-005 review and a cross-vendor review); every required check green on the exact
+  commit merged; and **the proxy cannot reach what a permission gate refuses** — the `rust MSRV`
+  branch-protection append was attempted from this session at 22:33 UTC and classifier-blocked,
+  exactly as the earlier attempt was, and was **not** routed through the peer session. Decision 4
+  therefore remains Jim's and is **not made**.
+  - *(delegated)* **E2/P15 rev 2 re-confirmed**, judged — as Jim asked — against the brief's
+    §Pooling findings. **Findings 1, 3 and 5 are folded into the build; 4 and 6 are deferred.**
+    Reasoning: 1 (a dropped future leaves a mid-protocol session in the map with no `Err` to trigger
+    eviction) and 5 (a parser panic on hostile bytes does the same) close with one
+    *checkout-removes-entry* pattern — take the entry out of the map on checkout, reinsert only on
+    clean completion — so eviction becomes a fact about the map rather than about an error reaching
+    the caller. 3 (`account_key = "user@host"` collides across port / TLS mode / auth mechanism, so a
+    rotated credential keeps being served) is cheap and is a correctness bug. 4 (staleness `NOOP`)
+    and 6 (`last_used` stamped on acquire) are availability, not correctness, and stay in the brief
+    as follow-ups. Decision 2's `getrandom = "0.3"` remains the **only** dependency E2 may add.
+    Landing order unchanged: E2 → async-imap 0.11 bump → F-4/F-5. The rev-4 delta (Done-when
+    clauses + the pool pattern in §Proposed change) is written as the first commit of the build
+    branch; **this entry is the approval, the delta is its mechanical expression.** Builder:
+    `velo-build-43` (Opus seat). Reviewers: `velo-build-f1` (EX-005) + Gemini 3.7 via Antigravity
+    (cross-vendor; Kimi is out of weekly quota).
+  - *(delegated)* **Dependency-audit PR C plan approved** — the vault plan
+    `PLAN-PR-C_Gemini-SDK-Replacement.md`, re-verified in the tree before approval: one importer
+    (`geminiProvider.ts`, 39 lines), `generativelanguage.googleapis.com` already in the CSP at
+    `tauri.conf.json:42`, no `geminiProvider.test.ts` today. **New dependency `@google/genai@^2.20`
+    approved — the only dependency PR C may add;** `@google/generative-ai` (EOL 2025-11-30) is
+    removed, not bumped. **Self-approval hazard, named rather than hidden:** the proxy approving this
+    plan is also its builder (`velo-build-f1`, now the Fable seat). Mitigations: an opposite-line
+    plan acknowledgement from `velo-build-43` recorded on the PR *before* code; EX-005 review by
+    `velo-build-43`; Gemini cross-vendor review; and this line, so Jim's retroactive review lands on
+    it first.
+  - **F-4 — not decided.** Rev 5 (vault `SPEC-F-4_Vanished-UID-Reconciliation.md`) is to be read in
+    full within the window before any decision is made in Jim's name; it builds after E2 regardless,
+    so nothing is lost by deciding it last.
+  - **Decision 4 (make `rust MSRV` a required check) — not made;** permission-gated, Jim only.
+    **Until it lands, the MSRV is not enforced.**
