@@ -366,16 +366,32 @@
     branch; **this entry is the approval, the delta is its mechanical expression.** Builder:
     `velo-build-43` (Opus seat). Reviewers: `velo-build-f1` (EX-005) + Gemini 3.7 via Antigravity
     (cross-vendor; Kimi is out of weekly quota).
-  - *(delegated)* **Dependency-audit PR C plan approved** — the vault plan
-    `PLAN-PR-C_Gemini-SDK-Replacement.md`, re-verified in the tree before approval: one importer
-    (`geminiProvider.ts`, 39 lines), `generativelanguage.googleapis.com` already in the CSP at
-    `tauri.conf.json:42`, no `geminiProvider.test.ts` today. **New dependency `@google/genai@^2.20`
-    approved — the only dependency PR C may add;** `@google/generative-ai` (EOL 2025-11-30) is
-    removed, not bumped. **Self-approval hazard, named rather than hidden:** the proxy approving this
-    plan is also its builder (`velo-build-f1`, now the Fable seat). Mitigations: an opposite-line
-    plan acknowledgement from `velo-build-43` recorded on the PR *before* code; EX-005 review by
-    `velo-build-43`; Gemini cross-vendor review; and this line, so Jim's retroactive review lands on
-    it first.
+  - *(delegated)* **Dependency-audit PR C — plan approved with one amendment: no new dependency.**
+    The vault plan `PLAN-PR-C_Gemini-SDK-Replacement.md` was re-verified in the tree (one importer,
+    `geminiProvider.ts`, 39 lines; `generativelanguage.googleapis.com` already in the CSP at
+    `tauri.conf.json:42`; no `geminiProvider.test.ts`) and its API claims re-verified against the
+    real `@google/genai@2.20.0` typings. `@google/generative-ai` is removed — its end of life
+    (2025-11-30) is **Google's announcement, not a registry fact**: npm carries no deprecation flag on
+    `0.24.1`, so treat the date as a citation. **Amendment:** rather than swapping SDKs,
+    `geminiProvider.ts` is rewritten against the REST API with `fetch` —
+    `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, key in
+    the `x-goog-api-key` header (never the URL), `systemInstruction` in the body,
+    `candidates[0].content.parts[].text` concatenated with `thought` parts skipped — the exact wire
+    format the SDK itself emits, read from its source. **Reasons:** (1) the hard rule *no dependency
+    where a function suffices* — the provider makes one POST; (2) the plan priced the swap as
+    one-for-one, but the old SDK has **zero** dependencies and `@google/genai` brings
+    `google-auth-library`, `p-retry`, `protobufjs` and `ws` into a renderer that holds mail
+    credentials — a transitive cost the plan did not name; (3) this makes PR C a pure removal, so
+    Jim's retroactive review lands on a strictly smaller change than the one he pre-approved, and
+    nothing is foreclosed — the SDK path can still be approved later. Error mapping: 401/403 →
+    `AiError("AUTH_ERROR")`, 429 → `RATE_LIMITED`, other non-2xx or network failure →
+    `NETWORK_ERROR`; a reply with no text part **throws** rather than returning `undefined` (P10
+    boundary), while a present-but-empty text is returned as `""` like the sibling providers.
+    **Self-approval hazard, named rather than hidden:** the proxy amended and approved this plan and
+    is also its builder (`velo-build-f1`, now the Fable seat). Mitigations: an opposite-line plan
+    acknowledgement from `velo-build-43` recorded on the PR *before* code — given for the SDK
+    version of the plan, **re-requested for this amendment**; EX-005 review by `velo-build-43`;
+    Gemini cross-vendor review; and this line, so Jim's retroactive review lands on it first.
   - **F-4 — not decided.** Rev 5 (vault `SPEC-F-4_Vanished-UID-Reconciliation.md`) is to be read in
     full within the window before any decision is made in Jim's name; it builds after E2 regardless,
     so nothing is lost by deciding it last.
