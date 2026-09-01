@@ -4,7 +4,6 @@ import { getEmailProvider } from "@/services/email/providerFactory";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
-import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
 
 // ---------------------------------------------------------------------------
 // Action types
@@ -67,16 +66,29 @@ export interface ActionResult {
   queued?: boolean;
   error?: string;
   data?: unknown;
+  /**
+   * The thread the UI should select next, when this action removed the one that
+   * was open. **The service does not navigate** (audit P13(a)) — it reports what
+   * should happen and the caller decides.
+   *
+   * Importing `@/router/navigate` from here put the entire page tree in the
+   * import graph of every service that touches email: a Gmail delta sync
+   * transitively imported `App.tsx`. That was 54 simple cycles through one
+   * 40-file strongly-connected component, and it is why services could not be
+   * tested without the router.
+   */
+  nextThreadId?: string;
 }
 
 // ---------------------------------------------------------------------------
 // Optimistic UI helpers
 // ---------------------------------------------------------------------------
 
-function getNextThreadId(currentId: string): string | null {
+function getNextThreadId(currentId: string, selectedThreadId: string | null): string | null {
   // Only auto-advance if the removed thread is the one being viewed
-  const selectedId = getSelectedThreadId();
-  if (selectedId !== currentId) return null;
+  // Selection is passed in, not read from the router: this function used to
+  // call `getSelectedThreadId()` from `@/router/navigate` (audit P13(a)).
+  if (selectedThreadId !== currentId) return null;
   const { threads } = useThreadStore.getState();
   const idx = threads.findIndex((t) => t.id === currentId);
   if (idx === -1) return null;
@@ -88,7 +100,10 @@ function getNextThreadId(currentId: string): string | null {
   return null;
 }
 
-function applyOptimisticUpdate(action: EmailAction): void {
+function applyOptimisticUpdate(
+  action: EmailAction,
+  selectedThreadId: string | null,
+): { nextThreadId?: string } {
   const store = useThreadStore.getState();
   switch (action.type) {
     case "archive":
@@ -96,12 +111,10 @@ function applyOptimisticUpdate(action: EmailAction): void {
     case "permanentDelete":
     case "spam":
     case "moveToFolder": {
-      const nextId = getNextThreadId(action.threadId);
+      const nextId = getNextThreadId(action.threadId, selectedThreadId);
       store.removeThread(action.threadId);
-      if (nextId) {
-        navigateToThread(nextId);
-      }
-      break;
+      // Reported, not performed -- see ActionResult.nextThreadId.
+      return nextId ? { nextThreadId: nextId } : {};
     }
     case "markRead":
       store.updateThread(action.threadId, { isRead: action.read });
@@ -118,6 +131,7 @@ function applyOptimisticUpdate(action: EmailAction): void {
       // No universal optimistic update for these
       break;
   }
+  return {};
 }
 
 function revertOptimisticUpdate(action: EmailAction): void {
@@ -303,9 +317,16 @@ async function executeViaProvider(
 export async function executeEmailAction(
   accountId: string,
   action: EmailAction,
+  /**
+   * The thread currently open in the UI, if any. Supplied by the caller so this
+   * service does not read router state (audit P13(a)). Omitted by non-UI callers
+   * such as the offline queue, for which "what to select next" is meaningless.
+   */
+  selectedThreadId: string | null = null,
 ): Promise<ActionResult> {
-  // 1. Optimistic UI update
-  applyOptimisticUpdate(action);
+  // 1. Optimistic UI update. Returns what the UI should select next; it does
+  //    not navigate.
+  const { nextThreadId } = applyOptimisticUpdate(action, selectedThreadId);
 
   // 2. Local DB update
   try {
@@ -322,13 +343,13 @@ export async function executeEmailAction(
       getResourceId(action),
       actionToParams(action),
     );
-    return { success: true, queued: true };
+    return { success: true, queued: true, nextThreadId };
   }
 
   // 4. Try online execution
   try {
     const data = await executeViaProvider(accountId, action);
-    return { success: true, data };
+    return { success: true, data, nextThreadId };
   } catch (err) {
     const classified = classifyError(err);
 
@@ -340,7 +361,7 @@ export async function executeEmailAction(
         getResourceId(action),
         actionToParams(action),
       );
-      return { success: true, queued: true };
+      return { success: true, queued: true, nextThreadId };
     }
 
     // Permanent error — revert optimistic update

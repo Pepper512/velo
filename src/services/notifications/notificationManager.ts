@@ -8,7 +8,6 @@ import {
 import { getSetting } from "../db/settings";
 import { WebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { useComposerStore } from "../../stores/composerStore";
-import { navigateToLabel } from "../../router/navigate";
 import { normalizeEmail } from "@/utils/emailUtils";
 
 let initialized = false;
@@ -93,6 +92,12 @@ export async function initNotifications(): Promise<void> {
       } else {
         await showAndFocusMainWindow();
         if (ctx?.threadId) {
+          // Dynamic import so this service does not carry the router -- and
+          // therefore the whole page tree -- in its static import graph
+          // (audit P13). This was the last static services -> router edge, and
+          // it closed the final cycle: sync -> notificationManager -> router ->
+          // routeTree -> App -> syncManager -> sync.
+          const { navigateToLabel } = await import("../../router/navigate");
           navigateToLabel("inbox", { threadId: ctx.threadId });
         }
       }

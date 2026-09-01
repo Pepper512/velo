@@ -167,6 +167,10 @@ describe("emailActions", () => {
     });
   });
 
+  // Audit P13(a): the service REPORTS the next thread; it no longer navigates.
+  // These assertions moved from "navigateToThread was called" to "the result
+  // says what should be selected", and selection is passed in rather than read
+  // from router state. Navigation itself is covered by useEmailActions.test.ts.
   describe("auto-advance after removal", () => {
     const threads = [
       { id: "t1" },
@@ -174,100 +178,132 @@ describe("emailActions", () => {
       { id: "t3" },
     ];
 
-    it("navigates to next thread when archiving the viewed thread", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t2");
+    it("reports the next thread when archiving the viewed thread", async () => {
+      const selected = "t2";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await archiveThread("acct-1", "t2", ["m1"]);
-      expect(navigateToThread).toHaveBeenCalledWith("t3");
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "archive", threadId: "t2", messageIds: ["m1"] },
+        selected,
+      );
+      expect(result.nextThreadId).toBe("t3");
     });
 
-    it("navigates to previous thread when archiving the last thread", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t3");
+    it("reports the previous thread when archiving the last thread", async () => {
+      const selected = "t3";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await archiveThread("acct-1", "t3", ["m1"]);
-      expect(navigateToThread).toHaveBeenCalledWith("t2");
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "archive", threadId: "t3", messageIds: ["m1"] },
+        selected,
+      );
+      expect(result.nextThreadId).toBe("t2");
     });
 
-    it("does not navigate when archiving a non-viewed thread", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t1");
+    it("reports no next thread when archiving a non-viewed thread", async () => {
+      const selected = "t1";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await archiveThread("acct-1", "t2", ["m1"]);
-      expect(navigateToThread).not.toHaveBeenCalled();
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "archive", threadId: "t2", messageIds: ["m1"] },
+        selected,
+      );
+      expect(result.nextThreadId).toBeUndefined();
     });
 
-    it("does not navigate when archiving the only thread", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t1");
+    it("reports no next thread when archiving the only thread", async () => {
+      const selected = "t1";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads: [{ id: "t1" }],
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await archiveThread("acct-1", "t1", ["m1"]);
-      expect(navigateToThread).not.toHaveBeenCalled();
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "archive", threadId: "t1", messageIds: ["m1"] },
+        selected,
+      );
+      expect(result.nextThreadId).toBeUndefined();
     });
 
-    it("navigates on trash action", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t1");
+    it("reports the next thread on trash action", async () => {
+      const selected = "t1";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await trashThread("acct-1", "t1", ["m1"]);
-      expect(navigateToThread).toHaveBeenCalledWith("t2");
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "trash", threadId: "t1", messageIds: ["m1"] },
+        selected,
+      );
+      expect(result.nextThreadId).toBe("t2");
     });
 
-    it("navigates on spam action", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t1");
+    it("reports the next thread on spam action", async () => {
+      const selected = "t1";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await spamThread("acct-1", "t1", ["m1"], true);
-      expect(navigateToThread).toHaveBeenCalledWith("t2");
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "spam", threadId: "t1", messageIds: ["m1"], isSpam: true },
+        selected,
+      );
+      expect(result.nextThreadId).toBe("t2");
     });
 
-    it("navigates on permanentDelete action", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t2");
+    it("reports the next thread on permanentDelete action", async () => {
+      const selected = "t2";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await permanentDeleteThread("acct-1", "t2", ["m1"]);
-      expect(navigateToThread).toHaveBeenCalledWith("t3");
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "permanentDelete", threadId: "t2", messageIds: ["m1"] },
+        selected,
+      );
+      expect(result.nextThreadId).toBe("t3");
     });
 
-    it("navigates on moveToFolder action", async () => {
-      vi.mocked(getSelectedThreadId).mockReturnValue("t2");
+    it("reports the next thread on moveToFolder action", async () => {
+      const selected = "t2";
       vi.mocked(useThreadStore.getState).mockReturnValue(createMockThreadStoreState({
         threads,
         updateThread: mockUpdateThread,
         removeThread: mockRemoveThread,
       }) as never);
 
-      await moveThread("acct-1", "t2", ["m1"], "Archive");
-      expect(navigateToThread).toHaveBeenCalledWith("t3");
+      const result = await executeEmailAction(
+        "acct-1",
+        { type: "moveToFolder", threadId: "t2", messageIds: ["m1"], folderPath: "Archive" },
+        selected,
+      );
+      expect(result.nextThreadId).toBe("t3");
     });
   });
 

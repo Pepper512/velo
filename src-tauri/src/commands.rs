@@ -44,12 +44,13 @@ pub async fn imap_fetch_messages(
 
     match result {
         Ok(r) => Ok(r),
-        Err(e) if e.starts_with("ASYNC_IMAP_EMPTY:") => {
-            // async-imap can't parse this server's responses — use raw TCP fallback
-            log::info!("Falling back to raw TCP fetch for folder {folder}");
+        // Typed, not a string prefix (audit P15): the compiler now enforces that
+        // this arm and the value `fetch_messages` returns stay in agreement.
+        Err(imap_client::FetchError::AsyncImapEmpty { folder: f }) => {
+            log::info!("Falling back to raw TCP fetch for folder {f}");
             imap_client::raw_fetch_messages(&config, &folder, &uid_set).await
         }
-        Err(e) => Err(e),
+        Err(imap_client::FetchError::Other(msg)) => Err(msg),
     }
 }
 

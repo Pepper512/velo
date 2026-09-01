@@ -121,6 +121,11 @@ jobs:
       # tree entirely, so prod advisories are now zero and the gate is back where
       # the standard puts it.
       - run: npm audit --omit=dev --audit-level=high
+      # Import-graph layering check (audit P13). Fails if any import cycle
+      # contains a services/* file -- the condition that put the whole page tree
+      # into the import graph of every service and made 54 cycles.
+      - name: Import graph (no service cycles)
+        run: node scripts/graph.mjs --check
 
   secrets:
     name: secret scan
