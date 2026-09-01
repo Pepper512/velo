@@ -126,3 +126,28 @@
   before it (the #2 merge, pre-guard) was **`failure` (1m9s)** — the EX-007 guard works. The #2
   merge also re-created the stray `release-please--branches--main--components--velo` branch, since
   it landed before the guard; deleted again.
+- **2026-09-01** — **Third audit error found; treat `docs/audits/…` §6 metrics as unverified.**
+  A completion review of the whole backlog turned up that the audit's headline metric
+  **"52% of source files (0% of components) have no test"** is wrong on the components half: there
+  are **32 component test files** (29 using `@testing-library/react`), present at the audit commit
+  `ec47a7a` and still present today. The audit's sibling-test script missed `.test.tsx`.
+  **Why it matters:** "0% component coverage" is the stated blocker for splitting `SettingsPage.tsx`
+  and the other god-components (audit §4 defers them "until component tests exist" — they exist), and
+  it inflates the apparent size of the component-test work. Anything sourced from that script (§6
+  metrics table) needs re-measuring before it is used to size or sequence work.
+  Running tally of audit corrections: (1) `serde_json` "unused" — false, `generate_context!` needs it;
+  (2) P1's six injection sites — an undercount, `async-imap` leaves three more sinks unvalidated;
+  (3) components "0% tested" — false. The audit remains the backlog's source of truth for *what* to
+  fix; its measurements are not trustworthy without a spot-check.
+- **2026-09-01** — **Batch B scope corrected before work started: it is P5, P6, P10 — not P5–P8.**
+  An earlier `HANDOFF.md` draft (and a verbal answer to Jim) said "P5–P8". The audit's delegation map
+  §3 is authoritative: **B** = P5 credential decrypt + P6 migration repair + **P10 LLM output
+  boundary**; **C** = P7, P8, P9, P14. P10 is the item that would have silently slid — it is Tier 2
+  and it is the LLM-output-is-untrusted-input rule from the global standard. Corrected in `HANDOFF.md`
+  §1. Consequence: the doubt raised earlier about whether **`zod`** belongs in Batch B was an artifact
+  of the wrong scope. The 2026-09-01 decisions entry above already says it plainly — *"Approved
+  dependency: `zod` … **first use is P10 (LLM output)**. Dependency block required in the Batch B
+  brief."* Nothing to re-decide; the block goes in the Batch B PR.
+  **Lesson:** the scope error came from re-deriving batch membership from the P-item narrative instead
+  of reading the delegation map (§3), and then repeating that guess in `HANDOFF.md` and to Jim. Read
+  the map.

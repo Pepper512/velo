@@ -11,22 +11,36 @@
 
 ## 1. Exact next step — write the **Batch B** brief (audit P5–P8)
 
-Batch B is **Tier 2** (P5 credentials, P6 migrations). Write the brief the way Batch A's was written
+Batch B is **Tier 2** on all three counts (P5 credentials, P6 migrations, P10 LLM boundary).
+Write the brief the way Batch A's was written
 (`docs/briefs/2026-09-01-batch-a-rust-security.md` is the template that worked), get Jim's approval,
 then build → PR → gates → merge.
 
-**Scope:** P5 credential decrypt falls through to ciphertext · P6 `runMigrations` destructive one-shot
-repair, untested · P7 `mailto:` header injection · P8 FTS5 syntax reaches SQLite unescaped.
+**Scope — P5, P6, P10** (per the audit's delegation map §3, which is authoritative):
+- **P5** credential decrypt falls through to using ciphertext as the password (`accounts.ts:39-75`)
+- **P6** `runMigrations` destructive one-shot repair, untested, runs every launch (`migrations.ts:898-923`)
+- **P10** LLM output boundary — model text reaches the composer via a regex tag-strip; email bodies
+  interpolated into prompts unescaped (`aiService.ts`, `askInbox.ts`, `prompts.ts`)
 
-**Two things to settle in the brief, both flagged to Jim 2026-09-01 and not yet answered:**
-1. **P6 and P8 need the P12 in-memory SQLite harness, which the audit schedules in a later batch.**
-   Their acceptance criteria are written against real SQL, and today **no test in the repo executes
-   SQL at all** (53 of 133 test files mock `services/db/*`). `better-sqlite3` is already approved and
-   landed in D0 (ADR-001), so the harness is buildable now. **Recommendation: pull it forward into B**
-   — otherwise P6, a destructive migration path, gets "fixed" with no test that ever runs it.
-2. **`zod`'s first use is pencilled into Batch B**, but none of P5–P8 obviously needs it; the closest
-   fit (P5's structural `isEncrypted`) is ~10 lines by hand. If it doesn't earn its place, the
-   dependency block slips to the batch that actually uses it rather than being added speculatively.
+> **Correction (2026-09-01):** an earlier draft of this handoff said Batch B was "P5–P8". It is not.
+> **P7 and P8 belong to Batch C** (with P9 and P14). P10 is the item that silently slid out of scope
+> — it is Tier 2 and it is the LLM-output boundary, so losing it would have been the expensive kind
+> of mistake. The delegation map in the audit, not this file, is the authority on batch membership.
+
+**One open question for Jim, plus one that resolved itself once the scope was corrected:**
+1. **P6 needs the P12 in-memory SQLite harness, which the audit schedules in a later batch.**
+   (P8 does too, but P8 is Batch C.) Their acceptance criteria are written against real SQL, and today
+   **no test in the repo executes SQL at all** — 53 of 133 test files mock `services/db/*`.
+   `better-sqlite3` is already approved and landed in D0 (ADR-001), so the harness is buildable now.
+   **Recommendation: pull it forward into B** — otherwise P6, a destructive migration path, gets
+   "fixed" with no test that ever runs it.
+2. **`zod` — already approved, and the question was mine, not yours.** `LOG.md` (2026-09-01, item 3)
+   records: *"Approved dependency: `zod` — boundary validation per the global standard; **first use is
+   P10 (LLM output)**. Dependency block required in the Batch B brief."* An earlier draft of this file
+   asked whether zod "earns its place in B" — that doubt only existed because the same draft had B
+   scoped wrongly as P5–P8, which excluded P10. With P10 restored, zod's first use *is* Batch B,
+   exactly as decided. **No decision needed: carry the dependency block in the Batch B PR,** scoped to
+   the AI-output parser.
 
 **P6 is a one-way door:** there are no down migrations, so users on the fixed build cannot be
 downgraded. The audit says the plan must state this. It must.
