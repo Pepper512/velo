@@ -10,10 +10,20 @@
 - **Date / owner:** 2026-09-01 · agent drafts · **Jim approves before any code** · build seat
   **#8 Claude Opus 5**, review **#19 GPT-5.6 Sol + DeepSeek V4 Pro** (audit §Batches, row E2).
 - **Source:** `docs/audits/2026-09-01-optimize-audit.md` §P15 and §Batches row **E2**.
-- **Base:** `main` @ `d704ea0` (**re-based** from `13cb063`; `d704ea0` is the Decision 3 fix, below).
-- **Status:** ⚠️ **DO NOT BUILD.** Rev 2, amended 2026-09-01 after independent review (§Independent
-  review). Jim approved rev 1; rev 2 changes retry semantics, session lifecycle and the fallback
-  design materially, so it needs his re-confirmation. **Decision 4 is open and blocking.**
+- **Base:** `main` @ `0d0b373` (**re-based** from `d704ea0`, six merges back). **Every line number in
+  this brief was re-verified at `0d0b373`**; rev 2's were verified at `d704ea0` and many had since
+  moved — `client.rs` in particular was rewritten twice by #25 and #26. See §Drift.
+- **Status:** ⚠️ **DO NOT BUILD.** **Rev 3**, 2026-09-01 — a docs-only refresh: citations
+  re-verified, the drift #25/#26 created folded in, Decision 4 recorded as decided, and **six**
+  pooling findings written down (§Pooling findings) rather than left in a review transcript — one of
+  which the current design does not cover.
+  - **Decision 4 — ✅ DECIDED (a)** (Jim, 2026-09-01). No longer blocking.
+  - 🔴 **Rev-2 re-confirmation — STILL OPEN, and it is now the only thing blocking the build.**
+    Jim approved rev 1; rev 2 changed retry semantics, session lifecycle, caps and the fallback
+    design. He is holding the re-confirmation deliberately until this refresh lands so he can judge
+    it against current facts — **specifically the cancellation finding in §Pooling findings, which
+    the design does not currently cover.** Tier 2 plan approval before code; agent merge authority
+    does not reach it.
 
 ---
 
@@ -27,24 +37,24 @@ let x = imap_client::do_the_thing(&mut session, ...).await?;
 let _ = session.logout().await;                            // and throw it away
 ```
 
-**15 copies.** `connect()` (`imap/client.rs:169`) wraps the whole handshake in a 60-second timeout,
+**15 copies.** `connect()` (`imap/client.rs:171`) wraps the whole handshake in a 60-second timeout,
 which is the honest measure of how expensive it is.
 
 The cost is not theoretical, and the codebase already documents it in the form of workarounds:
 
 | Evidence | Where |
 |---|---|
-| `INTER_FOLDER_DELAY_MS = 1_000` — *"Delay between folder syncs during initial sync to avoid connection bursts"* | `imapSync.ts:56`, applied at `:473-475` |
-| Circuit breaker: 3 failures → 15 s pause; 5 → skip remaining folders | `imapSync.ts:50-54` |
-| `isConnectionError()` classifier over 8 substrings | `imapSync.ts:58-70` |
+| `INTER_FOLDER_DELAY_MS = 1_000` — *"Delay between folder syncs during initial sync to avoid connection bursts"* | `imapSync.ts:57`, applied at `:485-487` |
+| Circuit breaker: 3 failures → 15 s pause; 5 → skip remaining folders | `imapSync.ts:51-55` |
+| `isConnectionError()` classifier over 8 substrings | `imapSync.ts:59-71` |
 
 **Corrected cost model (rev 2).** Rev 1 gave one formula for both sync paths and got both terms
 wrong. The paths differ:
 
 | | Logins | Inter-folder sleep |
 |---|---|---|
-| **Initial sync** | 1 `imapListFolders` + 1 `imapSearchFolder` **per folder** + 1 `imapFetchMessages` per **200**-UID chunk (`CHUNK_SIZE`, `imapSync.ts:41`, used at `:500-501`) | `(K-1) × 1 s` — the `folderIdx > 0` guard at `:473-475` |
-| **Delta sync** | 1 `imapListFolders` + **1 batched** `imapDeltaCheck` covering all existing folders (`:925`) + 1 `imapSearchFolder` per **new or UIDVALIDITY-changed** folder + 1 fetch per **50**-UID batch (`BATCH_SIZE`, `imapSync.ts:39`, `:365-367`) | **none** |
+| **Initial sync** | 1 `imapListFolders` + 1 `imapSearchFolder` **per folder** + 1 `imapFetchMessages` per **200**-UID chunk (`CHUNK_SIZE`, `imapSync.ts:42`, used at `:512`) | `(K-1) × 1 s` — the `folderIdx > 0` guard at `:485` |
+| **Delta sync** | 1 `imapListFolders` + **1 batched** `imapDeltaCheck` covering all existing folders (`:946`) + 1 `imapSearchFolder` per **new or UIDVALIDITY-changed** folder + 1 fetch per **50**-UID batch (`BATCH_SIZE`, `imapSync.ts:40`, `:375-376`) | **none** |
 
 So a delta sync of U new messages costs ≈ `2 + ceil(U/50)` logins. For U = 1000 that is ~22 logins,
 not the 7 rev 1 claimed. The argument gets **stronger**, not weaker: the delta path — the one that
@@ -55,7 +65,7 @@ The security half is why this is Tier 2 rather than a perf ticket. `ImapConfig.p
 bridge on every mail operation. Pooling makes that **once per session open**.
 
 **Stated honestly (rev 2):** the credential does not leave the process. Password accounts keep the
-decrypted password in `_imapConfig` (`imapSmtpProvider.ts:131-134`) and in SQLite; OAuth accounts
+decrypted password in `_imapConfig` (`imapSmtpProvider.ts:132`, cached at `:154-157`) and in SQLite; OAuth accounts
 need token material in the frontend for every reopen. What improves is the number of secret copies in
 flight and — the concrete operational win — the number of **login events**, which is what providers
 rate-limit and lock accounts over. The exposure *moves*: from "a secret on every IPC call" to "a live
@@ -72,10 +82,51 @@ Batch E (`3d76f1b`) delivered the Tier-1 half of P15:
   `configure_tcp_socket()`. Connection setup is already deduplicated; **pooling does not need to
   touch the handshake.** The TCP keepalive at `net.rs:79-91` (60 s) matters more than it looks — see
   Blocker 1.
-- `FetchError` (`imap/client.rs:23`) replaced the `ASYNC_IMAP_EMPTY:` string-prefix protocol.
+- `FetchError` (`imap/client.rs:25`) replaced the `ASYNC_IMAP_EMPTY:` string-prefix protocol.
 
 What did **not** land: the audit's full `MailError` enum. All 19 commands still return
 `Result<T, String>`. That matters — see Decision 1.
+
+---
+
+## Drift — what #25 and #26 changed under this brief (rev 3)
+
+Rev 2 was verified at `d704ea0`. Six merges later, two of them (#25 `2066351`, #26 `5c545f9`)
+rewrote the interior of `client.rs`. Beyond the line numbers, five things change what this brief
+plans to build:
+
+1. **`imap/caps.rs` now exists** (#25). It reads `CAPABILITY` once per session and returns
+   `Caps { has_move, has_uidplus }`, degrading to "no optional extensions" on a clean protocol
+   failure and **aborting on a timeout** (a dropped `CAPABILITY` future desynchronises the session —
+   the same hazard Blocker 1 describes). Its own doc already says where it belongs under pooling:
+   **in the pool entry beside the session**, so a pooled connection is interrogated once rather than
+   per command. That is a new `Entry` field this brief must carry, and it is the E2-shaped half of a
+   file written with E2 in mind.
+2. **Two of the 15 commands no longer return `()`.** `imap_move_messages` and
+   `imap_delete_messages` return `RemovalResult { expunged }` (#26). The command-table row that says
+   "`config: ImapConfig` → `session_id: String`" still holds, but their signatures are no longer the
+   uniform `Result<(), String>` rev 2 assumed.
+3. **Part of Blocker 2's retry policy has already shipped, by a different mechanism.** Rev 2
+   excludes `imap_move_messages` from retry because the COPY fallback is not replay-safe. That is
+   now enforced *below* the session manager: #26 wraps a post-COPY failure in
+   `VELO_OUTCOME_UNKNOWN:` and `classifyError` (`src/utils/networkErrors.ts`) matches that prefix
+   ahead of its network patterns, returning `isRetryable: false` — so neither `executeEmailAction`
+   nor `queueProcessor` replays it. **`imap_append_message` has no such sentinel**, so the
+   idempotency exclusion this brief specifies is still required for it. Scope shrinks; it does not
+   disappear.
+4. **`OUTCOME_UNKNOWN_PREFIX` is exactly the stringly-typed IPC error `MailError` exists to
+   replace — and it deliberately covers two different states.** A timed-out `UID MOVE` is genuinely
+   unknown; a COPY that succeeded before its expunge failed is a *known* partial. They share a
+   prefix only because replay duplicates mail in both. **E2's typed-error migration must split them,
+   not collapse them:** "unknown" wants a reconciling read, "copied but not removed" wants the
+   delete completed. The prefix's own doc comment says so; this brief owns the migration.
+5. **Mailbox state is shared and volatile across pooled sessions.** A per-account cap of **2** means
+   two live sessions on one account can hold the same folder selected, and IMAP flags and the
+   selected mailbox are per-connection *views* of shared server state. Every pooled operation must
+   `SELECT` its folder and must not assume its own earlier `SELECT` still holds. #26 removed the
+   worst version of this — an untargeted `EXPUNGE` in session A destroying what session B had
+   flagged — by making the expunge target only its own UID set, but the **rule** was never written
+   down and belongs here.
 
 ---
 
@@ -103,7 +154,7 @@ pub enum MailError {
 ```
 
 `SessionClosed` is gone — eviction plus `NoSuchSession` covers it with no string classification.
-`Other(String)` stays load-bearing: it keeps `isConnectionError()` (`imapSync.ts:58`) working, so
+`Other(String)` stays load-bearing: it keeps `isConnectionError()` (`imapSync.ts:59`) working, so
 this brief does not have to re-classify every IMAP failure in the codebase.
 
 ### Decision 2 — dependency ✅ **DECIDED: `getrandom = "0.3"`** (Jim, 2026-09-01)
@@ -114,7 +165,7 @@ unguessable id does and does not buy — rev 1 oversold it.
 
 ### Decision 3 — OAuth-over-IMAP sync bug ✅ **RESOLVED — shipped in `d704ea0` (#18)**
 
-Rev 1 found that `imapSync.ts:400`/`:833` built the sync config with no access token, so OAuth IMAP
+Rev 1 found that `imapSync.ts:411`/`:854` (rev 2 cited `:400`/`:833`) built the sync config with no access token, so OAuth IMAP
 accounts authenticated with `""`. Jim chose to fix it first, separately. It landed as **`d704ea0`**
 with regression tests, and both call sites now use `buildImapConfigWithFreshToken(account)`
 (`imapConfigBuilder.ts:104-112`).
@@ -123,23 +174,45 @@ with regression tests, and both call sites now use `buildImapConfigWithFreshToke
 second credential path. The "one place that always refreshes" already exists.
 (`syncManager.ts:94`'s discarded `ensureFreshToken` result is now merely redundant, not a bug.)
 
-### Decision 4 — where the raw-fetch fallback gets its credential 🔴 **OPEN — blocks the build**
+### Decision 4 — where the raw-fetch fallback gets its credential ✅ **DECIDED (a)** (Jim, 2026-09-01)
 
 `imap_fetch_messages` catches `FetchError::AsyncImapEmpty` and calls `raw_fetch_messages(&config, …)`
-(`commands.rs:48-52`), which opens its own authenticated connection (`client.rs:987-999`). A pooled
+(`commands.rs:51-53`), which opens its own authenticated connection (`client.rs:1073`). A pooled
 command has no config, and the pool deliberately stores none. Rev 1 noticed this and wrote *"call
 this out in review"* instead of resolving it. Called out — **with what password?** Every resolution
 costs something rev 1 claimed not to pay:
 
 | Option | Cost |
 |---|---|
-| **(a)** Frontend-driven: the pooled command returns `NeedRawFallback`; the frontend calls a separate config-carrying `imap_raw_fetch_messages` *(recommended)* | The password crosses IPC on that rare path. Done-when 5 needs an explicit exemption naming that one command. |
+| **(a)** Frontend-driven: the pooled command returns `NeedRawFallback`; the frontend calls a separate config-carrying `imap_raw_fetch_messages` — **CHOSEN** | The password crosses IPC on that rare path. Done-when 5 needs an explicit exemption naming that one command. |
 | **(b)** Keep `config` as a second argument on `imap_fetch_messages` | Done-when 1's grep becomes 4, and the password rides the **hot** path — the exact thing this brief exists to stop. |
 | **(c)** Store the `ImapConfig` in the pool entry | Breaks the central design property and the Threat section's disclosure argument. |
 
-**Recommendation: (a).** It confines the credential to a genuinely rare, non-standard-server path,
-keeps the hot path clean, and makes the cost one honest line in an acceptance test rather than a
-silent hole. **Jim's call — no code until this is settled.**
+### ✅ **DECIDED: (a)** — Jim, 2026-09-01
+
+The pooled command returns `NeedRawFallback`; the frontend calls a separate config-carrying
+`imap_raw_fetch_messages`. The password crosses IPC only on that rare non-standard-server path, at
+the cost of **one named exemption** in Done-when 5's grep. Decided after seeing all four options
+below with the cross-vendor additions in front of him.
+
+**What the review changed about the options' costs** (recorded here rather than left for
+cross-referencing):
+
+- **(c) is worse than this table said.** It does not merely break the design property — it *does not
+  work* for OAuth accounts. Stored access tokens expire, so re-authenticating in Rust would require
+  refresh-token logic and refresh tokens held in long-lived process state: a genuine escalation over
+  "the credential lives in the frontend and sessions are opened and discarded". Credentials in the
+  pool would also reach crash dumps. (c) was already the weakest option; it is not merely weak but
+  unworkable.
+- **A fourth option exists, and is not scope.** **(d) Run the raw fetch over the pooled,
+  already-authenticated session.** The fallback exists because async-imap's *parser* returned empty,
+  not for any reason to do with authentication — so conceptually it needs no credential at all. The
+  API is there: `run_command`/`run_command_untagged` plus `impl AsMut<T> for Session<T>` expose the
+  raw stream. **Two reasons it is not this brief's plan:** `as_mut()` returns the *inner* stream,
+  past async-imap's buffered `ImapStream`, so bytes already buffered would be skipped; and today's
+  `raw_fetch_messages` (`client.rs:1073`) bypasses async-imap entirely — its own TCP/TLS, LOGIN and
+  line reader — so (d) is a rewrite of the fallback against the very layer that fails to parse on
+  these servers. Recorded as the better end state once E2 has landed, not as work to fold in now.
 
 ---
 
@@ -174,7 +247,7 @@ that was never dangerous:
 > SELECT/STORE/EXPUNGE). A timeout **drops the inner future mid-protocol**, leaving unread response
 > bytes in the TLS buffer. Today that is harmless — the command ends, the session is logged out and
 > dropped. **Pooled, that session goes back in the map and the next command reads the tail of the
-> aborted FETCH as its own response.** Partial-failure paths do the same (`client.rs:504-522`: COPY
+> aborted FETCH as its own response.** Partial-failure paths do the same (`client.rs:500` `flag_and_expunge`, called after the COPY at `:602`: COPY
 > succeeded, EXPUNGE errored). `tokio::sync::Mutex` has no poisoning, so a panic mid-command releases
 > the lock and leaves the desynchronised session reusable too.
 >
@@ -202,13 +275,13 @@ match.
 
 **Exit hook.** `lib.rs` has no `RunEvent` handler today (`.run()` at `lib.rs:302`; tray quit calls
 `app.exit(0)` at `:207`). Best-effort LOGOUT needs a `RunEvent::ExitRequested` arm with a bounded
-per-session timeout — the pattern at `client.rs:974` already exists. Small, but rev 1 promised it
+per-session timeout — the pattern at `client.rs:1060` already exists. Small, but rev 1 promised it
 with no landing site.
 
 **No credentials in the pool.** The entry holds a session, an account key and a timestamp — not the
 `ImapConfig`. Dead sessions are not re-authenticated in Rust; the frontend reopens.
 
-**One cheap hardening:** `ImapConfig` derives `Debug` (`imap/types.rs:3`), which would print the
+**One cheap hardening:** `ImapConfig` derives `Debug` (`imap/types.rs:3`, password at `:9`), which would print the
 password. Nothing `{:?}`-logs it today (checked), but this is new credential-handling code — replace
 the derive with a manual `Debug` rendering `password: "[redacted]"`.
 
@@ -218,9 +291,9 @@ the derive with a manual `Debug` rendering `password: "[redacted]"`.
 |---|---|
 | `imap_session_open(config) -> String` | **new.** The only command that receives a password (plus Decision 4's fallback command, under (a)). |
 | `imap_session_close(session_id)` | **new.** Idempotent. |
-| The 15 operation commands | `config: ImapConfig` → `session_id: String`; the `connect()`/`logout()` pair disappears. Validation stays put — `wire::build_flag_list`, `wire::validate_mailbox` still run **before** the session is touched (`commands.rs:120`, `:217`). |
+| The 15 operation commands | `config: ImapConfig` → `session_id: String`; the `connect()`/`logout()` pair disappears. Validation stays put — `wire::build_flag_list`, `wire::validate_mailbox` still run **before** the session is touched (`commands.rs:122`, `:231`). |
 | `imap_test_connection(config)` | **unchanged.** Account setup, before a session can exist. |
-| `imap_raw_fetch_diagnostic(config)` | **unchanged.** Debug-only (`commands.rs:270`). |
+| `imap_raw_fetch_diagnostic(config)` | **unchanged.** Debug-only (`commands.rs:286`). |
 | `imap_fetch_messages`' fallback | **Decision 4.** Under (a): returns `NeedRawFallback`; a new config-carrying `imap_raw_fetch_messages` does the work. |
 
 ### TypeScript — `src/services/imap/sessionManager.ts` (new)
@@ -234,20 +307,20 @@ withSession(accountId, kind: 'sync' | 'interactive', opts: { idempotent: boolean
   `buildImapConfigWithFreshToken` (Decision 3).
 - **Retry policy by idempotency (Blocker 2).** On `NoSuchSession`: reopen once. Retry the operation
   **only if `idempotent`**. The two exclusions, with evidence:
-  - **`imap_append_message`** (`client.rs:567-586`) — the sent-mail copy (`imapSmtpProvider.ts:417`)
-    and the draft save (`:521`). If APPEND lands server-side but the connection dies before the
+  - **`imap_append_message`** (`client.rs:653`) — the sent-mail copy (`imapSmtpProvider.ts:445`)
+    and the draft save (`:549`). If APPEND lands server-side but the connection dies before the
     tagged response, an auto-retry writes a **duplicate in Sent**. Today a lost response means a
-    *missing* Sent copy, which the caller already tolerates (`imapSmtpProvider.ts:413-424`); a silent
+    *missing* Sent copy, which the caller already tolerates (`imapSmtpProvider.ts:441-452`); a silent
     duplicate is worse.
   - **`imap_move_messages`** — the MOVE-extension path is retry-safe (a second `uid_mv` on expunged
     UIDs is a silent no-op). The **COPY fallback is not**: COPY succeeds, the session dies during
-    `+Deleted`/EXPUNGE (`client.rs:504-522`), the retry re-runs COPY and **every moved message exists
+    `+Deleted`/EXPUNGE (`client.rs:500`, reached from `:602`), the retry re-runs COPY and **every moved message exists
     twice in the destination**. The frontend cannot tell which path the server took, so the whole
     command is non-retryable.
   - `imap_delete_messages` and `imap_set_flags` **are** safe: UID STORE on nonexistent UIDs is a
     silent no-op (RFC 3501 §6.4.8), EXPUNGE is idempotent, re-setting identical flags is a no-op.
 - On `TooManySessions`: close this realm's idlest session, retry once, then surface.
-- Closes sessions on account deletion, on `clearConfigCache()` (`imapSmtpProvider.ts:152` — password
+- Closes sessions on account deletion, on `clearConfigCache()` (`imapSmtpProvider.ts:175` — password
   change), **on OAuth refresh failure** (revocation — see Threat), and on app quit.
 
 **Two session kinds per account.** A 200-message fetch holds the session mutex for seconds; a shared
@@ -257,9 +330,9 @@ session would make an archive click wait behind it.
 `sessionManager` cache and its own `interactive` session. That is why the cap is per-account with LRU
 rather than a global hard fail.
 
-Call sites: `imapSmtpProvider.ts` (15 `getImapConfig()` sites) and `imapSync.ts` (`:400`, `:833` plus
+Call sites: `imapSmtpProvider.ts` (15 `getImapConfig()` sites) and `imapSync.ts` (`:411`, `:854` plus
 per-folder calls). The rewiring is wider than rev 1 implied: `imapSync` threads `config` through
-helpers such as `fetchMessagesInBatches` (`:355`), all of which change signature.
+helpers such as `fetchMessagesInBatches` (`:365`), all of which change signature.
 
 ---
 
@@ -368,6 +441,65 @@ the first operation should reopen transparently rather than error. Then send a m
 
 ---
 
+## Pooling findings not yet in the design (rev 3)
+
+A second cross-vendor read of the *pooling design itself* produced six findings. Rev 2 folded in the
+three blockers it was given; these six were raised against the pooled architecture and were left in
+a review transcript rather than written down. They are recorded here because **the first one is not
+covered by the current design**, and Jim's rev-2 re-confirmation should be made against it.
+
+Correcting a count I gave verbally: this is **six** findings, not five — one of which #26 has since
+absorbed.
+
+1. **Cancellation bypasses eviction-on-error — the one real hole.** Every safeguard in this brief
+   fires on an `Err` *returned to the caller*. If the command future is instead **dropped**
+   mid-IMAP-I/O — a caller-side `select!`, a dropped `JoinHandle`, any structured-concurrency
+   cancellation in the Tauri command path — the per-session mutex guard releases, the `Arc`'d
+   session stays in the map mid-protocol, and **no error is ever produced, so no eviction happens**.
+   The next acquirer reads the aborted command's response tail. This is the identical
+   desynchronisation Blocker 1 correctly fears from `with_timeout`, reachable through a door the
+   design does not watch. *Fix:* remove/swap the entry out of the map on checkout and reinsert only
+   on clean completion, or mark the entry poisoned from the guard's `Drop`.
+   **Uncertainty, stated:** whether such a cancellation path exists today depends on Tauri's command
+   dispatch — Tauri does not cancel in-flight commands when the frontend navigates away, so this may
+   be theoretical *at present*. It is exactly the kind of path added later without re-auditing the
+   pool, and the checkout-removes-entry pattern costs nothing to adopt now.
+2. **Cross-session mailbox state.** Covered in §Drift item 5 — **largely absorbed by #26's targeted
+   `UID EXPUNGE`**, which removed the destructive version of it. The residual is the discipline
+   rule: pooled operations must `SELECT` their folder and treat flags as volatile.
+3. **`account_key = "user@host"` collides across connection configurations.** Same user and host on
+   a different port, TLS mode (993 implicit vs 143 STARTTLS) or auth mechanism (password vs XOAUTH2)
+   map to one key, so a session authenticated under one config can be served to a command expecting
+   another. Concretely: after a password fix or an OAuth rotation the pool keeps serving sessions
+   authenticated with the old credential — fine while the server tolerates it, silently wrong when
+   it stops. *Fix:* include port, TLS mode and auth mechanism in the key, plus a credential-version
+   counter bumped on re-login. Cheap.
+4. **No staleness check at checkout, so the user eats the stale-session failure.** Servers idle-kill
+   connections. The `sync` session stays warm on the 60-second delta loop; the `interactive` one
+   idles. The first command after a kill fails, the entry is evicted as designed — but *the user's
+   command already failed*. A `NOOP` (or a transparent reopen) when `last_used` exceeds a threshold
+   turns that into nothing the user sees. Availability, not correctness.
+5. **Panics escape the eviction rule.** The design notes `tokio::sync::Mutex` has no poisoning, then
+   uses that only to justify eviction-on-`Err`, which does nothing for a panic. Not hypothetical on
+   this codebase: the app already meets servers whose bytes break the parser's contract — that is
+   what `AsyncImapEmpty` and Decision 4 exist for — and a parser panic on hostile bytes is the same
+   class of event on the same servers. *Fix:* `catch_unwind`/`spawn` per pooled operation and evict
+   on panic, or adopt finding 1's checkout-removes-entry pattern, which fixes both.
+6. **`last_used` stamped on acquire, plus a reaper that awaits the session mutex.** A 60-second
+   operation holds its mutex with a `last_used` from before it started, so the LRU and the reaper
+   both read the busiest session as the idlest — the LRU may evict a warm session while a genuinely
+   idle one survives. Not corruption (the mutex makes LOGOUT wait), but the reaper then blocks its
+   whole pass behind the busiest session. *Fix:* stamp on release, or `try_lock` to skip busy
+   entries in both reaper and LRU. Also: the reaper's LOGOUTs want their own timeout — a half-dead
+   TCP connection can hang a LOGOUT well past `IMAP_CMD_TIMEOUT`.
+
+**Not reported, deliberately:** the map-lock/lock-order discipline, the eviction-on-timeout
+rationale, the credential-free pool and the idempotency-aware retry policy were all examined and are
+sound as written. IDLE/unsolicited-response handling may be a real issue but nothing in the design
+mentions IDLE, so it is flagged as a question for the build rather than invented as a finding.
+
+---
+
 ## Independent review (rev 2)
 
 **Reviewer:** Kimi K3 (cross-vendor seat), run non-interactively against this brief and the ten files
@@ -391,22 +523,42 @@ pooling introduces no wrong-folder hazard. That invariant is now load-bearing, h
 Per `03-agents.md`, a same-vendor reviewer would have been weak evidence here. The two blockers that
 most threatened user data came from the cross-vendor seat.
 
-## Spun out — a live bug found during review, not part of this brief
+## Spun out during review — ✅ **both defects now fixed and shipped** (rev 3)
 
-`move_messages` (`client.rs:496-497`) matches `Ok(Ok(()))` for success and `_` for everything else, so
-a **timeout or connection error is treated identically to "server lacks MOVE"** and falls through to
-COPY + STORE + EXPUNGE. A `UID MOVE` that succeeded server-side but whose response timed out is
-therefore COPY'd again: **the message is duplicated in the destination folder.** This ships today and
-is independent of pooling. It needs its own Tier-1 brief; the fix is to distinguish "MOVE
-unsupported" (a tagged NO/BAD) from a transport failure and to fail rather than fall back on the
-latter.
+`move_messages` matched `Ok(Ok(()))` for success and `_` for everything else, so a timeout was
+treated identically to "server lacks MOVE" and a `UID MOVE` that had succeeded server-side was
+COPY'd again, duplicating the message. Reviewing *that* turned up a worse one: the COPY fallback and
+`delete_messages` both called a bare `session.expunge()`, which removes **every** `\Deleted`-flagged
+message in the folder rather than the given UIDs.
+
+Both were briefed separately (Tier 2, `docs/briefs/2026-09-01-move-expunge-data-loss.md`) and
+shipped: **#25 `2066351`** (classification + `caps.rs`) and **#26 `5c545f9`** (targeted
+`UID EXPUNGE`, proved by live Dovecot transcripts). There is no longer any call to the untargeted
+`expunge()` in the tree.
+
+Kept here because it is the reason this brief has a §Drift section, and because the lesson belongs
+with the pooling work: **#25's first cut passed every test written for it and still did not fix the
+bug** — the Rust classifier refused to retry, but the error text contained "timed out",
+`classifyError` marked it retryable, and the caller replayed the move. A requirement that spans Rust
+and TypeScript is not satisfied when the Rust half is. E2's retry policy spans exactly that boundary.
 
 ## Approval
 
 - **Rev 1 plan approved by:** Jim, 2026-09-01.
-- **Rev 2 re-confirmation:** __________ date: ______ ← **required: rev 2 changes retry semantics,
-  session lifecycle, caps and the fallback design.**
+- **Rev 2 re-confirmation:** __________ date: ______ ← 🔴 **REQUIRED, STILL OPEN, and now the only
+  thing blocking the build.** Rev 2 changed retry semantics, session lifecycle, caps and the
+  fallback design. Jim is holding it until this rev-3 refresh lands so he can judge it against
+  current facts — **above all §Pooling findings item 1 (cancellation bypasses eviction-on-error),
+  which the design does not cover.**
 - **Decision 1 (typed error): DECIDED** — minimal `MailError`, simplified by poison-on-error.
 - **Decision 2 (dependency): DECIDED** — `getrandom = "0.3"` (Jim, 2026-09-01).
 - **Decision 3 (OAuth sync bug): RESOLVED** — shipped in `d704ea0` (#18).
-- **Decision 4 (raw-fallback credential): OPEN — blocks the build.** Recommendation: (a).
+- **Decision 4 (raw-fallback credential): DECIDED — (a)**, Jim, 2026-09-01. Frontend-driven
+  `NeedRawFallback` + a separate config-carrying `imap_raw_fetch_messages`; one named exemption in
+  Done-when 5. Option (d) — run the raw fetch on the pooled session — is recorded as the better end
+  state after E2 lands, not as scope.
+
+**Rev 3 (2026-09-01) is docs-only.** No requirement changed. It re-verified every citation at
+`0d0b373`, recorded the #25/#26 drift (§Drift), folded Decision 4 in as decided, and wrote down six
+pooling findings that had been left in a review transcript (§Pooling findings). One of those is a
+gap in the current design, which is precisely why the rev-2 re-confirmation was held for it.
