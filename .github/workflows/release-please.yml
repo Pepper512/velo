@@ -11,6 +11,14 @@ permissions:
 
 jobs:
   release-please:
+    # Fork guard — release automation is upstream-only.
+    # This fork (Pepper512/velo) is a hardening fork, not a distribution channel:
+    # it holds no signing secrets, and update-homebrew.yml targets upstream's tap
+    # (avihaymenahem/homebrew-velo). Left unguarded, release-please reads the fork's
+    # empty release history, treats all inherited upstream commits as unreleased,
+    # and tries to cut a release of someone else's work. See docs/decisions/LOG.md
+    # (2026-09-01) and docs/decisions/EXCEPTIONS.md EX-007.
+    if: github.repository == 'avihaymenahem/velo'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}

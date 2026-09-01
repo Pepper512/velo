@@ -15,6 +15,10 @@ on:
 
 jobs:
   update-homebrew:
+    # Fork guard — see .github/workflows/release-please.yml. This job pushes to
+    # avihaymenahem/homebrew-velo (upstream's tap) and has an independent
+    # `workflow_dispatch` trigger, so it needs its own guard.
+    if: github.repository == 'avihaymenahem/velo'
     runs-on: macos-latest
     steps:
       - name: Get version

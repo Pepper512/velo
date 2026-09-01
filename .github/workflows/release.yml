@@ -24,6 +24,10 @@ permissions:
 
 jobs:
   test:
+    # Fork guard — see .github/workflows/release-please.yml. Covers the independent
+    # `release: [created]` and `workflow_dispatch` triggers on this workflow; the
+    # `build` and `build-macos` jobs `needs: test`, so they skip with it.
+    if: github.repository == 'avihaymenahem/velo'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
