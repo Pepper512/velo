@@ -4,9 +4,9 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main`. **Last commit: `5c545f9`** ("fix(imap): expunge only the messages the
-  operation was given (REQ-2/3/4) (#26)"). Unlike previous revisions of this file, the pin **is** the
-  code commit — this refresh landed after it.
+- **Branch:** `main`. **Last commit: `a230f3a`** (E2/P15 brief rev 3, #30). **Last commit that
+  changed code: `0d0b373`** (dependency-audit PR B, #29). Both matter: the docs pin is what this
+  file describes; the code pin is what any line number in a brief was verified against.
 - **Open PRs:** none. Working tree clean. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
@@ -18,40 +18,52 @@
   runs *that* branch's tests. Always scope your run — see §1. CI is unaffected (clean checkout).
 - **Expect `main` to move under you.** Five merges landed this session from two sessions working in
   parallel. Rebase before merging, and re-run gates after the rebase.
-- **State:** frontend **1,822** tests (152 files) · Rust **56** · **0** prod npm advisories
+- **State:** frontend **1,822** tests (152 files) · Rust **56** · **0** prod npm advisories and
+  **0** full-tree advisories (dependency-audit PRs A and B landed; the vitest critical is gone)
   · **0** import cycles containing a service · EX-001/002/004 closed; EX-003/005/006/007 open.
 
 ---
 
 ## 1. Exact next step
 
-**Three things are live. In priority order:**
+**Everything actionable is now waiting on Jim. Nothing is blocked on engineering.** Do not start any
+of the four items below without his answer — three are Tier-2 gates that agent authority does not
+reach, and the fourth is a settings change an agent session cannot make.
 
-**(A) F-4 rev-4 delta-review — you are the gate, not a formality.** Jim approved F-4 *pending a clean
-delta-review from this session*: clean ⇒ fully approved, anything found ⇒ approval void, back to Jim.
-Spec: `~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/10-Bug-Fixes/SPEC-F-4_Vanished-UID-Reconciliation.md`
-(rev 4). Review **only the rev-4 changes against the seven Gemini findings**, not a fourth full round.
-Two seams the author flagged: whether the >50% catastrophic stop and the batching cap compose sanely
-at the boundary, and whether REQ-2.2's recompute (`|server_list − local_uids|` after the pass's
-new-message fetch) has an ordering hazard.
+**Awaiting Jim, in the order they unblock work:**
 
-**(B) E2/P15 brief refresh — docs only, no code.** Decision 4 is now **DECIDED: (a)** (Jim,
-2026-09-01). The refresh must: re-verify every line number against `5c545f9` (they were verified at
-`d704ea0`, five merges back, and #26 moved code inside the functions pooling touches); fold in the
-drift #25/#26 created; and record the five Kimi pooling findings, **cancellation-bypassing-eviction
-first — the current design does not cover it**. Keep **rev-2 re-confirmation open at the top**, and
-where a Kimi finding changes what an option costs, say so *next to the decision block*.
+1. **E2/P15 rev-2 re-confirmation** — the only thing blocking the E2 build. He approved rev 1; rev 2
+   changed retry semantics, session lifecycle, caps and the fallback design. He held the
+   re-confirmation deliberately until the rev-3 refresh landed (it has, `a230f3a`) so he could judge
+   it against current facts — **specifically §Pooling findings item 1, cancellation bypassing
+   eviction-on-error, which the design does not cover.** Decision 4 is settled: **(a)**.
+2. **F-4 (vanished-UID reconciliation)** — approval **reset**. His conditional approval was voided by
+   its own terms when the rev-4 delta-review found three defects. Rev 5 fixes all three and was
+   re-checked clean, but that does not restore the approval. Spec is in the vault; it queues behind
+   E2/P15.
+3. **Dependency-audit PR C** — its Tier-2 plan (the `@google/genai` replacement, a genuinely new
+   dependency) is written and awaiting his approval. D follows C; E is parked behind E2/P15.
+4. **Two permission gaps, which are really one question.** `rust MSRV` is not in the required status
+   checks, so it runs and passes while gating nothing — it was already demonstrated red-and-mergeable
+   once. The append to branch protection was correctly refused by a permission gate. Separately, a
+   `gh pr merge` blocked twice by one session's classifier was performed from the other session.
+   Both are about what agent sessions may reach in repo settings. **Until the append lands, nobody
+   should describe the MSRV as enforced.**
 
-**(C) Dependency-audit PRs A–E** are being built by the parallel session, in dependency order. Each
-comes to this session for the EX-005 opposite-line review. Expect that load.
+**If Jim answers (1), the build is:** E2/P15 per `docs/briefs/2026-09-01-e2-p15-session-pooling.md`
+rev 3 — read §Drift and §Pooling findings before the Proposed-change section, because both change
+what gets built. Landing order for anything touching `src-tauri/src/imap/client.rs` is **E2/P15 →
+async-imap 0.11 bump**; F-4 and F-5 queue after.
 
-**Then, and only after Jim re-confirms rev 2: build E2/P15.**
+**Unblocked but unowned** (low value, listed so it is not re-derived): P16 (1)(2)(4)(5) dedupe
+(~380 lines), P13 (c)(d)(e), P14 remainder, the `react-best-practices` skill trim, and **F-5** —
+`updateMessageImapFolder` has zero callers, so a moved message's local row keeps pointing at the
+source folder (§2d). F-5 is a latent bug on `main` today, not merely an F-4 dependency.
 
 ### What must be re-verified before acting
 
-- **Every line number in the E2 brief.** Verified at `d704ea0`; `main` is `5c545f9`. #25 added
-  `caps.rs`/`move_outcome.rs` and rewrote the `uid_mv` arm; #26 rewrote both removal paths and changed
-  `move_messages`/`delete_messages` to return `RemovalResult`. Re-grep before editing.
+- **E2 brief line numbers are current as of `0d0b373`** (rev 3 re-verified all of them). If code has
+  landed since, re-grep — this file has been wrong about that twice.
 - **Has `main` moved?** `git log --oneline -5`. A second session lands work here continuously.
 - **The parallel worktree's branch** — `git worktree list`. The directory name lies; it has been
   re-pointed twice.
@@ -160,6 +172,9 @@ nothing watched. These batches added the watchers.
 | #24 `a96af36` | **Decision:** a peer session may relay Jim's Tier-2 approvals (see §5) |
 | #25 `2066351` | **REQ-1** — classify `UID MOVE` failures; `caps.rs` reads `CAPABILITY` |
 | #26 `5c545f9` | **REQ-2/3/4** — targeted `UID EXPUNGE`; the untargeted one is gone from the tree |
+| #27 `0183733` | **Dependency audit A** — vitest critical killed; MSRV declaration corrected 1.77.2 → **1.89** after the new job falsified the audit's 1.85 |
+| #29 `0d0b373` | **Dependency audit B** — SDKs, lucide v1 (8 renames), test-stack majors, release workflows pinned to SHAs; full npm audit **0** |
+| #30 `a230f3a` | **E2/P15 brief rev 3** — citations re-verified, #25/#26 drift recorded, Decision 4 decided, six pooling findings written down |
 
 **Verified on merged `main`:** `grep "\.expunge()"` returns **no call site** — only the doc comment
 describing the old bug. Rust 47 → 56, frontend 1,784 → 1,822.
@@ -346,21 +361,25 @@ brief's numbers the same way you verify the audit's — including your own.**
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`5c545f9`** · clean · CI green.
-**Status:** audit backlog merged. **The move/expunge data-loss bug is FIXED and verified** (#25, #26) —
-`grep "\.expunge()"` returns no call site anywhere. E2/P15 is still **not built**.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`a230f3a`** (last code
+commit **`0d0b373`**) · clean · CI green.
+**Status:** audit backlog merged. **The move/expunge data-loss bug is FIXED and verified** (#25, #26)
+— `grep "\.expunge()"` returns no call site anywhere. Dependency-audit A and B landed; full npm
+audit is **0**. E2/P15 is written and refreshed but still **not built**.
 
-**Next action — three live items, in order:**
-1. **F-4 rev-4 delta-review.** Jim approved F-4 *conditionally on this coming back clean*; anything
-   found voids the approval and returns it to him. Review the rev-4 changes only, against the seven
-   Gemini findings. Spec in the vault under `10 Projects/Velo/Build Queue/10-Bug-Fixes/`.
-2. **E2/P15 brief refresh — docs only, no code.** Decision 4 is **DECIDED (a)**. Re-verify every line
-   number against `5c545f9`: they were verified at `d704ea0`, five merges back, and #26 rewrote code
-   inside the very functions pooling touches. Fold in the #25/#26 drift and record the five Kimi
-   pooling findings — **cancellation bypassing eviction-on-error is not covered by the current
-   design**. Leave **rev-2 re-confirmation open at the top**: it is the last thing blocking the build,
-   and Jim is holding it deliberately until he can judge it against this refresh.
-3. **EX-005 opposite-line reviews for dependency-audit PRs A–E**, as the parallel session sends them.
+**Next action: tell Jim what is waiting on him. Everything is.** Nothing here is blocked on
+engineering, and none of it should be started without his answer.
+
+1. **E2/P15 rev-2 re-confirmation** — the only thing blocking the E2 build. Decision 4 is settled
+   **(a)**; rev 3 (`a230f3a`) is the refresh he was waiting for. He should judge it against
+   **§Pooling findings item 1 — cancellation bypasses eviction-on-error, which the design does not
+   cover.**
+2. **F-4** — approval **reset** by its own terms after the rev-4 delta-review found three defects.
+   Rev 5 fixes them and re-checked clean; that does not restore the approval. Queues behind E2/P15.
+3. **Dependency-audit PR C** — Tier-2 plan written, awaiting approval (new dependency).
+4. **Two permission gaps, one question** — `rust MSRV` passes while gating nothing (not a required
+   check; the branch-protection append was refused by a permission gate), and a `gh pr merge` blocked
+   in one session was performed from the other. **Do not call the MSRV enforced until that lands.**
 
 **Verify first:** `git log --oneline -5` — a second session lands work here continuously ·
 `git worktree list` — a **locked** worktree under `.claude/worktrees/` belongs to that session and
@@ -372,20 +391,21 @@ brief's numbers the same way you verify the audit's — including your own.**
 ```bash
 git checkout main && git pull origin main && npm ci
 npx tsc --noEmit
-npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # expect 152 files / 1,822 tests
+npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # 152 files / 1,822 tests
 npm run graph:check && npm run docs:check
 (cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)   # 56 Rust tests
 ```
 
-**Four traps:** a bare `npx vitest run` globs into the parallel worktree and reports failures that are
-**not yours** — always pass the excludes. `cargo build --release` is broken on this machine (sqlx
+**Four traps:** a bare `npx vitest run` globs into the parallel worktree and reports failures that
+are **not yours** — always pass the excludes. `cargo build --release` is broken on this machine (sqlx
 proc-macro dylib — not ours; use `cargo check --locked --config 'profile.dev.debug-assertions=false'`).
-The git-guard hook text-matches protected-branch wording anywhere in a Bash command — author such text
-with the Write tool and pass it via `--body-file` / `git commit -F`, never a heredoc, and keep the
-push in its own call. Docker's daemon is **not running** here, so Dovecot transcripts cannot be
+The git-guard hook text-matches protected-branch wording anywhere in a Bash command — author such
+text with the Write tool and pass it via `--body-file` / `git commit -F`, never a heredoc, and keep
+the push in its own call. Docker's daemon is **not running** here, so Dovecot transcripts cannot be
 produced from this session.
 
-**Read §6 next:** six audit claims failed verification, rev 1 of our own E2 brief carried four, and
-this session's first cut of REQ-1 passed every test written for it while still not fixing the bug —
-the tests never crossed the IPC boundary the requirement was about. Trust the backlog, not the
-numbers, including your own.
+**Read §6 next:** the audit's numbers keep failing the moment something mechanical checks them —
+**four** so far (`serde_json`, the injection-site count, the MSRV, brand icons) — rev 1 of our own E2
+brief carried four errors, and this session's first cut of REQ-1 passed every test written for it
+while still not fixing the bug, because the tests never crossed the IPC boundary the requirement
+spanned. Trust the backlog, not the numbers, including your own.
