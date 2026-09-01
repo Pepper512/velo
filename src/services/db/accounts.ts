@@ -1,5 +1,10 @@
 import { getDb, selectFirstBy } from "./connection";
-import { encryptValue, decryptValue, isEncrypted } from "@/utils/crypto";
+import {
+  encryptValue,
+  decryptValue,
+  isEncrypted,
+  CredentialDecryptError,
+} from "@/utils/crypto";
 
 export interface DbAccount {
   id: string;
@@ -36,40 +41,58 @@ export interface DbAccount {
   accept_invalid_certs: number;
 }
 
+/** Credential columns on `accounts` that are stored encrypted. */
+const ENCRYPTED_FIELDS = [
+  "access_token",
+  "refresh_token",
+  "imap_password",
+  "oauth_client_secret",
+  "caldav_password",
+] as const satisfies readonly (keyof DbAccount)[];
+
+/** Human-readable names for the re-auth banner. Never contains a value. */
+const FIELD_LABELS: Record<(typeof ENCRYPTED_FIELDS)[number], string> = {
+  access_token: "access token",
+  refresh_token: "refresh token",
+  imap_password: "IMAP password",
+  oauth_client_secret: "OAuth client secret",
+  caldav_password: "CalDAV password",
+};
+
+/**
+ * Decrypt an account's stored credentials, **failing closed** (audit P5).
+ *
+ * # What this used to do, and why it was dangerous
+ *
+ * Each of the five fields was wrapped in
+ * `catch (err) { console.warn("…using raw value") }` — so when decryption
+ * failed, the **AES ciphertext was returned as the credential** and handed to
+ * the IMAP/SMTP client, which transmitted it to the mail server as the user's
+ * password. A corrupt or rotated `velo.key` therefore turned every account into
+ * a stream of failed logins carrying confidential material over the wire, while
+ * the user saw only "wrong password" and re-entered credentials against a key
+ * that could not work.
+ *
+ * Throwing instead removes the network egress entirely: nothing is attempted
+ * with a credential we could not read.
+ */
 async function decryptAccountTokens(account: DbAccount): Promise<DbAccount> {
-  if (account.access_token && isEncrypted(account.access_token)) {
+  for (const field of ENCRYPTED_FIELDS) {
+    const value = account[field];
+    if (typeof value !== "string" || value.length === 0) continue;
+    if (!isEncrypted(value)) continue;
+
     try {
-      account.access_token = await decryptValue(account.access_token);
+      account[field] = await decryptValue(value);
     } catch (err) {
-      console.warn("Failed to decrypt access token, using raw value:", err);
+      throw new CredentialDecryptError(FIELD_LABELS[field], err);
     }
-  }
-  if (account.refresh_token && isEncrypted(account.refresh_token)) {
-    try {
-      account.refresh_token = await decryptValue(account.refresh_token);
-    } catch (err) {
-      console.warn("Failed to decrypt refresh token, using raw value:", err);
-    }
-  }
-  if (account.imap_password && isEncrypted(account.imap_password)) {
-    try {
-      account.imap_password = await decryptValue(account.imap_password);
-    } catch (err) {
-      console.warn("Failed to decrypt IMAP password, using raw value:", err);
-    }
-  }
-  if (account.oauth_client_secret && isEncrypted(account.oauth_client_secret)) {
-    try {
-      account.oauth_client_secret = await decryptValue(account.oauth_client_secret);
-    } catch (err) {
-      console.warn("Failed to decrypt OAuth client secret, using raw value:", err);
-    }
-  }
-  if (account.caldav_password && isEncrypted(account.caldav_password)) {
-    try {
-      account.caldav_password = await decryptValue(account.caldav_password);
-    } catch (err) {
-      console.warn("Failed to decrypt CalDAV password, using raw value:", err);
+
+    // Belt and braces: never hand back something still shaped like ciphertext.
+    // If this ever fires, decryptValue returned without decrypting.
+    const decrypted = account[field];
+    if (typeof decrypted === "string" && isEncrypted(decrypted)) {
+      throw new CredentialDecryptError(FIELD_LABELS[field]);
     }
   }
   return account;
