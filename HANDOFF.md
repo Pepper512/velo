@@ -7,11 +7,11 @@
 - **Branch:** `main` @ **`99b691f`** (#31, docs). **Last commit that changed code: `0d0b373`** (#29,
   dependency batch B). Docs-only commits above it are wrap-ups and are expected — check line numbers
   against the **code** pin, never this one.
-- **Open PRs:** none. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
-  A stale local branch `docs/handoff-repin-5c545f9` remains from **PR #28, closed deliberately**:
-  it refreshed this same file against the same base as #31 and would have clobbered it. Its one
-  unique fact (F-5 as a live defect) was folded into #31 before closing. Nothing to recover; delete
-  the branch whenever convenient.
+- **Open PRs:** only this file's own re-pin (**#32**, docs-only) — none once it lands. CI green on
+  `main`; Release Please **skipped** (EX-007 guard holding). **PR #28 was closed deliberately** (it
+  refreshed this same file against the same base as #31 and would have clobbered it); its one unique
+  fact (F-5 as a live defect) was folded into #31 first, and its branch
+  `docs/handoff-repin-5c545f9` is now deleted locally and on `origin` — nothing to recover.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 - **⚠️ Two agent sessions work this repo.** The Opus session (`velo-build-6d`) works the main
