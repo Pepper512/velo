@@ -1,6 +1,6 @@
 ---
 name: document-feature
-description: Add help documentation for a new or changed feature. Updates the Help page content, project docs (docs/, CLAUDE.md), and keeps counts accurate.
+description: Add help documentation for a new or changed feature. Updates the Help page content and project docs (docs/, CLAUDE.md); counts are verified by scripts/docs-check.mjs, not maintained by hand.
 argument-hint: [feature description]
 ---
 
@@ -12,7 +12,9 @@ You just implemented or modified a feature. Now add or update its documentation 
 
 1. **Read the current help content** at `src/constants/helpContent.ts` to understand the existing structure.
 
-2. **Determine where the feature belongs.** The 13 existing categories are:
+2. **Determine where the feature belongs.** Read the current categories from
+   `src/constants/helpContent.ts` — that file is the source of truth, and the
+   list below is a summary that can go stale. At the time of writing:
    - `getting-started` — First-time setup (accounts, sync, client ID)
    - `reading-email` — Thread view, reading pane, mark-as-read
    - `composing` — Compose, reply, undo send, schedule, signatures, templates, aliases, drafts
@@ -66,8 +68,15 @@ You just implemented or modified a feature. Now add or update its documentation 
    ```
 
 8. **Update project docs** if the feature affects them. Check each file and update as needed:
-   - `docs/architecture.md` — Update if the feature adds new component groups, services, stores, database tables, or changes the project structure tree. Keep counts accurate (component groups, file counts, table counts).
-   - `docs/development.md` — Update if test counts change or new development workflows are introduced.
+   - `docs/architecture.md` — Update if the feature adds new component groups, services, stores, database tables, or changes the project structure tree.
+
+     **Do not count anything by hand.** Run `npm run docs:check`; it measures
+     migrations, tables, test files, stores and AI providers from the tree and
+     names any documented number that disagrees. Hand-maintained counts are
+     exactly what drifted six ways before audit P20 — including two different
+     table counts in the same file. If a number is not worth keeping correct,
+     delete it and point at the source instead of writing a new one.
+   - `docs/development.md` — Update if new development workflows are introduced. Test counts are checked by `npm run docs:check`.
    - `docs/keyboard-shortcuts.md` — Update if the feature adds or changes keyboard shortcuts.
    - `CLAUDE.md` — Update the relevant section (component organization, service layer, key gotchas, etc.) to reflect the new feature.
 

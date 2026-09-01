@@ -126,6 +126,10 @@ jobs:
       # into the import graph of every service and made 54 cycles.
       - name: Import graph (no service cycles)
         run: node scripts/graph.mjs --check
+      # Documentation counts vs. the tree (audit P20). These drifted six ways
+      # because they were hand-maintained; now CI names the file and the number.
+      - name: Documentation counts
+        run: node scripts/docs-check.mjs --check
 
   secrets:
     name: secret scan
