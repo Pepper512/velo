@@ -223,5 +223,8 @@
 
 ## Approval
 
-- Plan approved by: __________ date: ______ ← **required before any code** (Tier 2, no pre-approval).
-- Reviewed by: __________ date: ______
+- Plan approved by: **Jim** date: **2026-09-01** — approved on PR #6 ("approve #6"). Tier 2 plan
+  approval obtained **before any code**, as `02-work-loop.md` requires. This is the first batch to
+  follow that sequence properly: Batch A was built under a blanket pre-approval given after the fact.
+- Reviewed by: __________ date: ______ ← the diff review, still outstanding; approving the plan is
+  not approving the implementation (`03-agents.md`, no self-approval).
