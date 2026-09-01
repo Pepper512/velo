@@ -1,7 +1,8 @@
 import { getDb } from "./connection";
 import { encryptValue, decryptValue, isEncrypted } from "@/utils/crypto";
+import type { SettingKey, SecureSettingKey } from "@/constants/settingsKeys";
 
-export async function getSetting(key: string): Promise<string | null> {
+export async function getSetting(key: SettingKey | SecureSettingKey): Promise<string | null> {
   const db = await getDb();
   const rows = await db.select<{ value: string }[]>(
     "SELECT value FROM settings WHERE key = $1",
@@ -10,7 +11,10 @@ export async function getSetting(key: string): Promise<string | null> {
   return rows[0]?.value ?? null;
 }
 
-export async function setSetting(key: string, value: string): Promise<void> {
+export async function setSetting(
+  key: SettingKey | SecureSettingKey,
+  value: string,
+): Promise<void> {
   const db = await getDb();
   await db.execute(
     "INSERT INTO settings (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = $2",
@@ -30,7 +34,7 @@ export async function getAllSettings(): Promise<Record<string, string>> {
  * Get a setting that is stored encrypted. Transparently decrypts the value.
  * Falls back to returning the raw value if decryption fails (e.g. not yet encrypted).
  */
-export async function getSecureSetting(key: string): Promise<string | null> {
+export async function getSecureSetting(key: SecureSettingKey): Promise<string | null> {
   const raw = await getSetting(key);
   if (!raw) return null;
 
@@ -48,7 +52,7 @@ export async function getSecureSetting(key: string): Promise<string | null> {
 /**
  * Set a setting with encryption. The value is encrypted before storing.
  */
-export async function setSecureSetting(key: string, value: string): Promise<void> {
+export async function setSecureSetting(key: SecureSettingKey, value: string): Promise<void> {
   const encrypted = await encryptValue(value);
   await setSetting(key, encrypted);
 }

@@ -1,25 +1,38 @@
 import { getSetting, getSecureSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
 import type { AiProvider, AiProviderClient } from "./types";
+import type { SecureSettingKey } from "@/constants/settingsKeys";
 import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
 import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider, clearOpenAIProvider } from "./providers/openaiProvider";
 import { createGeminiProvider, clearGeminiProvider } from "./providers/geminiProvider";
 import { createOllamaProvider, clearOllamaProvider } from "./providers/ollamaProvider";
 import { createCopilotProvider, clearCopilotProvider } from "./providers/copilotProvider";
+import { createXaiProvider, clearXaiProvider } from "./providers/xaiProvider";
 
-const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
+const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, SecureSettingKey> = {
   claude: "claude_api_key",
   openai: "openai_api_key",
   gemini: "gemini_api_key",
   copilot: "copilot_api_key",
+  xai: "xai_api_key",
 };
 
 let cachedProvider: { name: AiProvider; key: string; client: AiProviderClient } | null = null;
 
 export async function getActiveProviderName(): Promise<AiProvider> {
   const setting = await getSetting("ai_provider");
-  if (setting === "openai" || setting === "gemini" || setting === "ollama" || setting === "copilot") return setting;
+  if (
+    setting === "openai" ||
+    setting === "gemini" ||
+    setting === "ollama" ||
+    setting === "copilot" ||
+    setting === "xai"
+  ) {
+    return setting;
+  }
+  // Claude remains the default. Adding a provider makes it *available*, never
+  // the default for an existing install (LOG.md 2026-09-01).
   return "claude";
 }
 
@@ -68,6 +81,9 @@ export async function getActiveProvider(): Promise<AiProviderClient> {
     case "copilot":
       client = createCopilotProvider(apiKey, model);
       break;
+    case "xai":
+      client = createXaiProvider(apiKey, model);
+      break;
   }
 
   cachedProvider = { name: providerName, key: cacheKey, client };
@@ -100,4 +116,5 @@ export function clearProviderClients(): void {
   clearGeminiProvider();
   clearOllamaProvider();
   clearCopilotProvider();
+  clearXaiProvider();
 }
