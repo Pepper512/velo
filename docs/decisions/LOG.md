@@ -224,3 +224,35 @@
   break pop-out windows for users is worse than sequencing it deliberately, so it gets its own brief
   and PR, gated on Jim's manual QA. **Consequence: the P9+P11 chain stays half-open** — P9's side is
   closed here; P11's is not.
+- **2026-09-01** — **Batch E built** (P13 a+b, P15 Tier 1) on `feat/batch-e-p15-rust`. Suite
+  **1,709 → 1,716**; Rust 47 tests. Built under Jim's standing pre-approval; both items are **Tier 1**.
+  **P15's Tier 2 session-pooling half is NOT included** — it changes credential lifecycle and needs
+  its own brief (it is Batch E2 in the audit's order).
+  - **P15:** the `ASYNC_IMAP_EMPTY:` string-prefix control flow is now `FetchError::AsyncImapEmpty`.
+    The compiler proved the point immediately: changing the return type failed the build at exactly
+    the one call site that pattern-matched the prefix — a coupling that had been invisible, where
+    adding context to the message would have silently disabled the raw-TCP fallback and left
+    non-standard servers showing an empty mailbox. New `imap/net.rs` holds `with_timeout` plus the
+    shared connection setup; `grep -c "check your server settings" imap/client.rs` went **44 → 0**
+    (acceptance was 1; the single copy now lives in `net.rs`).
+    **The two STARTTLS copies had already drifted**, which is the concrete argument for the dedupe
+    rather than a hypothetical one: `raw_connect_starttls` discarded the server greeting without
+    checking it, so a server opening with `* BYE` was treated as healthy and failed later as an
+    unrelated protocol error. Sharing the routine fixed that as a side effect.
+    **Near-miss worth recording:** the first draft of `net::configure_tcp_socket` set only
+    `TCP_NODELAY` and dropped the socket2 keepalive the original also set — a real regression, caught
+    only because removing the old function produced a dead-code warning. Keepalive matters: an idle
+    IMAP connection whose NAT mapping is dropped hangs until timeout instead of failing fast.
+  - **P13:** `emailActions` and `notificationManager` both imported `router/navigate`, which put the
+    whole page tree in the import graph of every service that touches email. The service now reports
+    `ActionResult.nextThreadId` and `hooks/useEmailActions` performs the navigation; the UI wrappers
+    keep identical signatures so call sites changed one import line each.
+    **`notificationManager` was not on the audit's list** and was, by itself, keeping the last cycle
+    alive (`sync → notificationManager → router → routeTree → App → syncManager → sync`).
+    `scripts/graph.mjs` is the acceptance check and is now a CI gate:
+    **1 SCC of 40 files / 54 cycles → 1 SCC of 21 files, zero containing a `services/*` file.**
+    Only the cycle rule is enforced; the `services → stores` count (11) and components-importing-`db`
+    count (49) are reported for the trend but not gated — a gate nobody can turn green gets deleted.
+    Six tests asserted that the *service* navigates; they were pinning the coupling, so they now
+    assert the reported value, and `useEmailActions.test.ts` owns the navigation behaviour they used
+    to cover.
