@@ -63,3 +63,5 @@
   protection enabled: the 5 job names as required checks (strict), linear history, enforce for admins,
   deletions blocked, conversation resolution required, required reviews off (EX-005). Repo
   `allowed_actions` = GitHub-owned + 6 pinned third-party actions. **EX-001 closes on merge of PR #1.**
+- **2026-09-01** — Session wrap-up: `HANDOFF.md` created (pinned to `b751b94`; next step = Batch A plan
+  for Jim's approval). EX-001 closed. Handoff lands via PR from branch `docs/handoff`.
