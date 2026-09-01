@@ -10,9 +10,11 @@
   #32). To see what is above the code pin: `git log --oneline 0d0b373..origin/main` — docs-only
   commits there are wrap-ups and expected; **a code commit there means this pin is stale and every
   brief line number needs re-grepping.**
-- **Open PRs:** never trust this line — run `gh pr list --repo Pepper512/velo`. As of writing, two
-  are open, both complete and waiting only on Jim (§1): **#33** (docs — the delegation record) and
-  **#34** (dependency PR C). CI green on `main`; Release Please **skipped** (EX-007 guard holding).
+- **Open PRs:** never trust this line — run `gh pr list --repo Pepper512/velo`. At writing the open
+  set was **#33** (docs — the delegation record), **#34** (dependency PR C) and **this file's own PR,
+  #35** — a count that omits the PR it is written from is how #32 went wrong. All three are
+  complete and wait only on Jim (§1). CI green on `main`; Release Please **skipped** (EX-007 guard
+  holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 - **⚠️ Two agent seats work this repo, and they are not one-per-tree.** Name **seats, never
@@ -26,6 +28,12 @@
     substitution and shell variables near anything it cannot prove is not `git`. Use plain single
     commands, the `Edit`/`Write` tools for file changes, and a small `.sh` wrapper for anything that
     needs substitution (the `agy` review runner is the standing example).
+  - `git worktree list` shows **three** trees at writing: the main checkout, `f1-decisions` (the
+    Fable seat's, live), and **`f2-email-links-open` — dead.** Its head `86bbc52` is exactly what
+    #31 merged, the tree is clean and unlocked, and it holds nothing unlanded (Opus verified in the
+    #35 review). Its directory name never matched its branch and it has misled every session since.
+    **Safe to `git worktree remove .claude/worktrees/f2-email-links-open`** — left for Jim or the
+    main-checkout seat because it is not the Fable seat's to delete.
   - Worktrees are gitignored but **not vitest-excluded**: a bare `npx vitest run` at the repo root
     globs into every one of them — always pass the excludes in §1.
 - **State on `main`:** frontend **1,822** tests (152 files) · Rust **56** · npm audit **0 — full
@@ -39,8 +47,9 @@
 
 **Jim is back from a three-hour absence during which he delegated his decision authority to the
 Fable seat** (`velo-build-f1`; 22:30 → 01:30 UTC, 2026-09-01/02 — recorded with a hard expiry in
-`docs/decisions/LOG.md` via #33). **The delegation has expired. Nothing further is decided in his
-name.** What waits on him, in the order it unblocks work:
+`docs/decisions/LOG.md` via #33). **It expires at 01:30 UTC on 2026-09-02 — if you are reading
+this after that, it has expired and nothing further is decided in his name.** (Written at ~00:10
+UTC, inside the window.) What waits on him, in the order it unblocks work:
 
 1. **Ratify or reverse the delegated decisions — read the #33 LOG entry first.** Every decision
    made under the delegation is marked *(delegated)* there and is subject to his retroactive
@@ -243,8 +252,8 @@ SHA pinned; `git log --oneline 0d0b373..origin/main` shows what is above it) · 
 
 **Next action — Jim, in this order:**
 1. **Read the #33 LOG entry and ratify or reverse** the decisions made under the 3-hour delegation
-   (expired 01:30 UTC): E2 rev 2 re-confirmed with findings 1/3/5 in scope; PR C amended to *no new
-   dependency*; F-4 read and recommended but **not** decided.
+   (expires 01:30 UTC 2026-09-02; after that, expired): E2 rev 2 re-confirmed with findings 1/3/5 in
+   scope; PR C amended to *no new dependency*; F-4 read and recommended but **not** decided.
 2. **Merge #33, then #34** — both green and reviewed; every agent merge was classifier-blocked and
    deliberately not routed through the other seat. Or rule on agent merge reach.
 3. **Tell the Opus seat directly** that the delegation was real — it is holding the E2 build on
