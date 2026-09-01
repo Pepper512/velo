@@ -4,7 +4,9 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main` @ `be2610b` — "docs: Batch H — CI-checked doc counts, rewrite two risky skills (P20) (#14)"
+- **Branch:** `main` @ `6c44194`. **Last commit that changed anything but this file: `be2610b`**
+  ("Batch H — CI-checked doc counts, rewrite two risky skills (P20) (#14)"). Use that second SHA when
+  checking whether work has landed since — a handoff-only commit on top is expected and harmless.
 - **Open PRs:** none. Working tree clean. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
@@ -39,7 +41,8 @@ gh repo set-default Pepper512/velo       # gh otherwise resolves PR numbers agai
 
 ### Re-verify before acting — these may have gone stale
 
-- **`main` still at `be2610b`?** `git log --oneline -3`.
+- **Has real work landed since?** `git log --oneline -5`. Commits touching only `HANDOFF.md` are
+  wrap-ups and can be ignored; anything else means someone has pushed and this file is behind.
 - **Upstream drift:** `git fetch upstream && git log --oneline main..upstream/main`. Empty all
   session; if security-relevant `src-tauri/` commits appear, rebase the plan on them first.
 - **CI green?** `gh run list --branch main --limit 2`. Release Please must read **`skipped`**, never
@@ -188,7 +191,7 @@ Three CI gates now enforce what used to be prose: `graph.mjs --check`, `docs-che
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`be2610b`** · no open PRs · clean · CI green.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`6c44194`** (last non-handoff commit **`be2610b`**) · no open PRs · clean · CI green.
 **Status:** the whole accepted audit backlog (20 items) is **merged** — 1,751 frontend tests, 47 Rust, 0 prod advisories, 0 service import cycles.
 
 **Next action — pick one:**
@@ -199,8 +202,8 @@ Three CI gates now enforce what used to be prose: `graph.mjs --check`, `docs-che
   SECURITY.md claim is already corrected).
 - **(C)** Low-risk cleanup: P16 (1)(2)(4)(5) dedupe, P13 (c)(d)(e), P14 remainder.
 
-**Verify first:** `main` still `be2610b` · `git fetch upstream && git log --oneline main..upstream/main`
-empty · `gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped** ·
+**Verify first:** `git log --oneline -5` shows no commit past `be2610b` that touches more than
+`HANDOFF.md` · `git fetch upstream && git log --oneline main..upstream/main` empty · `gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped** ·
 re-grep any line numbers the audit or briefs cite.
 
 **Get running:**
