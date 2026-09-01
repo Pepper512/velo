@@ -2,32 +2,62 @@
 
 > Living document, edited in place. Pinned to repo state at the top; next step first.
 
-- **Branch:** `main` @ `b751b94` — "chore: CI baseline, methodology import, approved deps (Batch D0) (#1)"
-- **Open PRs:** **#2, #3, #4 — all built, all waiting on you to merge.** Nothing else open.
+- **Branch:** `main` @ `f7e890b` — "fix(imap,oauth): Batch A — Rust security hardening (P1–P4, closes EX-002) (#4)"
+- **Open PRs:** none (besides the one landing this edit). D0, the handoff, the release guard, and **Batch A** are all merged.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 
 ---
 
-## 1. Exact next step — merge three PRs, in this order
+## 1. Exact next step — write the **Batch B** brief (audit P5–P8)
+
+Batch B is **Tier 2** (P5 credentials, P6 migrations). Write the brief the way Batch A's was written
+(`docs/briefs/2026-09-01-batch-a-rust-security.md` is the template that worked), get Jim's approval,
+then build → PR → gates → merge.
+
+**Scope:** P5 credential decrypt falls through to ciphertext · P6 `runMigrations` destructive one-shot
+repair, untested · P7 `mailto:` header injection · P8 FTS5 syntax reaches SQLite unescaped.
+
+**Two things to settle in the brief, both flagged to Jim 2026-09-01 and not yet answered:**
+1. **P6 and P8 need the P12 in-memory SQLite harness, which the audit schedules in a later batch.**
+   Their acceptance criteria are written against real SQL, and today **no test in the repo executes
+   SQL at all** (53 of 133 test files mock `services/db/*`). `better-sqlite3` is already approved and
+   landed in D0 (ADR-001), so the harness is buildable now. **Recommendation: pull it forward into B**
+   — otherwise P6, a destructive migration path, gets "fixed" with no test that ever runs it.
+2. **`zod`'s first use is pencilled into Batch B**, but none of P5–P8 obviously needs it; the closest
+   fit (P5's structural `isEncrypted`) is ~10 lines by hand. If it doesn't earn its place, the
+   dependency block slips to the batch that actually uses it rather than being added speculatively.
+
+**P6 is a one-way door:** there are no down migrations, so users on the fixed build cannot be
+downgraded. The audit says the plan must state this. It must.
+
+---
+
+## 1b. How merges work now (changed 2026-09-01)
 
 All three are green (or were when written — check), all three are based on `b751b94`, and none
-touches a file another one touches. **Agents never merge** (`CLAUDE.md` Part I), so this is yours.
+**Agents perform the merge** (Jim, 2026-09-01 — supersedes the old "agents never merge"). Land work
+in dependency order once every required check is green **on the exact commit being merged**; a rebase
+or force-push invalidates the previous run. Stop and ask on a red gate or a judgment-call conflict.
+
+The three PRs below are **done** — kept here only as the worked example of the sequencing hazard,
+because it cost three full CI re-runs:
 
 | # | Branch | What it is | Closes |
 |---|---|---|---|
-| **#2** | `docs/handoff` | This file. | EX-001 |
-| **#3** | `chore/fork-release-automation` | Stops Release Please failing on every push. | — |
-| **#4** | `feat/batch-a-rust-security` | **Batch A** — the security work. | EX-002 |
+| **#2** ✅ `252bb1a` | `docs/handoff` | This file. | EX-001 |
+| **#3** ✅ `6fe932a` | `chore/fork-release-automation` | Stops Release Please failing on every push. | — |
+| **#4** ✅ `f7e890b` | `feat/batch-a-rust-security` | **Batch A** — the security work. | EX-002 |
 
 **Order matters only because of branch protection:** `main` requires the 5 checks **strict**, i.e.
 a branch must be up to date with `main` before it can merge. So after you merge one, the next PR
 will show *"This branch is out-of-date"* — click **Update branch**, wait for CI (~7 min, the `rust`
-job is the long pole), then merge. Repeat. Merging smallest-first (#2 → #3 → #4) keeps the
-re-runs cheap.
+job is the long pole), then merge. Repeat. Merging smallest-first (#2 → #3 → #4) kept the re-runs
+cheap — and was still three extra full runs, because all three PRs appended to the same two doc files.
 
-**After the final merge, confirm the fix worked:** the Release Please run on that push should show
-**skipped**, not failed. `gh run list --branch main --limit 3`.
+**Confirmed after #3 merged:** the Release Please run on that push is **`skipped` (2s)**, where the
+push before it (the #2 merge, which landed pre-guard) was **`failure` (1m9s)**. The #2 merge also
+re-created the stray `release-please--…` branch; deleted again. The guard works.
 
 ---
 
@@ -56,7 +86,7 @@ Velo is a local-first Tauri v2 (Rust) + React 19 desktop email client, forked fr
 (`docs/methodology/`, pinned copy) to harden it: a 2026-09-01 optimization audit found the code
 disciplined where tooling enforces (TS strict, DOMPurify chokepoint, clippy-clean) and weak where
 nothing watched. **All 20 audit items are accepted**; batch order **D0 → A → B → C → G → E → E2 →
-F → H**. D0 is merged; **A is built and awaiting merge**; B is next. A separate accepted feature —
+F → H**. **D0 and A are merged**; **B is next**. A separate accepted feature —
 **add xAI Grok as an AI provider and refresh every provider's model list** — is sequenced after
 P16(3) in Batch F.
 
@@ -107,7 +137,8 @@ P16(3) in Batch F.
   because P1/P3/P4/clippy edit interleaved regions of the same functions.
 
 **Pending your decision:**
-- **Merge #2, #3, #4** (section 1).
+- **The two Batch B questions in section 1** (pull the P12 SQLite harness forward? does `zod` earn its
+  place in B?).
 - **Model defaults per provider** for the Grok/models brief (proposed: fast-and-cheap for background
   categorization, frontier selectable for compose/Ask Inbox). Also still unconfirmed: Grok is
   *available*, not the default for anything.
@@ -125,24 +156,29 @@ P16(3) in Batch F.
 - Splitting `SettingsPage.tsx` → not until component tests exist.
 - IMAP session pooling (P15/E2) → after A lands; Tier 2, changes credential lifecycle.
 
-**Exceptions:** EX-001 closes on #2 · EX-002 closes on #4 · **EX-007 new** (no release path on the
-fork, review 2027-03-01) · EX-003, EX-004, EX-005, EX-006 open.
+**Exceptions:** EX-001 **closed** (#2) · EX-002 **closed** (#4) · EX-007 open (no release path on the
+fork, review 2027-03-01) · EX-003, EX-004, EX-006 open · **EX-005 rewritten 2026-09-01**: its old
+mitigation was "agents never merge; Jim is the only merger", which the new merge rule withdrew. It now
+records the residual risk explicitly — an agent can land its own Tier 0/1 work with no human in the
+loop. Tier 2+ still needs Jim's plan approval before code.
 
 **Operational notes that bit us:**
 - `~/.claude/hooks/git-guard.sh` blocks `git add -A/.` (stage explicit paths) and text-matches
   protected-branch wording across the *whole* Bash command, heredocs included. Author docs with
   Write/Edit; keep `git push` and `gh pr create --base …` in separate calls. Never bypass it.
 - The repo's `.claude/skills/commit` skill pushes unconditionally — don't use it (rewrite pending in Batch H).
-- **`gh pr merge` is blocked by the local auto-mode classifier**, which happens to match the repo rule
-  that agents never merge. Expect to do all merges yourself.
+- **Every merge invalidates the branches behind it.** `main` protection is *strict*, and #2/#3/#4 all
+  appended to `LOG.md` and `EXCEPTIONS.md`, so each merge left the rest `DIRTY` (a real conflict, not
+  just out-of-date) and forced a rebase + a full CI re-run. When batching PRs, expect this: resolve
+  append conflicts by keeping **both** entries in chronological order, re-run the gates locally, then
+  force-push. Sequence doc-touching PRs one at a time rather than in parallel where possible.
 
 ---
 
-## 6. Next work after the merges — Batch B
+## 6. Batch B detail
 
-Per the audit's batch order. Batch B is where **`zod` gets its first use**, so its PR carries the
-dependency block (`06-decisions.md`). Start by re-reading `docs/audits/2026-09-01-optimize-audit.md`
-§P5–P8 and writing the brief the same way Batch A's was written.
+Full scope and the two open questions are in **section 1** (they belong at the top now that Batch B
+is the next step, not a future one). Start from `docs/audits/2026-09-01-optimize-audit.md` §P5–P8.
 
 ---
 

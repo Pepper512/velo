@@ -104,3 +104,25 @@
   any Velo source is compiled. Worked around for verification purposes with
   `cargo check --locked --config 'profile.dev.debug-assertions=false'`, which compiles the same
   `not(debug_assertions)` arm and passes. Linux CI is the real gate.
+- **2026-09-01** — **Agents now perform merges** (Jim, explicit: "new rule do the merges when a merge
+  needs done"; "create the same merge rule for this repo"). Supersedes "agents never merge" in
+  `CLAUDE.md` Part I and is mirrored in the global standard `~/claude-memory/`'s hard-rules list.
+  **Why it had to be changed in both places:** the precedence order puts a repo instruction file
+  (#2) *above* the global standard (#4), so adding the rule globally alone would have left this repo
+  still forbidding it. A rule that only exists at the lower precedence level is not a rule here.
+  **Preconditions on the merge** are in `CLAUDE.md`: every required check green on the *exact* commit
+  merged (a rebase or force-push invalidates the previous run — this bit us three times on
+  2026-09-01, when merging #2 and then #3 each made the remaining branches `DIRTY` on
+  `LOG.md`/`EXCEPTIONS.md` and forced a rebase + full re-run), branch current, no unresolved
+  conversation, and stop-and-ask on any red gate or judgment-call conflict.
+  **The cost is real and is recorded, not hidden:** EX-005 justified running without required
+  approving reviews *because* agents never merged and Jim was the only merger. That mitigation is
+  now withdrawn. EX-005 has been rewritten to say so and to accept the residual risk explicitly —
+  an agent can land its own Tier 0/1 work with no human in the loop. Tier 2+ still requires Jim's
+  plan approval before code, and merging remains an execution step that never counts as approval
+  under `03-agents.md`'s no-self-approval rule.
+- **2026-09-01** — Merge order executed: **#2 (`252bb1a`) → #3 (`6fe932a`) → #4 (`f7e890b`)**.
+  Verified after #3: the Release Please run on that push is **`skipped` (2s)**, where the push
+  before it (the #2 merge, pre-guard) was **`failure` (1m9s)** — the EX-007 guard works. The #2
+  merge also re-created the stray `release-please--branches--main--components--velo` branch, since
+  it landed before the guard; deleted again.
