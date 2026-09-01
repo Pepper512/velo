@@ -1,0 +1,30 @@
+# Native-arch Dovecot for the REQ-2 transcripts — fallback for hosts where the
+# amd64-only dovecot/dovecot image fails under emulation (Apple Silicon).
+# Same Dovecot version as the committed harness (2.3.21, via Alpine 3.20).
+# The per-variant conf (uidplus / no-uidplus) is bind-mounted by compose at
+# /etc/dovecot/conf.d/99-velo.conf, exactly like the committed harness.
+#
+# `alpine:3.20` is multi-arch, so despite the filename this builds and runs on
+# amd64 too. It is the variant that produced the transcripts on PR #26.
+FROM alpine:3.20
+RUN apk add --no-cache dovecot
+RUN printf '%s\n' \
+    'protocols = imap' \
+    'listen = *' \
+    'log_path = /dev/stderr' \
+    'auth_mechanisms = plain login' \
+    'passdb {' \
+    '  driver = passwd-file' \
+    '  args = /etc/dovecot/users' \
+    '}' \
+    'userdb {' \
+    '  driver = passwd-file' \
+    '  args = /etc/dovecot/users' \
+    '}' \
+    > /etc/dovecot/conf.d/10-velo-base.conf
+# Throwaway credential for a loopback-only, disposable container. Plaintext on
+# purpose: this stack has no TLS and must never be exposed or reused.
+RUN printf 'velo:{PLAIN}velo-test-only:1000:1000::/srv/mail/velo\n' > /etc/dovecot/users \
+    && mkdir -p /srv/mail/velo && chown -R 1000:1000 /srv/mail
+EXPOSE 143
+CMD ["dovecot", "-F"]

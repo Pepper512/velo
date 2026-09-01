@@ -1,0 +1,27 @@
+# Native-arch variant of docs/testing/dovecot/docker-compose.yml for Apple
+# Silicon, where the amd64-only dovecot/dovecot:2.3.21 image fails under
+# Rosetta. Same Dovecot version (2.3.21 via Alpine 3.20), same topology: two
+# servers differing only in UIDPLUS advertisement.
+#
+# This is the variant that produced the transcripts on PR #26 — but see the
+# README: that run used a prebuilt image, so the `build:` stanza below is the
+# portable equivalent rather than the exact command that was executed.
+services:
+  dovecot-uidplus:
+    build:
+      context: .
+      dockerfile: Dockerfile.arm64
+    container_name: velo-dovecot-uidplus
+    ports:
+      - "127.0.0.1:11143:143"
+    volumes:
+      - ./dovecot-uidplus.conf:/etc/dovecot/conf.d/99-velo.conf:ro
+  dovecot-no-uidplus:
+    build:
+      context: .
+      dockerfile: Dockerfile.arm64
+    container_name: velo-dovecot-no-uidplus
+    ports:
+      - "127.0.0.1:11144:143"
+    volumes:
+      - ./dovecot-no-uidplus.conf:/etc/dovecot/conf.d/99-velo.conf:ro
