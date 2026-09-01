@@ -1,4 +1,24 @@
-export type ErrorType = "network" | "auth" | "quota" | "server" | "permanent";
+export type ErrorType =
+  | "network"
+  | "auth"
+  | "quota"
+  | "server"
+  | "permanent"
+  | "indeterminate";
+
+/**
+ * Marks a Rust-side error whose operation may or may not have taken effect.
+ *
+ * Must stay identical to `OUTCOME_UNKNOWN_PREFIX` in
+ * `src-tauri/src/imap/move_outcome.rs`. A `UID MOVE` that timed out may have
+ * succeeded server-side, so retrying it duplicates the message — the exact bug
+ * the Rust classifier exists to prevent. Its refusal to retry is worthless if
+ * this side retries on its behalf, and the message contains "timed out", which
+ * `NETWORK_PATTERNS` would otherwise mark retryable.
+ *
+ * Interim: E2/P15 replaces the stringly-typed IPC error with a serialized enum.
+ */
+export const OUTCOME_UNKNOWN_PREFIX = "VELO_OUTCOME_UNKNOWN:";
 
 export interface ClassifiedError {
   type: ErrorType;
@@ -37,6 +57,18 @@ export function classifyError(error: unknown): ClassifiedError {
   const message =
     error instanceof Error ? error.message : String(error ?? "Unknown error");
   const lower = message.toLowerCase();
+
+  // An operation whose server-side outcome is unknown must never be retried
+  // automatically: the retry is what duplicates the message. Checked before
+  // every other rule, including the status-code scan, because the underlying
+  // message is free text from the server and may contain anything.
+  if (message.startsWith(OUTCOME_UNKNOWN_PREFIX)) {
+    return {
+      type: "indeterminate",
+      isRetryable: false,
+      message: message.slice(OUTCOME_UNKNOWN_PREFIX.length).trim(),
+    };
+  }
 
   // Check for HTTP status codes in the message
   const statusMatch = lower.match(/\b(4\d{2}|5\d{2})\b/);

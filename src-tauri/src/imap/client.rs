@@ -10,6 +10,8 @@ use tokio_native_tls::TlsStream;
 use super::types::*;
 use super::net;
 use super::wire;
+use super::caps;
+use super::move_outcome::{self, MoveOutcome};
 
 /// Why a fetch failed, when the caller must be able to tell the cases apart.
 ///
@@ -158,7 +160,7 @@ fn build_tls_connector(accept_invalid_certs: bool) -> Result<native_tls::TlsConn
 
 // ---------- Public API ----------
 
-type ImapSession = Session<ImapStream>;
+pub(crate) type ImapSession = Session<ImapStream>;
 
 /// Establish an IMAP connection and authenticate.
 ///
@@ -492,36 +494,85 @@ pub async fn move_messages(
         .await?
         .map_err(|e| format!("SELECT {source_folder} failed: {e}"))?;
 
-    // Try MOVE extension first
-    match net::with_timeout(IMAP_CMD_TIMEOUT, "UID COPY", session.uid_mv(uid_set, dest_folder)).await {
-        Ok(Ok(())) => return Ok(()),
-        _ => {
-            // Fallback: COPY, then mark Deleted, then EXPUNGE
-            net::with_timeout(IMAP_CMD_TIMEOUT, "UID COPY", session.uid_copy(uid_set, dest_folder))
-                .await?
-                .map_err(|e| format!("UID COPY failed: {e}"))?;
+    // Ask the server rather than inferring MOVE support from a failure (REQ-1.1).
+    // A CAPABILITY timeout aborts here: it leaves the session desynchronised,
+    // and the next thing this function would otherwise do is COPY + EXPUNGE.
+    let caps = caps::fetch(session, IMAP_CMD_TIMEOUT).await?;
 
-            net::with_timeout(IMAP_CMD_TIMEOUT, "UID STORE +Deleted", async {
-                let store_stream = session
-                    .uid_store(uid_set, "+FLAGS (\\Deleted)")
-                    .await
-                    .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-                let _: Vec<_> = store_stream.collect().await;
-                Ok::<_, String>(())
-            })
-        .await??;
+    if caps.has_move {
+        let outcome = move_outcome::classify_move(
+            net::with_timeout(
+                IMAP_CMD_TIMEOUT,
+                "UID MOVE",
+                session.uid_mv(uid_set, dest_folder),
+            )
+            .await,
+        );
 
-            net::with_timeout(IMAP_CMD_TIMEOUT, "EXPUNGE", async {
-                let expunge_stream = session
-                    .expunge()
-                    .await
-                    .map_err(|e| format!("EXPUNGE failed: {e}"))?;
-                let _: Vec<_> = expunge_stream.collect().await;
-                Ok::<_, String>(())
-            })
-        .await??;
+        match outcome {
+            MoveOutcome::Moved => return Ok(()),
+            // The server advertised MOVE and still rejected the command. This
+            // is the only outcome the COPY fallback was ever written for.
+            MoveOutcome::FallBackToCopy(msg) => {
+                log::warn!(
+                    "UID MOVE rejected by {source_folder} ({msg}); falling back to COPY + EXPUNGE"
+                );
+            }
+            // REQ-1.3: COPY cannot fix a refusal, and on a quota boundary it can
+            // succeed where MOVE was refused — leaving the message in both folders.
+            MoveOutcome::Refused(msg) => return Err(format!("UID MOVE refused: {msg}")),
+            MoveOutcome::Failed(msg) => return Err(format!("UID MOVE failed: {msg}")),
+            // REQ-1.4: the server may have completed the move after we stopped
+            // waiting, and the session is desynchronised mid-protocol — so we
+            // issue nothing further on it.
+            //
+            // Nothing reconciles this afterwards. `DeltaCheckResult` carries
+            // only new UIDs and UIDVALIDITY, so a message that moved (or was
+            // duplicated) behind our back is not detected by any sync path. The
+            // sentinel keeps the frontend from retrying blindly; telling the
+            // user to look is currently the whole recovery story. Closing that
+            // gap needs its own brief.
+            MoveOutcome::OutcomeUnknown(msg) => {
+                return Err(format!(
+                    "{}{msg}. The move may already have completed on the server. \
+                     Velo will not retry it automatically — reopen the folder to see \
+                     its current state.",
+                    move_outcome::OUTCOME_UNKNOWN_PREFIX
+                ))
+            }
         }
     }
+
+    // Fallback: COPY, then mark Deleted, then EXPUNGE.
+    //
+    // NOTE (REQ-2, not this PR): the EXPUNGE below is untargeted and removes
+    // every message in `source_folder` flagged \Deleted, not just `uid_set`.
+    // That defect is unchanged here and is fixed in the expunge slice, which
+    // is gated on live Dovecot transcripts. REQ-1 only narrows *when* this
+    // path runs — which strictly reduces exposure to it.
+    net::with_timeout(IMAP_CMD_TIMEOUT, "UID COPY", session.uid_copy(uid_set, dest_folder))
+        .await?
+        .map_err(|e| format!("UID COPY failed: {e}"))?;
+
+    net::with_timeout(IMAP_CMD_TIMEOUT, "UID STORE +Deleted", async {
+        let store_stream = session
+            .uid_store(uid_set, "+FLAGS (\\Deleted)")
+            .await
+            .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
+        let _: Vec<_> = store_stream.collect().await;
+        Ok::<_, String>(())
+    })
+    .await??;
+
+    net::with_timeout(IMAP_CMD_TIMEOUT, "EXPUNGE", async {
+        let expunge_stream = session
+            .expunge()
+            .await
+            .map_err(|e| format!("EXPUNGE failed: {e}"))?;
+        let _: Vec<_> = expunge_stream.collect().await;
+        Ok::<_, String>(())
+    })
+    .await??;
 
     Ok(())
 }
