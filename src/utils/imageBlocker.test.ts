@@ -19,15 +19,18 @@ describe("stripRemoteImages", () => {
   });
 
   it("preserves data: URIs", () => {
-    const html = '<img src="data:image/png;base64,iVBOR..." />';
-    const result = stripRemoteImages(html);
-    expect(result).toBe(html);
+    // Asserts the src VALUE, not the serialised string: blocking is now
+    // DOM-based (audit P9), so HTML is normalised on the round trip -- `/>`
+    // becomes `>` and single quotes become double. Both are the same document.
+    const result = stripRemoteImages('<img src="data:image/png;base64,iVBOR..." />');
+    expect(result).toContain('src="data:image/png;base64,iVBOR..."');
+    expect(result).not.toContain("data-blocked-src");
   });
 
   it("preserves cid: URIs", () => {
-    const html = '<img src="cid:image001@example.com" />';
-    const result = stripRemoteImages(html);
-    expect(result).toBe(html);
+    const result = stripRemoteImages('<img src="cid:image001@example.com" />');
+    expect(result).toContain('src="cid:image001@example.com"');
+    expect(result).not.toContain("data-blocked-src");
   });
 
   it("handles multiple images", () => {
@@ -38,9 +41,10 @@ describe("stripRemoteImages", () => {
   });
 
   it("handles single-quoted src", () => {
-    const html = "<img src='https://cdn.example.com/img.jpg' />";
-    const result = stripRemoteImages(html);
-    expect(result).toContain("data-blocked-src='https://cdn.example.com/img.jpg'");
+    const result = stripRemoteImages("<img src='https://cdn.example.com/img.jpg' />");
+    // Quote style is normalised by serialisation; the value is what matters.
+    expect(result).toContain('data-blocked-src="https://cdn.example.com/img.jpg"');
+    expect(result).toContain('src=""');
   });
 
   it("handles HTML with no images", () => {
@@ -66,9 +70,8 @@ describe("restoreRemoteImages", () => {
   });
 
   it("handles HTML with no blocked images", () => {
-    const html = '<img src="data:image/png;base64,abc" />';
-    const result = restoreRemoteImages(html);
-    expect(result).toBe(html);
+    const result = restoreRemoteImages('<img src="data:image/png;base64,abc" />');
+    expect(result).toContain('src="data:image/png;base64,abc"');
   });
 });
 
