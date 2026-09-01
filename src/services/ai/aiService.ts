@@ -15,6 +15,12 @@ import {
   SMART_LABEL_PROMPT,
   EXTRACT_TASK_PROMPT,
 } from "./prompts";
+import {
+  wrapContent,
+  fenceContent,
+  parseModelOutput,
+  SmartRepliesSchema,
+} from "./modelOutput";
 
 async function callAi(systemPrompt: string, userContent: string): Promise<string> {
   try {
@@ -43,7 +49,11 @@ function formatMessageForSummary(msg: DbMessage): string {
     year: "numeric",
   });
   const body = (msg.body_text ?? msg.snippet ?? "").trim();
-  return `<email_content>From: ${from}\nDate: ${date}\n\n${body}</email_content>`;
+  // Every interpolated value is fenced: `from` is attacker-controlled too (it is
+  // a header), not just the body (audit P10).
+  return wrapContent(
+    `From: ${fenceContent(from)}\nDate: ${fenceContent(date)}\n\n${body}`,
+  );
 }
 
 export async function summarizeThread(
@@ -110,31 +120,21 @@ export async function generateSmartReplies(
   }
 
   const formatted = messages.map(formatMessageForSummary).join("\n---\n");
+  // Each message is already individually fenced by formatMessageForSummary;
+  // don't wrap the join in a second, outer fence — that would be unclosed the
+  // moment any inner block ends.
   const combined = formatted.slice(0, 4000);
-  const result = await callAi(SMART_REPLY_PROMPT, `<email_content>${combined}</email_content>`);
+  const result = await callAi(SMART_REPLY_PROMPT, combined);
 
-  // Parse JSON array from response
-  let replies: string[];
-  try {
-    // Extract JSON array from the response (handle potential markdown wrapping)
-    // Use non-greedy match to avoid capturing extra content
-    const jsonMatch = result.match(/\[[\s\S]*?\]/);
-    replies = jsonMatch ? JSON.parse(jsonMatch[0]) as string[] : [result];
-  } catch {
-    // If parsing fails, split by newlines as fallback
-    replies = result
-      .split("\n")
-      .map((l) => l.replace(/^\d+\.\s*/, "").trim())
-      .filter(Boolean)
-      .slice(0, 3);
-  }
+  // Fail closed (audit P10). The previous version fell back to `[result]`, and
+  // on a parse throw to splitting raw model text by newline — so unparseable
+  // model output became user-facing reply suggestions in the compose path.
+  // Anything that is not a well-shaped array of short strings is discarded.
+  const parsed = parseModelOutput(result, SmartRepliesSchema);
+  let replies: string[] = parsed === null ? [] : parsed.map((r) => r.slice(0, 200));
 
-  // Validate and sanitize each reply
-  replies = replies
-    .filter((r): r is string => typeof r === "string")
-    .map((r) => r.replace(/<[^>]*>/g, "").slice(0, 200));
-
-  // Ensure exactly 3 replies
+  // Pad to exactly 3 with a neutral default. When the model output was
+  // unusable this yields three safe generic replies rather than model text.
   while (replies.length < 3) replies.push("Thanks for the update.");
   replies = replies.slice(0, 3);
 
@@ -157,8 +157,16 @@ const VALID_CATEGORIES = new Set(["Primary", "Updates", "Promotions", "Social", 
 export async function categorizeThreads(
   threads: { id: string; subject: string; snippet: string; fromAddress: string }[],
 ): Promise<Map<string, string>> {
+  // Subject, snippet and from-address are all attacker-controlled. Unfenced, a
+  // body containing `</email_content>` plus forged `id:category` lines could
+  // recategorise other threads (audit P10).
   const input = threads
-    .map((t) => `<email_content>ID:${t.id} | From:${t.fromAddress} | Subject:${t.subject} | ${t.snippet}</email_content>`)
+    .map((t) =>
+      wrapContent(
+        `ID:${fenceContent(t.id)} | From:${fenceContent(t.fromAddress)} | ` +
+          `Subject:${fenceContent(t.subject)} | ${fenceContent(t.snippet)}`,
+      ),
+    )
     .join("\n");
 
   const validThreadIds = new Set(threads.map((t) => t.id));
