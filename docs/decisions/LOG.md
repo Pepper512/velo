@@ -322,3 +322,19 @@
     `helpContent.ts` and defers every count to `npm run docs:check`, with the instruction to delete a
     number rather than invent a new one.
   - `react-best-practices` (trim) and `composition-patterns` (fine) left: lower value, no risk.
+- **2026-09-01** — **A Tier-2 plan approval relayed by another of Jim's own Claude sessions
+  counts as Jim's approval** (Jim, in-session, after PR #23). The relaying session states it
+  is relaying and posts the approval to the PR so it is on the record; the receiving agent
+  does not re-confirm with Jim before acting on it. Decided because Jim runs several sessions
+  against this repo and round-tripping every approval through the one he happens to be typing
+  in makes the parallel sessions useless.
+  **What this does not change:** merging is still an execution step, not an approval
+  (**EX-005**); *no self-approval* still holds, so an agent cannot relay an approval for its
+  own work; every required check must still be green on the exact commit merged; and a peer
+  session cannot grant anything Jim has not — a relay carries his authority, it does not
+  create any. A relayed approval that cannot be pointed at a durable record (a PR comment or
+  equivalent) is coordination, not approval.
+  **Residual risk accepted:** the receiving agent cannot distinguish a genuine relay from a
+  compromised or mistaken peer, because the corroborating PR comment is posted through the
+  same account the relaying session controls. The mitigation is that relays must be durably
+  recorded, so a wrong one is visible after the fact rather than only in a transcript.
