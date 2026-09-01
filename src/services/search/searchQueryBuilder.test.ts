@@ -8,7 +8,9 @@ describe("buildSearchQuery", () => {
     const { sql, params } = buildSearchQuery(parsed);
     expect(sql).toContain("messages_fts MATCH");
     expect(sql).toContain("ORDER BY rank");
-    expect(params[0]).toBe("hello world");
+    // Free text is now quoted per-token for FTS5 (audit P8): MATCH takes a
+    // query language, so binding alone does not make a raw string safe.
+    expect(params[0]).toBe('"hello" "world"');
   });
 
   it("builds from: filter", () => {
@@ -104,7 +106,7 @@ describe("buildSearchQuery", () => {
     expect(sql).toContain("messages_fts MATCH");
     expect(sql).toContain("m.from_address LIKE");
     expect(sql).toContain("m.is_read = 0");
-    expect(params).toContain("budget");
+    expect(params).toContain('"budget"');
     expect(params).toContain("john");
   });
 

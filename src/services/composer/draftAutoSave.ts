@@ -50,8 +50,16 @@ async function saveDraft(): Promise<void> {
     }
 
     state.setLastSavedAt(Date.now());
+    state.setSaveError(null);
   } catch (err) {
+    // Audit P14: this used to be console-only. Auto-save failing silently while
+    // the user is still typing is the worst shape of the "user believes it was
+    // saved" class -- they keep writing, close the window, and the draft is gone.
+    // The composer already renders a save-state label; this makes it tell the truth.
     console.error("Failed to auto-save draft:", err);
+    state.setSaveError(
+      err instanceof Error ? err.message : "Draft could not be saved",
+    );
   } finally {
     state.setIsSaving(false);
   }

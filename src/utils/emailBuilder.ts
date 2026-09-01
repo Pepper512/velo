@@ -97,27 +97,60 @@ function generateMessageId(from: string): string {
   return `<${timestamp}.${random}@${domain}>`;
 }
 
+/**
+ * Make a value safe to place in an RFC 5322 header (audit P7).
+ *
+ * Headers are newline-delimited, so a CR or LF in a header value does not
+ * corrupt that header -- it **starts a new one**. A subject arriving from a
+ * `mailto:` link as `x%0ABcc:attacker@example.com` therefore became a real
+ * `Bcc` on the outgoing message. Any web page can hand the app such a link.
+ *
+ * Folding whitespace is collapsed to a single space rather than dropped, so a
+ * legitimately long or wrapped subject still reads correctly.
+ */
+function sanitizeHeaderValue(value: string): string {
+  return value.replace(/[\r\n]+\s*/g, " ").trim();
+}
+
+/**
+ * Encode a header value as RFC 2047 base64 if it is not pure ASCII.
+ *
+ * Non-ASCII in a raw header is an RFC 5322 violation; servers may mangle or
+ * reject it, and `Subject: héllo` was previously emitted verbatim. Uses
+ * TextEncoder + btoa rather than a dependency.
+ */
+function encodeHeaderValue(value: string): string {
+  const clean = sanitizeHeaderValue(value);
+  // eslint-disable-next-line no-control-regex
+  if (!/[^\x00-\x7F]/.test(clean)) return clean;
+
+  const bytes = new TextEncoder().encode(clean);
+  let binary = "";
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return `=?utf-8?B?${btoa(binary)}?=`;
+}
+
 export function buildRawEmail(draft: EmailDraft): string {
   const messageId = generateMessageId(draft.from);
   const lines: string[] = [
-    `From: ${draft.from}`,
-    `To: ${draft.to.join(", ")}`,
+    `From: ${sanitizeHeaderValue(draft.from)}`,
+    `To: ${draft.to.map(sanitizeHeaderValue).join(", ")}`,
   ];
 
   if (draft.cc && draft.cc.length > 0) {
-    lines.push(`Cc: ${draft.cc.join(", ")}`);
+    lines.push(`Cc: ${draft.cc.map(sanitizeHeaderValue).join(", ")}`);
   }
   if (draft.bcc && draft.bcc.length > 0) {
-    lines.push(`Bcc: ${draft.bcc.join(", ")}`);
+    lines.push(`Bcc: ${draft.bcc.map(sanitizeHeaderValue).join(", ")}`);
   }
 
   lines.push(`Date: ${new Date().toUTCString()}`);
   lines.push(`Message-ID: ${messageId}`);
-  lines.push(`Subject: ${draft.subject}`);
+  lines.push(`Subject: ${encodeHeaderValue(draft.subject)}`);
   lines.push(`MIME-Version: 1.0`);
 
   if (draft.inReplyTo) {
-    lines.push(`In-Reply-To: ${draft.inReplyTo}`);
+    lines.push(`In-Reply-To: ${sanitizeHeaderValue(draft.inReplyTo)}`);
   }
   if (draft.references) {
     lines.push(`References: ${draft.references}`);

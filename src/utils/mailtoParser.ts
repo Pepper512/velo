@@ -6,6 +6,23 @@ export interface MailtoFields {
   body: string;
 }
 
+/**
+ * `decodeURIComponent` that never throws (audit P7).
+ *
+ * A malformed escape -- `mailto:%zz` from any web page -- raises `URIError`.
+ * That propagated out of the parser into an un-awaited `handleUrl` call and
+ * became an unhandled rejection. Malformed input should produce no draft, not
+ * an unhandled error; returning the raw text lets the address validation that
+ * follows reject it normally.
+ */
+function safeDecode(value: string): string {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 export function parseMailtoUrl(url: string): MailtoFields {
   const result: MailtoFields = {
     to: [],
@@ -29,7 +46,7 @@ export function parseMailtoUrl(url: string): MailtoFields {
 
   // Parse the "to" addresses from the address part
   if (addressPart) {
-    result.to = decodeURIComponent(addressPart)
+    result.to = safeDecode(addressPart)
       .split(",")
       .map((a) => a.trim())
       .filter(Boolean);
