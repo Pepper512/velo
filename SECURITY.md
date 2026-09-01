@@ -40,12 +40,17 @@ Velo is a desktop application. Your emails, tokens, and settings are stored loca
 
 - HTML emails are sanitized with **DOMPurify** and rendered in a **sandboxed iframe** (`allow-same-origin` only -- no scripts)
 - Remote images are **blocked by default** and replaced with placeholders. Users can allowlist specific senders.
-- Phishing detection uses 10 heuristic rules to flag suspicious links before you click them
+- Phishing link detection (10 heuristic rules) ships in the codebase but is
+  **not currently surfaced in the UI** -- the banner and link-confirmation dialog
+  that would display its results are not reachable from any rendered component
+  (audit P19, verified 2026-09-01). **Do not rely on Velo screening links for
+  you.** This line previously claimed the feature flagged links "before you click
+  them", which was not true of any shipped build.
 
 ### Network
 
 - All API connections use HTTPS
-- Content Security Policy restricts network requests to known domains (googleapis.com, anthropic.com, openai.com, generativelanguage.googleapis.com, gravatar.com, googleusercontent.com)
+- Content Security Policy restricts network requests to known domains: Google (googleapis.com, oauth2.googleapis.com, generativelanguage.googleapis.com, googleusercontent.com), Anthropic, OpenAI, xAI (api.x.ai), GitHub Models (models.github.ai), Microsoft (login.microsoftonline.com, graph.microsoft.com), Yahoo (api.login.yahoo.com), Gravatar, and localhost for a local Ollama or LM Studio server
 - No telemetry, analytics, or tracking
 
 ### Dependencies

@@ -104,7 +104,7 @@ Google Calendar sync with month, week, and day views. Create events without leav
 - OAuth PKCE for Gmail -- no client secret, no backend servers
 - Encrypted password/app-password storage for IMAP accounts (AES-256-GCM)
 - Remote image blocking with per-sender allowlist
-- Phishing link detection with 10 heuristic scoring rules
+- Phishing link detection with 10 heuristic scoring rules *(implemented but not currently wired into the UI -- see SECURITY.md)*
 - SPF/DKIM/DMARC authentication display with badges and warnings
 - DOMPurify + sandboxed iframe rendering
 - AES-256-GCM encrypted token storage
