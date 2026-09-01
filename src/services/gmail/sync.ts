@@ -12,6 +12,7 @@ import { getMutedThreadIds } from "../db/threads";
 import { getThreadCategory } from "../db/threadCategories";
 import { getVipSenders } from "../db/notificationVips";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { getOwnAddresses, clearSnoozeForNewExternalMessages } from "@/services/snooze/snoozeSync";
 
 async function loadAutoArchiveCategories(): Promise<Set<string>> {
   const raw = await getSetting("auto_archive_categories");
@@ -37,9 +38,19 @@ async function processAndStoreThread(
   parsedMessages: ParsedMessage[],
   client?: GmailClient,
   autoArchiveCategories?: Set<string>,
+  ownAddresses?: Set<string>,
 ): Promise<void> {
   const lastMessage = parsedMessages[parsedMessages.length - 1]!;
   const firstMessage = parsedMessages[0]!;
+
+  // SPEC-F-1 REQ-1.3: a genuinely new message from someone else ends a snooze.
+  // Decided here, BEFORE upsertThread overwrites last_message_at.
+  await clearSnoozeForNewExternalMessages(
+    accountId,
+    thread.id,
+    parsedMessages.map((m) => ({ id: m.id, fromAddress: m.fromAddress })),
+    ownAddresses ?? (await getOwnAddresses(accountId)),
+  );
 
   const allLabelIds = new Set<string>();
   for (const msg of parsedMessages) {
@@ -217,8 +228,9 @@ export async function initialSync(
   // Phase 3: Fetch and store each thread's details
   let historyId = "0";
 
-  // Load auto-archive categories once for the whole sync
+  // Load auto-archive categories and the account's own addresses once for the whole sync
   const autoArchiveCategories = await loadAutoArchiveCategories();
+  const ownAddresses = await getOwnAddresses(accountId);
 
   let progress = 0;
   await parallelLimit(
@@ -239,7 +251,7 @@ export async function initialSync(
         if (!thread.messages || thread.messages.length === 0) return;
 
         const parsedMessages = thread.messages.map(parseGmailMessage);
-        await processAndStoreThread(thread, accountId, parsedMessages, client, autoArchiveCategories);
+        await processAndStoreThread(thread, accountId, parsedMessages, client, autoArchiveCategories, ownAddresses);
       } catch (err) {
         console.error(`Failed to sync thread ${stub.id}:`, err);
       }
@@ -341,6 +353,7 @@ export async function deltaSync(
 
     // Load settings once for the whole sync cycle
     const autoArchiveCategories = await loadAutoArchiveCategories();
+    const ownAddresses = await getOwnAddresses(accountId);
     const mutedThreadIds = await getMutedThreadIds(accountId);
     const smartNotifications = (await getSetting("smart_notifications")) !== "false";
     const notifyCategories = new Set(
@@ -365,7 +378,7 @@ export async function deltaSync(
           if (!thread.messages || thread.messages.length === 0) return;
 
           const parsedMessages = thread.messages.map(parseGmailMessage);
-          await processAndStoreThread(thread, accountId, parsedMessages, client, autoArchiveCategories);
+          await processAndStoreThread(thread, accountId, parsedMessages, client, autoArchiveCategories, ownAddresses);
 
           // Auto-archive muted threads that reappear in INBOX
           if (mutedThreadIds.has(threadId)) {

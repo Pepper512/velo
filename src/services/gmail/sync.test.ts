@@ -45,6 +45,10 @@ vi.mock("@/services/db/bundleRules", () => ({
 vi.mock("@/services/db/pendingOperations", () => ({
   getPendingOpsForResource: vi.fn().mockResolvedValue([]),
 }));
+vi.mock("@/services/snooze/snoozeSync", () => ({
+  getOwnAddresses: vi.fn().mockResolvedValue(new Set(["me@example.com"])),
+  clearSnoozeForNewExternalMessages: vi.fn().mockResolvedValue(false),
+}));
 
 const mockNotify = vi.fn();
 const mockShouldNotify = vi.fn().mockReturnValue(true);
@@ -180,5 +184,32 @@ describe("deltaSync notifications", () => {
     await deltaSync(client, "account-1", "99");
 
     expect(mockNotify).not.toHaveBeenCalled();
+  });
+});
+
+/** SPEC-F-1 REQ-1.3 — sync consults the snooze rule before it touches the thread row. */
+describe("deltaSync snooze handling (SPEC-F-1)", () => {
+  it("checks for new external messages BEFORE upserting the thread, with the account's own addresses", async () => {
+    const { clearSnoozeForNewExternalMessages, getOwnAddresses } = await import("@/services/snooze/snoozeSync");
+    const { upsertThread } = await import("../db/threads");
+    vi.mocked(clearSnoozeForNewExternalMessages).mockClear();
+    vi.mocked(upsertThread).mockClear();
+
+    const client = createMockClient([
+      { id: "100", messagesAdded: [{ message: { id: "msg-thread-1", threadId: "thread-1", labelIds: ["INBOX", "UNREAD"] } }] },
+    ]);
+
+    await deltaSync(client, "account-1", "99");
+
+    expect(getOwnAddresses).toHaveBeenCalledWith("account-1");
+    expect(clearSnoozeForNewExternalMessages).toHaveBeenCalledWith(
+      "account-1",
+      "thread-1",
+      [{ id: "msg-thread-1", fromAddress: "sender@example.com" }],
+      new Set(["me@example.com"]),
+    );
+    const clearOrder = vi.mocked(clearSnoozeForNewExternalMessages).mock.invocationCallOrder[0]!;
+    const upsertOrder = vi.mocked(upsertThread).mock.invocationCallOrder[0]!;
+    expect(clearOrder).toBeLessThan(upsertOrder);
   });
 });

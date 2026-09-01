@@ -75,6 +75,10 @@ vi.mock("../db/folderSyncState", () => ({
 vi.mock("../db/pendingOperations", () => ({
   getPendingOpsForResource: vi.fn(() => []),
 }));
+vi.mock("../snooze/snoozeSync", () => ({
+  getOwnAddresses: vi.fn().mockResolvedValue(new Set(["me@example.com"])),
+  clearSnoozeForNewExternalMessages: vi.fn().mockResolvedValue(false),
+}));
 
 import { imapMessageToParsedMessage, imapInitialSync, imapDeltaSync, formatImapDate, computeSinceDate, isConnectionError } from "./imapSync";
 import {
@@ -820,5 +824,51 @@ describe("sync credential wiring for OAuth accounts", () => {
     await imapInitialSync("acc-1");
 
     expect(mockImapListFolders.mock.calls[0]![0].password).toBe("secret");
+  });
+});
+
+/** SPEC-F-1 REQ-1.3 — the IMAP thread-store path consults the snooze rule before upserting. */
+describe("imapInitialSync snooze handling (SPEC-F-1)", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockImapSearchFolder = vi.mocked(imapSearchFolder);
+  const mockImapFetchMessages = vi.mocked(imapFetchMessages);
+  const mockUpsertThread = vi.mocked(upsertThread);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+  });
+
+  afterEach(() => {
+    mockImapSearchFolder.mockReset();
+    mockImapFetchMessages.mockReset();
+    mockImapListFolders.mockReset();
+    vi.useRealTimers();
+  });
+
+  it("checks for new external messages before the post-threading upsert, with the account's own addresses", async () => {
+    const { clearSnoozeForNewExternalMessages, getOwnAddresses } = await import("../snooze/snoozeSync");
+    const msg = createMockImapMessage({ uid: 1, message_id: "<m1@test>", subject: "Hello", date: Math.floor(Date.now() / 1000) });
+    const folder = createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 1 });
+    mockImapListFolders.mockResolvedValue([folder]);
+    mockImapSearchFolder.mockResolvedValue({ uids: [1], folder_status: createMockImapFolderStatus({ exists: 1 }) });
+    mockImapFetchMessages.mockResolvedValue(createMockImapFetchResult([msg]));
+
+    await imapInitialSync("acc-1");
+
+    expect(getOwnAddresses).toHaveBeenCalledWith("acc-1");
+    expect(clearSnoozeForNewExternalMessages).toHaveBeenCalledTimes(1);
+    const [accountId, threadId, incoming, own] = vi.mocked(clearSnoozeForNewExternalMessages).mock.calls[0]!;
+    expect(accountId).toBe("acc-1");
+    expect(typeof threadId).toBe("string");
+    expect(incoming).toEqual([expect.objectContaining({ id: expect.any(String) })]);
+    expect(own).toEqual(new Set(["me@example.com"]));
+
+    // Before the thread-store upsert (the last upsertThread call; earlier ones are FK placeholders).
+    const clearOrder = vi.mocked(clearSnoozeForNewExternalMessages).mock.invocationCallOrder[0]!;
+    const lastUpsertOrder = mockUpsertThread.mock.invocationCallOrder.at(-1)!;
+    expect(clearOrder).toBeLessThan(lastUpsertOrder);
   });
 });
