@@ -80,9 +80,12 @@ Three providers with selectable models -- choose one or mix and match:
 
 | Provider | Models |
 |----------|--------|
-| **Anthropic Claude** | Haiku 4.5, Sonnet 4, Opus 4 |
+| **Anthropic Claude** | Haiku 4.5, Sonnet 4.6, Opus 4.6 / 4.7 / 4.8 |
 | **OpenAI** | GPT-4o Mini, GPT-4o, GPT-4.1 Nano, GPT-4.1 Mini, GPT-4.1 |
 | **Google Gemini** | 2.5 Flash, 2.5 Pro |
+| **xAI Grok** | Grok 4.6, 4.5, 4.3 |
+| **GitHub Copilot Models** | GPT-4o Mini, GPT-4.1 Nano / Mini, GPT-4o, GPT-4.1 |
+| **Ollama** (local) | any model your server exposes |
 
 Thread summaries, smart reply suggestions, AI compose & reply, text transform (improve/shorten/formalize), Ask My Inbox (natural language search). Pick which model to use per provider in Settings. All results cached locally.
 
@@ -131,7 +134,7 @@ No build tools or programming knowledge required -- just download, install, and 
 
 **IMAP/SMTP:** Click "Add IMAP Account" in the account switcher. Enter your email and password -- Velo auto-discovers server settings for popular providers (Outlook, Yahoo, iCloud, Fastmail, etc.). For other providers, enter IMAP/SMTP server details manually. No Google Cloud project needed.
 
-**AI (optional):** Add an API key for [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), or [Google Gemini](https://aistudio.google.com/) in Settings. Then select which model to use for each provider.
+**AI (optional):** Add an API key for [Anthropic](https://console.anthropic.com/), [OpenAI](https://platform.openai.com/), [Google Gemini](https://aistudio.google.com/), or [xAI](https://console.x.ai/) in Settings — or point Velo at a local [Ollama](https://ollama.com/) server for a fully offline setup. Then select which model to use for each provider.
 
 ### Building from source
 

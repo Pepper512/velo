@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Create a conventional commit and push to the current branch. Ensures commit messages follow the Conventional Commits spec for automatic versioning with release-please.
+description: Create a conventional commit on the current branch. Does NOT push. Ensures commit messages follow the Conventional Commits spec for automatic versioning with release-please.
 argument-hint: [optional commit description]
 ---
 
@@ -65,7 +65,31 @@ Create a git commit following the [Conventional Commits](https://www.conventiona
    )"
    ```
 
-6. **Push to the current branch** with `git push`. If the branch has no upstream, use `git push -u origin HEAD`.
+6. **Stop. Do not push.**
+
+   This skill commits and nothing else. It previously ran `git push` (and
+   `git push -u origin HEAD` when there was no upstream) as an unconditional
+   final step, which was wrong three ways:
+
+   - It conflicts with `docs/methodology/02-work-loop.md`: work lands through a
+     PR that CI gates, not by an agent pushing when it happens to be done.
+   - It conflicts with the harness rule that an agent commits or pushes **only
+     when asked**.
+   - `git push -u origin HEAD` on a checked-out default branch pushes straight
+     to `main`, which is protected — so the good case is a rejection and the bad
+     case is a bypass.
+
+7. **Refuse outright if the current branch is the default branch.** Check with
+   `git rev-parse --abbrev-ref HEAD`. If it is `main` or `master`, do not commit:
+   say so, and suggest a branch name based on the change type and scope.
+
+8. **Print the follow-up commands rather than running them**, so the human
+   decides when work leaves the machine:
+
+   ```
+   git push -u origin <branch>
+   gh pr create --title "<type>(<scope>): <description>"
+   ```
 
 ## User hint
 

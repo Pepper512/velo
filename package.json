@@ -12,7 +12,9 @@
     "test:watch": "vitest",
     "tauri": "tauri",
     "dev:landing": "npm run dev --prefix landing",
-    "flatpak": "flatpak-builder --force-clean --user --install --install-deps-from=flathub build-dir com.velomail.app.yml"
+    "flatpak": "flatpak-builder --force-clean --user --install --install-deps-from=flathub build-dir com.velomail.app.yml",
+    "docs:check": "node scripts/docs-check.mjs --check",
+    "graph:check": "node scripts/graph.mjs --check"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",
