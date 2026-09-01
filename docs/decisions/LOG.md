@@ -65,3 +65,18 @@
   `allowed_actions` = GitHub-owned + 6 pinned third-party actions. **EX-001 closes on merge of PR #1.**
 - **2026-09-01** — Session wrap-up: `HANDOFF.md` created (pinned to `b751b94`; next step = Batch A plan
   for Jim's approval). EX-001 closed. Handoff lands via PR from branch `docs/handoff`.
+- **2026-09-01** — **Release automation is upstream-only on this fork.** The Release Please workflow
+  failed on the D0 merge (`release-please failed: GitHub Actions is not permitted to create or approve
+  pull requests`) *after* computing a `0.4.21 → 0.5.0` bump from **173 inherited upstream commits** —
+  the fork has no release tag or manifest history, so every upstream commit reads as unreleased. It
+  also left a stray branch `release-please--branches--main--components--velo` carrying that version
+  bump. Decision (Jim, approving the PM recommendation): **guard the release workflows on
+  `github.repository`** rather than enable the Actions PR-creation permission or delete the files.
+  Rationale: this fork is a hardening fork, not a distribution channel; it holds **no** signing secrets
+  (`gh secret list` is empty — no `TAURI_SIGNING_PRIVATE_KEY`, no Apple certs, no `HOMEBREW_TAP_TOKEN`);
+  `update-homebrew.yml` pushes to **upstream's** tap `avihaymenahem/homebrew-velo`; and a permanently
+  red workflow on the default branch normalises red, which is exactly what the gate ledger exists to
+  prevent. Guarding rather than deleting keeps the diff upstream-merge-friendly. `packaging.yml` needs
+  no guard — it is `workflow_call`-only and unreachable once `release-please.yml` is guarded. Filed as
+  **EX-007** (this fork now has no exercised release path). If Jim later wants signed builds from
+  `Pepper512/velo`, that is an ADR (release + signing model), not a reversal of this entry.
