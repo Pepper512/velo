@@ -116,9 +116,11 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Level is "critical" until the @tiptap/pm bump lands (Batch G, EX-004);
-      # then raise to "high" per the vuln SLA table.
-      - run: npm audit --omit=dev --audit-level=critical
+      # "high" per the vuln SLA table. EX-004 held this at "critical" to tolerate
+      # markdown-it via @tiptap/pm; the Batch G bump removed markdown-it from the
+      # tree entirely, so prod advisories are now zero and the gate is back where
+      # the standard puts it.
+      - run: npm audit --omit=dev --audit-level=high
 
   secrets:
     name: secret scan
