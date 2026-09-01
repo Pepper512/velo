@@ -256,3 +256,41 @@
     Six tests asserted that the *service* navigates; they were pinning the coupling, so they now
     assert the reported value, and `useEmailActions.test.ts` owns the navigation behaviour they used
     to cover.
+- **2026-09-01** — **Batch F built** (P16 extractions 3/6/7, P17, P19, plus the accepted **xAI Grok**
+  feature) on `feat/batch-f-grok-and-dedupe`. Suite **1,739 → 1,751**.
+  - **Grok landed as ~15 lines**, because P16(3) `createOpenAICompatibleProvider` was extracted first —
+    exactly the sequencing the audit specified. Model IDs were **fetched from xAI's live
+    documentation, not recalled**: `grok-4.6` (their recommended chat/code model), 4.5, 4.3. CSP
+    `connect-src` gains `https://api.x.ai`; without it Grok works under `tauri dev` and fails in the
+    packaged app with an opaque network error. **Grok is available, not default** —
+    `getActiveProviderName` still falls back to Claude, matching the recorded assumption.
+  - **Claude model IDs were stale.** Sonnet 4 and Opus 4 no longer exist, and the Haiku entry carried
+    a date suffix (`claude-haiku-4-5-20251001`) where the current ID is plain `claude-haiku-4-5`.
+    Refreshed from the authoritative model reference rather than memory. **Defaults deliberately
+    unchanged** and now documented in `DEFAULT_MODELS`: the fast/cheap tier for every provider,
+    because Velo runs *one* model for all AI features and the highest-volume one is background thread
+    categorisation on every sync. Jim has still not confirmed the per-provider default proposal; this
+    is the conservative reading of it.
+  - **P16(6) found a live bug.** `getActiveLabel` and `useActiveLabel` were separate copies and had
+    drifted — the React one was missing `/attachments` and `/tasks`, so the sidebar highlighted
+    **Inbox** on both pages. Found by duplication analysis, not by a bug report.
+  - **P16(7):** PKCE existed byte-identically in two files with **no tests in either**, for the
+    mechanism that binds an auth code to the client that requested it — and Velo's OAuth flow has no
+    client secret, so it is the only such protection. Now one implementation with the **RFC 7636
+    Appendix B** vector as a test.
+  - **P17 acceptance verified by injecting a typo:** `getSetting("thmee")` produces `TS2345` naming
+    the literal. The compiler also found a settings key the grep that built the list had missed
+    (`custom_shortcuts`, written via a variable) — the enumeration-by-hand going stale is the whole
+    argument. Deleted the dead `velo-calendar-sync-done` event: one dispatch, **zero** listeners.
+  - **P19 is worse than the audit assumed, and it is a documentation-honesty problem.**
+    `phishingDetector.ts` (486 lines) is imported by exactly four files: its own test and **three
+    other orphans** (`PhishingBanner`, `LinkConfirmDialog`, `phishingScanner`). Nothing in
+    `ThreadView`/`MessageItem` references phishing. **The feature does not run at all.**
+    SECURITY.md told users it "flag[s] suspicious links before you click them" — untrue of any
+    shipped build, and a user could click a link believing Velo had screened it. The claim is
+    corrected; the code is left in place. **Neither of the audit's two options was taken:** re-wiring
+    is building a security-visible feature whose rendering cannot be verified without running the
+    app, and deleting 486 lines of working tested logic is a product decision. **Jim decides.**
+    Also corrected the stale CSP domain list in SECURITY.md while in the file.
+  - **Sixth audit claim to fail verification:** P19's orphan list names `hooks/useContextMenu.ts`,
+    which has **nine importers** and is not orphaned.
