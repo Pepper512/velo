@@ -524,7 +524,14 @@ pub async fn move_messages(
             MoveOutcome::Failed(msg) => return Err(format!("UID MOVE failed: {msg}")),
             // REQ-1.4: the server may have completed the move after we stopped
             // waiting, and the session is desynchronised mid-protocol — so we
-            // issue nothing further on it. The next delta sync reconciles.
+            // issue nothing further on it.
+            //
+            // Nothing reconciles this afterwards. `DeltaCheckResult` carries
+            // only new UIDs and UIDVALIDITY, so a message that moved (or was
+            // duplicated) behind our back is not detected by any sync path. The
+            // sentinel keeps the frontend from retrying blindly; telling the
+            // user to look is currently the whole recovery story. Closing that
+            // gap needs its own brief.
             MoveOutcome::OutcomeUnknown(msg) => {
                 return Err(format!(
                     "{}{msg}. The move may already have completed on the server. \
