@@ -22,6 +22,22 @@
 
 use async_imap::error::Error as ImapError;
 
+/// Marks an error whose operation may or may not have taken effect server-side.
+///
+/// **This is a wire contract with the frontend, not decoration.** `move_messages`
+/// returning "…timed out…" is classified as a network error by
+/// `src/utils/networkErrors.ts`, which marks it retryable — and
+/// `executeEmailAction` then enqueues the move for the queue processor to run
+/// again. For a `UID MOVE` that already succeeded server-side, that retry is
+/// the duplication REQ-1 exists to prevent: the Rust half declining to retry
+/// achieves nothing if the caller retries for it. `classifyError` matches this
+/// prefix ahead of its network patterns and returns `isRetryable: false`.
+///
+/// Interim by design: E2/P15 replaces the stringly-typed IPC error with a
+/// serialized enum, at which point this prefix goes away. Until then the two
+/// sides are pinned by `networkErrors.test.ts`, which asserts this literal.
+pub const OUTCOME_UNKNOWN_PREFIX: &str = "VELO_OUTCOME_UNKNOWN:";
+
 /// What to do after attempting `UID MOVE`.
 #[derive(Debug, PartialEq, Eq)]
 pub enum MoveOutcome {

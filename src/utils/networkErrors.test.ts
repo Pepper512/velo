@@ -1,4 +1,8 @@
-import { classifyError, formatSyncError } from "./networkErrors";
+import {
+  classifyError,
+  formatSyncError,
+  OUTCOME_UNKNOWN_PREFIX,
+} from "./networkErrors";
 
 describe("classifyError", () => {
   it("classifies 'Failed to fetch' as network (retryable)", () => {
@@ -162,5 +166,57 @@ describe("formatSyncError", () => {
 
   it("passes through short unknown errors unchanged", () => {
     expect(formatSyncError("Something unexpected")).toBe("Something unexpected");
+  });
+});
+
+describe("classifyError — indeterminate outcomes (REQ-1.4)", () => {
+  // The Rust side returns this when a UID MOVE timed out: the server may have
+  // completed the move after the client stopped waiting. Retrying duplicates
+  // the message, which is the bug REQ-1 exists to prevent. The Rust classifier
+  // declining to retry is worthless if this side retries on its behalf.
+  const RUST_TIMEOUT_ERROR =
+    "VELO_OUTCOME_UNKNOWN:UID MOVE timed out after 30s — check your " +
+    "server settings or network connection. The move may already have " +
+    "completed on the server.";
+
+  it("marks an outcome-unknown error non-retryable despite 'timed out'", () => {
+    const result = classifyError(new Error(RUST_TIMEOUT_ERROR));
+    expect(result.isRetryable).toBe(false);
+    expect(result.type).toBe("indeterminate");
+  });
+
+  it("would otherwise be classified retryable — guards the ordering", () => {
+    // Same message without the sentinel: the network patterns claim it. This
+    // is what shipped before the prefix existed, and why the prefix check must
+    // run first.
+    const withoutSentinel = RUST_TIMEOUT_ERROR.replace(
+      "VELO_OUTCOME_UNKNOWN:",
+      "",
+    );
+    const result = classifyError(new Error(withoutSentinel));
+    expect(result.isRetryable).toBe(true);
+    expect(result.type).toBe("network");
+  });
+
+  it("strips the sentinel from the user-visible message", () => {
+    const result = classifyError(new Error(RUST_TIMEOUT_ERROR));
+    expect(result.message.startsWith("UID MOVE timed out")).toBe(true);
+    expect(result.message).not.toContain("VELO_OUTCOME_UNKNOWN");
+  });
+
+  it("pins the literal shared with move_outcome.rs", () => {
+    // If OUTCOME_UNKNOWN_PREFIX changes on either side without the other, the
+    // retry guard silently stops matching and the duplication bug returns.
+    expect(OUTCOME_UNKNOWN_PREFIX).toBe("VELO_OUTCOME_UNKNOWN:");
+  });
+
+  it("takes precedence over a status code in the server's text", () => {
+    // The message after the sentinel is free text from the server and may
+    // contain anything, including something the status-code scan would claim.
+    const result = classifyError(
+      new Error("VELO_OUTCOME_UNKNOWN:UID MOVE timed out; server said 503"),
+    );
+    expect(result.isRetryable).toBe(false);
+    expect(result.type).toBe("indeterminate");
   });
 });

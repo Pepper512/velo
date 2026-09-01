@@ -495,7 +495,9 @@ pub async fn move_messages(
         .map_err(|e| format!("SELECT {source_folder} failed: {e}"))?;
 
     // Ask the server rather than inferring MOVE support from a failure (REQ-1.1).
-    let caps = caps::fetch(session, IMAP_CMD_TIMEOUT).await;
+    // A CAPABILITY timeout aborts here: it leaves the session desynchronised,
+    // and the next thing this function would otherwise do is COPY + EXPUNGE.
+    let caps = caps::fetch(session, IMAP_CMD_TIMEOUT).await?;
 
     if caps.has_move {
         let outcome = move_outcome::classify_move(
@@ -525,8 +527,10 @@ pub async fn move_messages(
             // issue nothing further on it. The next delta sync reconciles.
             MoveOutcome::OutcomeUnknown(msg) => {
                 return Err(format!(
-                    "UID MOVE outcome unknown, not retried: {msg}. \
-                     The move may have completed on the server; the next sync will reconcile."
+                    "{}{msg}. The move may already have completed on the server. \
+                     Velo will not retry it automatically — reopen the folder to see \
+                     its current state.",
+                    move_outcome::OUTCOME_UNKNOWN_PREFIX
                 ))
             }
         }
