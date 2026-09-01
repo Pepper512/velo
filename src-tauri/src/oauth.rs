@@ -10,13 +10,30 @@ pub struct OAuthResult {
     pub state: String,
 }
 
-/// Binds to a localhost port for OAuth callback. Tries the given port first,
-/// falls back to nearby ports if taken.
+/// Ports the OAuth callback server may bind, in order.
+///
+/// Hard-coded in Rust rather than taken as an IPC argument (audit P2): the webview
+/// should not be able to make the app bind an arbitrary TCP port. Fixing the range
+/// here also removes the `port + 3` overflow that a caller could reach by passing
+/// a port near `u16::MAX`.
+///
+/// These must stay in sync with `OAUTH_CALLBACK_PORT` in
+/// `src/services/oauth/oauthFlow.ts` and `src/services/gmail/auth.ts`.
+const OAUTH_CALLBACK_PORTS: [u16; 4] = [17248, 17249, 17250, 17251];
+
+/// How long to wait for the browser's redirect request body after it connects.
+///
+/// The 300 s timeout below covers `accept()` only. Without this second timeout, a
+/// local process that connects and then sends nothing holds the command open for
+/// the lifetime of the process (audit P2).
+const OAUTH_READ_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Binds to a loopback port for the OAuth callback. Tries each port in
+/// `OAUTH_CALLBACK_PORTS` in order.
 #[tauri::command]
-pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult, String> {
-    // Try the requested port, then a few alternatives
+pub async fn start_oauth_server(state: String) -> Result<OAuthResult, String> {
     let mut listener = None;
-    for p in [port, port + 1, port + 2, port + 3] {
+    for p in OAUTH_CALLBACK_PORTS {
         match TcpListener::bind(format!("127.0.0.1:{}", p)).await {
             Ok(l) => {
                 listener = Some(l);
@@ -43,11 +60,18 @@ pub async fn start_oauth_server(port: u16, state: String) -> Result<OAuthResult,
     .map_err(|_| "OAuth timed out — please try again".to_string())?
     .map_err(|e| format!("Failed to accept: {}", e))?;
 
-    // Read the HTTP request
+    // Read the HTTP request. The accept timeout above does not cover this read, so
+    // a connection that opens and stays silent would otherwise hang the command
+    // forever (audit P2).
     let mut buf = vec![0u8; 4096];
-    let n = stream
-        .read(&mut buf)
+    let n = tokio::time::timeout(OAUTH_READ_TIMEOUT, stream.read(&mut buf))
         .await
+        .map_err(|_| {
+            format!(
+                "OAuth callback connected but sent nothing within {}s — please try again",
+                OAUTH_READ_TIMEOUT.as_secs()
+            )
+        })?
         .map_err(|e| format!("Failed to read: {}", e))?;
     let request = String::from_utf8_lossy(&buf[..n]);
 
@@ -124,17 +148,31 @@ fn parse_query_string(path: &str) -> HashMap<String, String> {
     params
 }
 
+/// Value of a single ASCII hex digit, or `None` if it is not one.
+fn hex_value(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
+}
+
+/// Percent-decode a query-string value.
+///
+/// Works entirely on bytes. The previous implementation sliced the `&str` as
+/// `&s[i + 1..i + 3]`, which panics whenever those indices are not UTF-8 character
+/// boundaries — `?code=%€x` was enough to crash the command mid-sign-in, *before*
+/// the CSRF `state` comparison could run (audit P2). Malformed escapes are now left
+/// as literal text, which is what every lenient decoder does.
 fn urlencoding_decode(s: &str) -> String {
-    let mut result = Vec::with_capacity(s.len());
     let bytes = s.as_bytes();
+    let mut result = Vec::with_capacity(bytes.len());
     let mut i = 0;
     while i < bytes.len() {
         if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(byte) = u8::from_str_radix(
-                &s[i + 1..i + 3],
-                16,
-            ) {
-                result.push(byte);
+            if let (Some(hi), Some(lo)) = (hex_value(bytes[i + 1]), hex_value(bytes[i + 2])) {
+                result.push(hi * 16 + lo);
                 i += 3;
                 continue;
             }
@@ -147,6 +185,127 @@ fn urlencoding_decode(s: &str) -> String {
         i += 1;
     }
     String::from_utf8(result).unwrap_or_else(|_| s.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------- urlencoding_decode (audit P2: reachable panic) ----------
+
+    #[test]
+    fn decode_handles_valid_escapes() {
+        assert_eq!(urlencoding_decode("%2F"), "/");
+        assert_eq!(urlencoding_decode("%2f"), "/");
+        assert_eq!(urlencoding_decode("a%20b"), "a b");
+        assert_eq!(urlencoding_decode("a+b"), "a b");
+        assert_eq!(urlencoding_decode("4%2F0AY0e-g7"), "4/0AY0e-g7");
+    }
+
+    #[test]
+    fn decode_does_not_panic_on_non_char_boundary() {
+        // The regression this test exists for. `€` occupies bytes 1..=3, so the old
+        // `&s[i + 1..i + 3]` split it and panicked, taking down the OAuth command
+        // before the CSRF state check at the call site could run.
+        assert_eq!(urlencoding_decode("%€x"), "%€x");
+    }
+
+    #[test]
+    fn decode_leaves_malformed_escapes_alone() {
+        for input in ["%", "%2", "%zz", "%g0", "abc%", "%%", "100%"] {
+            // The contract is only "returns without panicking"; assert the lenient
+            // behaviour too so a future rewrite has to be deliberate.
+            assert_eq!(urlencoding_decode(input), input, "input {input:?}");
+        }
+    }
+
+    #[test]
+    fn decode_survives_invalid_utf8_result() {
+        // %FF is not valid UTF-8 on its own; we fall back to the original text
+        // rather than panicking or silently producing replacement characters.
+        assert_eq!(urlencoding_decode("%FF"), "%FF");
+    }
+
+    // ---------- parse_auth_code_and_state ----------
+
+    #[test]
+    fn parses_code_and_state_from_a_real_request_line() {
+        let request = "GET /?code=4%2F0AY0e-g7&state=xyz123 HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n";
+        let (code, state) = parse_auth_code_and_state(request).unwrap();
+        assert_eq!(code, "4/0AY0e-g7");
+        assert_eq!(state, "xyz123");
+    }
+
+    #[test]
+    fn surfaces_provider_errors() {
+        let request = "GET /?error=access_denied HTTP/1.1\r\n\r\n";
+        let err = parse_auth_code_and_state(request).unwrap_err();
+        assert!(err.contains("access_denied"), "got {err}");
+    }
+
+    #[test]
+    fn rejects_requests_without_code_or_state() {
+        for request in [
+            "GET /?state=xyz HTTP/1.1\r\n\r\n",
+            "GET /?code=abc HTTP/1.1\r\n\r\n",
+            "GET / HTTP/1.1\r\n\r\n",
+            "",
+        ] {
+            assert!(
+                parse_auth_code_and_state(request).is_err(),
+                "should reject {request:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_escape_in_a_redirect_does_not_panic() {
+        // End-to-end version of the panic case, through the real parse path.
+        let request = "GET /?code=%€x&state=%E0 HTTP/1.1\r\n\r\n";
+        let parsed = parse_auth_code_and_state(request);
+        assert!(parsed.is_ok(), "should parse without panicking");
+    }
+
+    // ---------- read timeout ----------
+
+    /// A client that connects and then says nothing must not hold the reader open
+    /// forever. Exercises the same `timeout(OAUTH_READ_TIMEOUT, read)` shape as
+    /// `start_oauth_server`, against a real loopback socket, with a short deadline
+    /// so the test finishes quickly.
+    #[tokio::test]
+    async fn stalled_connection_times_out_instead_of_hanging() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Connect, then hold the socket open without writing anything.
+        let client = tokio::spawn(async move {
+            let stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            tokio::time::sleep(Duration::from_secs(30)).await;
+            drop(stream);
+        });
+
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut buf = vec![0u8; 4096];
+        let result = tokio::time::timeout(Duration::from_millis(250), stream.read(&mut buf)).await;
+
+        assert!(
+            result.is_err(),
+            "a silent client should hit the read timeout, got {result:?}"
+        );
+        client.abort();
+    }
+
+    // ---------- port range ----------
+
+    #[test]
+    fn callback_ports_are_contiguous_and_cannot_overflow() {
+        assert_eq!(OAUTH_CALLBACK_PORTS[0], 17248);
+        for pair in OAUTH_CALLBACK_PORTS.windows(2) {
+            assert_eq!(pair[1], pair[0] + 1);
+        }
+        // The old code computed `port + 3` on a caller-supplied u16.
+        assert!(OAUTH_CALLBACK_PORTS.iter().all(|p| *p < u16::MAX - 3));
+    }
 }
 
 #[derive(Serialize, Deserialize)]

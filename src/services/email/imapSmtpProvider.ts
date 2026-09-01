@@ -414,7 +414,7 @@ export class ImapSmtpProvider implements EmailProvider {
       const imapConfig = await this.getImapConfig();
       const sentFolder =
         (await findSpecialFolder(this.accountId, "\\Sent")) ?? "Sent";
-      await imapAppendMessage(imapConfig, sentFolder, rawBase64Url, "(\\Seen)");
+      await imapAppendMessage(imapConfig, sentFolder, rawBase64Url, ["Seen"]);
     } catch (err) {
       // Non-fatal: message was sent successfully, just not copied to server Sent folder
       console.error(
@@ -518,7 +518,7 @@ export class ImapSmtpProvider implements EmailProvider {
     const draftsFolder =
       (await findSpecialFolder(this.accountId, "\\Drafts")) ?? "Drafts";
 
-    await imapAppendMessage(config, draftsFolder, rawBase64Url, "(\\Draft)");
+    await imapAppendMessage(config, draftsFolder, rawBase64Url, ["Draft"]);
 
     // IMAP APPEND does not return the new UID, so generate a pseudo draft ID
     const draftId = `imap-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;

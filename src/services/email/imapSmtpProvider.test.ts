@@ -454,7 +454,7 @@ describe("ImapSmtpProvider", () => {
         mockImapConfig,
         "Sent Items",
         rawBase64Url,
-        "(\\Seen)",
+        ["Seen"],
       );
       expect(result.id).toMatch(/^imap-sent-/);
     });
@@ -528,7 +528,7 @@ describe("ImapSmtpProvider", () => {
         mockImapConfig,
         "INBOX.Drafts",
         "base64data",
-        "(\\Draft)",
+        ["Draft"],
       );
       expect(result.draftId).toMatch(/^imap-draft-/);
     });
@@ -543,7 +543,7 @@ describe("ImapSmtpProvider", () => {
         mockImapConfig,
         "Drafts",
         "base64data",
-        "(\\Draft)",
+        ["Draft"],
       );
     });
   });
@@ -570,7 +570,7 @@ describe("ImapSmtpProvider", () => {
         mockImapConfig,
         "Drafts",
         "newBase64data",
-        "(\\Draft)",
+        ["Draft"],
       );
       expect(result.draftId).toMatch(/^imap-draft-/);
     });

@@ -78,14 +78,16 @@ jobs:
         run: cargo build --locked
       - name: Clippy
         working-directory: src-tauri
-        # -D warnings with three named allowances = the pre-existing debt
-        # recorded in docs/decisions/EXCEPTIONS.md EX-002. Any *new* lint fails.
-        run: >
-          cargo clippy --all-targets --locked --
-          -D warnings
-          -A clippy::too_many_arguments
-          -A clippy::question_mark
-          -A clippy::unnecessary_map_or
+        # No allowances. The three pre-existing lints that EX-002 covered were
+        # fixed in Batch A, so any warning is now a failure.
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Release-profile check (dev-only commands must compile out)
+        working-directory: src-tauri
+        # `open_devtools` and `imap_raw_fetch_diagnostic` live behind
+        # `#[cfg(debug_assertions)]` and are absent from the release handler list
+        # (audit P3). That arm is only type-checked when debug assertions are off,
+        # so check it explicitly — otherwise a break there would ship unnoticed.
+        run: cargo check --release --locked
       - name: Rust tests
         working-directory: src-tauri
         run: cargo test --locked

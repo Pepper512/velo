@@ -222,13 +222,16 @@ export async function imapDeleteMessages(
 /**
  * Append a raw message to a folder (for saving sent mail or drafts).
  * @param rawMessage - The full email message encoded as base64url.
- * @param flags - Optional IMAP flags string (e.g. "(\\Seen)" or "(\\Draft)").
+ * @param flags - Optional IMAP flag names, with or without the leading backslash
+ *   (e.g. ["Seen"], ["Draft"]). Rendering to the wire form `(\\Seen)` happens in
+ *   Rust against an allowlist, so an unvalidated flag string never reaches the
+ *   IMAP session (audit P1).
  */
 export async function imapAppendMessage(
   config: ImapConfig,
   folder: string,
   rawMessage: string,
-  flags?: string
+  flags?: string[]
 ): Promise<void> {
   return invoke<void>('imap_append_message', { config, folder, flags: flags ?? null, rawMessage });
 }
@@ -308,12 +311,21 @@ export async function imapSearchFolder(
 
 /**
  * Raw IMAP diagnostic: bypasses async-imap to show raw server responses.
+ *
+ * **Development builds only.** The Rust command is gated on
+ * `#[cfg(debug_assertions)]` (audit P3) because the transcript it returns is a live
+ * authenticated IMAP session and can contain credential material echoed back by the
+ * server. In a release build the command is not registered at all, so fail with a
+ * clear message here rather than surfacing Tauri's "command not found".
  */
 export async function imapRawFetchDiagnostic(
   config: ImapConfig,
   folder: string,
   uidRange: string,
 ): Promise<string> {
+  if (!import.meta.env.DEV) {
+    throw new Error('The raw IMAP diagnostic is only available in development builds.');
+  }
   return invoke<string>('imap_raw_fetch_diagnostic', { config, folder, uidRange });
 }
 

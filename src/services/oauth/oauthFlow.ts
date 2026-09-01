@@ -92,7 +92,9 @@ export async function startProviderOAuthFlow(
   const authUrl = `${provider.authUrl}?${new URLSearchParams(params).toString()}`;
 
   const serverPromise = invoke<OAuthServerResult>("start_oauth_server", {
-    port: OAUTH_CALLBACK_PORT,
+    // The port range is hard-coded in src-tauri/src/oauth.rs (audit P2) so the
+    // webview cannot make the app bind an arbitrary port. OAUTH_CALLBACK_PORT
+    // below must stay in sync with OAUTH_CALLBACK_PORTS[0] there.
     state: oauthState,
   });
 
