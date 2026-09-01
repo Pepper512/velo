@@ -60,7 +60,7 @@ below is what the workflow enforces; anything "honor-system" is in
 | IPC-boundary + LLM-output validation tests (replacement gates) | — | not yet (audit P1, P10) |
 | Migration pairing | N/A — SQLite, no down-migrations (ADR-000/P6) | N/A, documented |
 | Preview deploy | N/A — desktop; release builds via upstream `release.yml` | N/A |
-| Branch protection on `main` | required check `ci`, linear history, history rewrites blocked | set after first green run |
+| Branch protection on `main` | 5 required checks (frontend ×2, rust, npm audit, secret scan), strict up-to-date, linear history, admins included, deletions blocked, conversation resolution required; no required reviews (EX-005) | set 2026-09-01 after PR #1's first green run |
 
 ## Decisions
 

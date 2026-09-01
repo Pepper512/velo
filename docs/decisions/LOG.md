@@ -59,3 +59,7 @@
   only; `cargo check --locked` green) cleared 13 of 15 RustSec advisories incl. both `quick-xml`
   (via `plist`) and `h2`. Remaining `rkyv`/`rsa` are lockfile-only → EX-006. Own commit so it can be
   reverted independently if CI on any platform objects.
+- **2026-09-01** — PR #1 (`chore/ci-baseline`) first run: all 5 jobs green (rust 6m21s). Default-branch
+  protection enabled: the 5 job names as required checks (strict), linear history, enforce for admins,
+  deletions blocked, conversation resolution required, required reviews off (EX-005). Repo
+  `allowed_actions` = GitHub-owned + 6 pinned third-party actions. **EX-001 closes on merge of PR #1.**
