@@ -392,8 +392,16 @@
     acknowledgement from `velo-build-43` recorded on the PR *before* code — given for the SDK
     version of the plan, **re-requested for this amendment**; EX-005 review by `velo-build-43`;
     Gemini cross-vendor review; and this line, so Jim's retroactive review lands on it first.
-  - **F-4 — not decided.** Rev 5 (vault `SPEC-F-4_Vanished-UID-Reconciliation.md`) is to be read in
-    full within the window before any decision is made in Jim's name; it builds after E2 regardless,
-    so nothing is lost by deciding it last.
+  - **F-4 — read in full, deliberately left to Jim.** Rev 5 of
+    `SPEC-F-4_Vanished-UID-Reconciliation.md` was read end to end within the window. **Proxy
+    recommendation: approve as written.** Five revisions, two vendors, all eleven findings adopted,
+    the three rev-5 text fixes re-checked clean, and the design fails toward "keep" on every
+    ambiguity (two-pass confirmation, positive completeness attestation, batching cap, 50% stop
+    behind `ConfirmDialog`, pending-ops guard). The one sharp edge is stated rather than emergent
+    (a 10-row folder may clear fully; an 11-row folder blocks at 6 suspects). **Why not decided in
+    his name:** it builds after E2/P15, which is itself held pending Jim's direct confirmation of
+    this delegation, so F-4 cannot start inside the window whatever is decided — an agent-created
+    approval of a 4–5-day local-deletion feature would trade provenance for nothing. Nothing is
+    lost by waiting for him.
   - **Decision 4 (make `rust MSRV` a required check) — not made;** permission-gated, Jim only.
     **Until it lands, the MSRV is not enforced.**
