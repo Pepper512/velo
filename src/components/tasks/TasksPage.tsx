@@ -3,7 +3,7 @@ import {
   CheckSquare,
   Search,
   Trash2,
-  CheckCircle2,
+  CircleCheck,
 } from "lucide-react";
 import { useAccountStore } from "@/stores/accountStore";
 import { useTaskStore, type TaskGroupBy, type TaskFilterStatus } from "@/stores/taskStore";
@@ -270,7 +270,7 @@ export function TasksPage() {
             onClick={handleBulkComplete}
             className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover"
           >
-            <CheckCircle2 size={13} />
+            <CircleCheck size={13} />
             Complete
           </button>
           <button

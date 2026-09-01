@@ -6,7 +6,7 @@ import {
   parseUnsubscribeHeaders,
   type SubscriptionEntry,
 } from "@/services/unsubscribe/unsubscribeManager";
-import { MailMinus, Search, Loader2 } from "lucide-react";
+import { MailMinus, Search, LoaderCircle } from "lucide-react";
 import { formatRelativeDate } from "@/utils/date";
 
 export function SubscriptionManager() {
@@ -93,7 +93,7 @@ export function SubscriptionManager() {
   if (loading) {
     return (
       <div className="flex items-center gap-2 py-8 justify-center text-text-tertiary">
-        <Loader2 size={16} className="animate-spin" />
+        <LoaderCircle size={16} className="animate-spin" />
         <span className="text-sm">Loading subscriptions...</span>
       </div>
     );
@@ -179,7 +179,7 @@ export function SubscriptionManager() {
                   className="flex items-center gap-1 px-2.5 py-1 text-xs text-danger hover:text-danger/80 bg-bg-tertiary rounded-md border border-border-primary transition-colors disabled:opacity-50 shrink-0"
                 >
                   {isLoading ? (
-                    <Loader2 size={12} className="animate-spin" />
+                    <LoaderCircle size={12} className="animate-spin" />
                   ) : (
                     <MailMinus size={12} />
                   )}

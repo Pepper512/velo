@@ -50,7 +50,7 @@ describe("AuthBadge", () => {
     expect(badge?.className).toContain("text-warning");
   });
 
-  it("should render ShieldQuestion for unknown aggregate", () => {
+  it("should render ShieldQuestionMark for unknown aggregate", () => {
     const { container } = render(
       <AuthBadge authResults={makeAuthResults("unknown")} />,
     );

@@ -3,9 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  XCircle,
-  Loader2,
+  CircleCheck,
+  CircleX,
+  LoaderCircle,
   Server,
   Mail,
   Send,
@@ -517,7 +517,7 @@ export function AddImapAccount({
 
         {hasOAuthTokens ? (
           <div className="flex items-center gap-2 p-3 rounded-lg bg-success/10 border border-success/20">
-            <CheckCircle2 className="w-4 h-4 text-success flex-shrink-0" />
+            <CircleCheck className="w-4 h-4 text-success flex-shrink-0" />
             <div className="text-sm text-success">
               Connected as <span className="font-medium">{form.oauthEmail}</span>
             </div>
@@ -530,7 +530,7 @@ export function AddImapAccount({
           >
             {oauthConnecting ? (
               <>
-                <Loader2 className="w-4 h-4 animate-spin" />
+                <LoaderCircle className="w-4 h-4 animate-spin" />
                 Connecting...
               </>
             ) : (
@@ -821,11 +821,11 @@ export function AddImapAccount({
   const renderTestResult = (label: string, status: TestStatus) => {
     const icon =
       status.state === "testing" ? (
-        <Loader2 className="w-4 h-4 animate-spin text-accent" />
+        <LoaderCircle className="w-4 h-4 animate-spin text-accent" />
       ) : status.state === "success" ? (
-        <CheckCircle2 className="w-4 h-4 text-success" />
+        <CircleCheck className="w-4 h-4 text-success" />
       ) : status.state === "error" ? (
-        <XCircle className="w-4 h-4 text-danger" />
+        <CircleX className="w-4 h-4 text-danger" />
       ) : (
         <div className="w-4 h-4 rounded-full border-2 border-border-primary" />
       );

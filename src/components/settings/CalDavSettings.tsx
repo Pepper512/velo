@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Loader2, CheckCircle2, XCircle } from "lucide-react";
+import { LoaderCircle, CircleCheck, CircleX } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { TextField } from "@/components/ui/TextField";
 import { discoverCalDavSettings, testCalDavConnection } from "@/services/calendar/autoDiscovery";
@@ -118,7 +118,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
 
       {testResult && (
         <div className={`flex items-center gap-2 text-xs ${testResult.success ? "text-success" : "text-danger"}`}>
-          {testResult.success ? <CheckCircle2 size={14} /> : <XCircle size={14} />}
+          {testResult.success ? <CircleCheck size={14} /> : <CircleX size={14} />}
           {testResult.message}
         </div>
       )}
@@ -130,7 +130,7 @@ export function CalDavSettings({ account, onSaved }: CalDavSettingsProps) {
           onClick={handleTest}
           disabled={testing || !caldavUrl || !password}
         >
-          {testing && <Loader2 size={14} className="animate-spin" />}
+          {testing && <LoaderCircle size={14} className="animate-spin" />}
           {testing ? "Testing..." : "Test Connection"}
         </Button>
 

@@ -28,7 +28,7 @@ import {
   Mail,
   Info,
   ExternalLink,
-  Github,
+  GitBranch,
   Scale,
   Globe,
   Download,
@@ -1800,7 +1800,7 @@ function AboutTab() {
             onClick={() => openExternal("https://github.com/avihaymenahem/velo")}
             className="flex items-center gap-3 w-full px-4 py-2.5 rounded-lg bg-bg-secondary hover:bg-bg-hover transition-colors text-left"
           >
-            <Github size={16} className="text-text-tertiary shrink-0" />
+            <GitBranch size={16} className="text-text-tertiary shrink-0" />
             <div className="min-w-0 flex-1">
               <span className="text-sm text-text-primary">GitHub Repository</span>
               <p className="text-xs text-text-tertiary">avihaymenahem/velo</p>

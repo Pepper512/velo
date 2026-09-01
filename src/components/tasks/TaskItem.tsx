@@ -1,7 +1,7 @@
 import { useState, useCallback } from "react";
 import {
   Circle,
-  CheckCircle2,
+  CircleCheck,
   ChevronRight,
   ChevronDown,
   Trash2,
@@ -102,7 +102,7 @@ export function TaskItem({
         {/* Checkbox */}
         <button onClick={handleToggle} className="mt-0.5 shrink-0">
           {task.is_completed ? (
-            <CheckCircle2 size={16} className="text-success" />
+            <CircleCheck size={16} className="text-success" />
           ) : (
             <Circle size={16} className={PRIORITY_COLORS[task.priority]} />
           )}

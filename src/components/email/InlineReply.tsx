@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Reply, ReplyAll, Forward, Send, Maximize2, RotateCcw, X, Loader2 } from "lucide-react";
+import { Reply, ReplyAll, Forward, Send, Maximize2, RotateCcw, X, LoaderCircle } from "lucide-react";
 import { useAccountStore } from "@/stores/accountStore";
 import { useComposerStore } from "@/stores/composerStore";
 import { useUIStore } from "@/stores/uiStore";
@@ -383,7 +383,7 @@ export function InlineReply({ thread, messages, accountId, noReply, onSent }: In
         {autoDraftLoading && (
           <div className="absolute inset-0 flex items-center justify-center bg-bg-primary/60 backdrop-blur-[1px]">
             <div className="flex items-center gap-2 text-xs text-text-secondary">
-              <Loader2 size={14} className="animate-spin" />
+              <LoaderCircle size={14} className="animate-spin" />
               Generating draft...
             </div>
           </div>

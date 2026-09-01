@@ -27,7 +27,7 @@ import {
   Tag,
   ChevronDown,
   ChevronUp,
-  HelpCircle,
+  CircleQuestionMark,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
@@ -39,7 +39,7 @@ import {
   MailOpen,
   Paperclip,
   FolderSearch,
-  Loader2,
+  LoaderCircle,
   type LucideIcon,
 } from "lucide-react";
 import { useTaskStore } from "@/stores/taskStore";
@@ -382,7 +382,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                 {() => (
                   <>
                     {isSyncingFolder === item.id ? (
-                      <Loader2 size={18} className="shrink-0 animate-spin text-accent" />
+                      <LoaderCircle size={18} className="shrink-0 animate-spin text-accent" />
                     ) : (
                       <Icon size={18} className="shrink-0" />
                     )}
@@ -628,7 +628,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
           }`}
           title="Help"
         >
-          <HelpCircle size={18} className="shrink-0" />
+          <CircleQuestionMark size={18} className="shrink-0" />
         </button>
         <button
           onClick={toggleSidebar}

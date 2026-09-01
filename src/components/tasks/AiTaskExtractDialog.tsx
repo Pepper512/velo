@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { X, Loader2, Sparkles, Calendar, Flag } from "lucide-react";
+import { X, LoaderCircle, Sparkles, Calendar, Flag } from "lucide-react";
 import { extractTask } from "@/services/ai/taskExtraction";
 import { insertTask, getIncompleteTaskCount } from "@/services/db/tasks";
 import type { TaskPriority } from "@/services/db/tasks";
@@ -107,7 +107,7 @@ export function AiTaskExtractDialog({
         <div className="px-5 py-4 space-y-4">
           {loading ? (
             <div className="flex flex-col items-center justify-center py-8 gap-3">
-              <Loader2 size={24} className="animate-spin text-accent" />
+              <LoaderCircle size={24} className="animate-spin text-accent" />
               <p className="text-sm text-text-secondary">Extracting task from email...</p>
             </div>
           ) : error && !title ? (
