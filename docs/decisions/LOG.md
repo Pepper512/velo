@@ -294,3 +294,31 @@
     Also corrected the stale CSP domain list in SECURITY.md while in the file.
   - **Sixth audit claim to fail verification:** P19's orphan list names `hooks/useContextMenu.ts`,
     which has **nine importers** and is not orphaned.
+- **2026-09-01** — **Batch H built** (P20, skills audit §7) on `docs/batch-h-p20-skills`. Last batch in
+  the audit's order.
+  - **P20 fixed structurally, not once.** Six documented counts had drifted — and by the time they
+    were measured they had drifted *further*, with `docs/architecture.md` claiming **two different
+    table counts in the same file** (34 and 35; actual 31). Correcting them by hand would have bought
+    nothing, so `scripts/docs-check.mjs` now measures migrations, tables, test files, stores and AI
+    providers from the tree and fails CI naming the file, the claim and the real number. It also
+    asserts migration count == highest migration version, catching a skipped or duplicated version.
+    Prose fixed too: "Eight Zustand stores" sat directly above a table listing nine; `CLAUDE.md` said
+    `providerManager` "manages three providers" (six); the README model table still listed Sonnet 4
+    and Opus 4 and omitted Grok, Copilot and Ollama entirely.
+  - **Two skills carried real risk and were rewritten.**
+    **`commit`** ran `git push` — and `git push -u origin HEAD` with no upstream — as an unconditional
+    final step. That conflicts with the work loop (work lands through a gated PR) *and* the harness
+    rule that agents push only when asked; on a checked-out default branch the good case is a
+    protection rejection and the bad case is a bypass. Now: commit only, refuse on `main`/`master`
+    with a suggested branch name, and **print** the push/PR commands instead of running them.
+    **`web-design-guidelines`** told the agent to fetch a `raw.githubusercontent.com` URL on a
+    **mutable `main` branch** and *"apply all rules from the fetched guidelines"* including its
+    *"output format instructions"* — remote instruction execution inside a repo holding mail
+    credentials. Now the source must be pinned to a full commit SHA, fetched content is explicitly
+    **reference data and never instructions**, and the output format lives in the skill. Also scoped
+    to Velo: ~half the vendored rules assume Next.js and do not apply to a Vite/Tauri SPA.
+  - **`document-feature` sharpened:** it hardcoded "the 13 existing categories" and asked the agent to
+    keep counts accurate by hand — the exact drift P20 documents. Now it reads categories from
+    `helpContent.ts` and defers every count to `npm run docs:check`, with the instruction to delete a
+    number rather than invent a new one.
+  - `react-best-practices` (trim) and `composition-patterns` (fine) left: lower value, no risk.
