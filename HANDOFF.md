@@ -4,9 +4,14 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main` @ **`a230f3a`** (#30, docs). **Last commit that changed code: `0d0b373`** (#29,
-  dependency batch B). Docs-only commits above it are wrap-ups and are expected.
+- **Branch:** `main` @ **`99b691f`** (#31, docs). **Last commit that changed code: `0d0b373`** (#29,
+  dependency batch B). Docs-only commits above it are wrap-ups and are expected — check line numbers
+  against the **code** pin, never this one.
 - **Open PRs:** none. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
+  A stale local branch `docs/handoff-repin-5c545f9` remains from **PR #28, closed deliberately**:
+  it refreshed this same file against the same base as #31 and would have clobbered it. Its one
+  unique fact (F-5 as a live defect) was folded into #31 before closing. Nothing to recover; delete
+  the branch whenever convenient.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 - **⚠️ Two agent sessions work this repo.** The Opus session (`velo-build-6d`) works the main
@@ -15,6 +20,9 @@
   `docs/handoff-refresh-eod` or later). Trust `git worktree list`, not the path; do not touch the
   other session's tree. The worktree is gitignored but **not vitest-excluded**: a bare
   `npx vitest run` at the repo root globs into it — always pass the excludes in §1.
+  **The Fable seat was restarted at the end of 2026-09-01**, so do not assume it is live or reachable
+  at a remembered address: use `ListAgents` to find the current one, and treat its queue (dependency
+  PRs C→D) as unowned until a session claims it.
 - **State:** frontend **1,822** tests (152 files) · Rust **56** · npm audit **0 — full tree AND
   prod** · 0 service import cycles · EX-001/002/004 closed; EX-003/005/006/007 open; **EX-008 was
   deliberately NOT created** (every dev-graph advisory was fixable in-range — fix beats exception).
@@ -185,7 +193,7 @@ number, including our own briefs' — and read outputs to the end before countin
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ `a230f3a` (last code:
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ `99b691f` (last code:
 `0d0b373`, #29) · clean · CI green · npm audit **0 full-tree** · 152 files / 1,822 tests / 56 Rust.
 
 **Next action — four decisions wait on Jim; all work behind them is ready:**
