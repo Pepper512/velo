@@ -147,11 +147,19 @@ export async function getPendingOpsForResource(
 export async function compactQueue(accountId?: string): Promise<number> {
   const db = await getDb();
 
-  // Get all pending ops grouped by resource
-  const filter = accountId ? `AND account_id = '${accountId}'` : "";
-  const ops = await db.select<PendingOperation[]>(
-    `SELECT * FROM pending_operations WHERE status = 'pending' ${filter} ORDER BY created_at ASC`,
-  );
+  // Get all pending ops grouped by resource.
+  // Parameterised like its siblings above (audit P8): this was the only one of
+  // 231 query calls in services/db that interpolated a value into SQL. Low
+  // exploitability -- accountId is an internally generated UUID -- but it is the
+  // one site a future caller could reach with something else.
+  const ops = accountId
+    ? await db.select<PendingOperation[]>(
+        `SELECT * FROM pending_operations WHERE status = 'pending' AND account_id = $1 ORDER BY created_at ASC`,
+        [accountId],
+      )
+    : await db.select<PendingOperation[]>(
+        `SELECT * FROM pending_operations WHERE status = 'pending' ORDER BY created_at ASC`,
+      );
 
   // Group by resource_id
   const byResource = new Map<string, PendingOperation[]>();

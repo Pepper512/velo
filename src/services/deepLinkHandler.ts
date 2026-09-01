@@ -35,7 +35,11 @@ export async function initDeepLinkHandler(): Promise<() => void> {
   try {
     const unlistenOpenUrl = await onOpenUrl((urls) => {
       for (const url of urls) {
-        handleUrl(url);
+        // `handleUrl` is async; without a catch a rejection here is unhandled
+        // and, in a packaged build, invisible (audit P7).
+        void handleUrl(url).catch((err: unknown) => {
+          console.error("Failed to handle mailto: deep link:", err);
+        });
       }
     });
     cleanups.push(unlistenOpenUrl);
@@ -48,7 +52,9 @@ export async function initDeepLinkHandler(): Promise<() => void> {
     const unlistenArgs = await listen<string[]>("single-instance-args", (event) => {
       for (const arg of event.payload) {
         if (arg.startsWith("mailto:")) {
-          handleUrl(arg);
+          void handleUrl(arg).catch((err: unknown) => {
+            console.error("Failed to handle forwarded mailto: argument:", err);
+          });
         }
       }
     });

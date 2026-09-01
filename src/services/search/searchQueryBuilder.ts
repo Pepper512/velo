@@ -9,6 +9,28 @@ interface BuiltQuery {
  * Build a parameterized SQL query from a parsed search query.
  * Returns { sql, params } for safe execution.
  */
+/**
+ * Quote free text for an FTS5 `MATCH` expression (audit P8).
+ *
+ * FTS5 `MATCH` takes a *query language*, not a literal string, so parameter
+ * binding does not protect it -- the bound value is still parsed as a query.
+ * Typing `foo"` in the search box therefore raised `fts5: syntax error` at
+ * runtime, invisible to the suite because SQLite was always mocked.
+ *
+ * Every token is wrapped in double quotes, which makes it a literal phrase, and
+ * embedded quotes are doubled per the FTS5 escaping rule. This deliberately
+ * disables the FTS5 operators (`NEAR`, `*`, `OR`, `-`, column filters) for free
+ * text: users type search terms, not query syntax, and the operators Velo means
+ * to support are its own (`from:`, `is:`, ...) which are parsed separately.
+ */
+export function escapeFtsQuery(freeText: string): string {
+  return freeText
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => `"${token.replace(/"/g, '""')}"`)
+    .join(" ");
+}
+
 export function buildSearchQuery(
   parsed: ParsedSearchQuery,
   accountId?: string,
@@ -28,7 +50,7 @@ export function buildSearchQuery(
     needsFts = true;
     fromClause = "FROM messages_fts JOIN messages m ON m.rowid = messages_fts.rowid";
     whereClauses.push(`messages_fts MATCH $${paramIdx}`);
-    params.push(parsed.freeText);
+    params.push(escapeFtsQuery(parsed.freeText));
     paramIdx++;
   }
 
