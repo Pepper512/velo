@@ -775,13 +775,38 @@ const MIGRATIONS = [
     description: "Accept self-signed certificates for IMAP/SMTP",
     sql: `ALTER TABLE accounts ADD COLUMN accept_invalid_certs INTEGER DEFAULT 0;`,
   },
+  {
+    version: 24,
+    description:
+      "Force IMAP attachment resync with corrected part IDs (was an unguarded post-migration repair)",
+    // Audit P6. This ran as a settings-flag special case *after* the migration
+    // loop and **outside any transaction**: three destructive statements, then a
+    // separate flag write. Any interruption between them left the flag unset, so
+    // the deletes ran again on every subsequent launch — a self-inflicted forced
+    // resync loop that nothing logged as abnormal.
+    //
+    // As a numbered migration it inherits the loop's BEGIN/COMMIT, so the deletes
+    // and the "this ran" record commit together or not at all, and the record
+    // lives in the `_migrations` ledger instead of a settings key.
+    //
+    // The `imap_attachment_repair_v1` settings flag is still written, and the
+    // statements are still guarded on `provider = 'imap'`, so a client that
+    // already performed the old repair is unaffected: the deletes match the same
+    // rows (now empty) and the flag write is idempotent.
+    sql: `
+      DELETE FROM attachments WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap');
+      DELETE FROM folder_sync_state WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap');
+      UPDATE accounts SET history_id = NULL WHERE provider = 'imap';
+      INSERT OR REPLACE INTO settings (key, value) VALUES ('imap_attachment_repair_v1', '1');
+    `,
+  },
 ];
 
 /**
  * Split a SQL string into individual statements, correctly handling
  * BEGIN...END blocks (e.g. inside CREATE TRIGGER) that contain semicolons.
  */
-function splitStatements(sql: string): string[] {
+export function splitStatements(sql: string): string[] {
   const statements: string[] = [];
   let current = "";
   let depth = 0;
@@ -888,37 +913,21 @@ export async function runMigrations(): Promise<void> {
       );
       await db.execute("COMMIT");
     } catch (err) {
-      await db.execute("ROLLBACK").catch(() => {});
+      // A failed ROLLBACK is a corrupt-state signal, not noise: the migration
+      // failed *and* the database is now stuck mid-transaction. Swallowing it
+      // (the previous `.catch(() => {})`) hid the more serious of the two
+      // problems. Surface it alongside the original error rather than instead of
+      // it — the original is what explains why we are here.
+      await db.execute("ROLLBACK").catch((rollbackErr: unknown) => {
+        console.error(
+          `Migration v${migration.version} failed AND its ROLLBACK failed — ` +
+            `the database may be left mid-transaction:`,
+          rollbackErr,
+        );
+      });
       throw err;
     }
   }
 
   console.log("All migrations applied.");
-
-  // One-time repair: force IMAP attachment resync with corrected Rust binary.
-  // Migrations 20/21 may have run before the Rust fix was compiled in.
-  // This uses a settings flag so it only runs once.
-  const repairFlag = await db.select<{ value: string }[]>(
-    "SELECT value FROM settings WHERE key = 'imap_attachment_repair_v1'",
-  );
-  if (repairFlag.length === 0) {
-    const imapAccounts = await db.select<{ id: string }[]>(
-      "SELECT id FROM accounts WHERE provider = 'imap'",
-    );
-    if (imapAccounts.length > 0) {
-      console.log("[repair] Forcing IMAP attachment resync with corrected part IDs...");
-      await db.execute(
-        "DELETE FROM attachments WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap')",
-      );
-      await db.execute(
-        "DELETE FROM folder_sync_state WHERE account_id IN (SELECT id FROM accounts WHERE provider = 'imap')",
-      );
-      await db.execute(
-        "UPDATE accounts SET history_id = NULL WHERE provider = 'imap'",
-      );
-    }
-    await db.execute(
-      "INSERT OR REPLACE INTO settings (key, value) VALUES ('imap_attachment_repair_v1', '1')",
-    );
-  }
 }
