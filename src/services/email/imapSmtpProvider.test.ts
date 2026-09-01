@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ImapSmtpProvider } from "./imapSmtpProvider";
+import { useUIStore } from "@/stores/uiStore";
 
 // Mock all external dependencies
 vi.mock("../db/accounts", () => ({
@@ -216,7 +217,7 @@ describe("ImapSmtpProvider", () => {
   describe("archive", () => {
     it("moves messages to Archive folder", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Archive");
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.archive("thread-1", [
         "imap-acc-1-INBOX-100",
@@ -234,7 +235,7 @@ describe("ImapSmtpProvider", () => {
 
     it("skips messages already in Archive", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Archive");
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.archive("thread-1", ["imap-acc-1-Archive-100"]);
 
@@ -243,7 +244,7 @@ describe("ImapSmtpProvider", () => {
 
     it("falls back to 'Archive' when special folder not found", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue(null);
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.archive("thread-1", ["imap-acc-1-INBOX-100"]);
 
@@ -259,7 +260,7 @@ describe("ImapSmtpProvider", () => {
   describe("trash", () => {
     it("moves messages to Trash folder", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Deleted Items");
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.trash("thread-1", ["imap-acc-1-INBOX-100"]);
 
@@ -275,7 +276,7 @@ describe("ImapSmtpProvider", () => {
 
   describe("permanentDelete", () => {
     it("calls imapDeleteMessages for each folder group", async () => {
-      vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
 
       await provider.permanentDelete("thread-1", [
         "imap-acc-1-INBOX-100",
@@ -345,7 +346,7 @@ describe("ImapSmtpProvider", () => {
   describe("spam", () => {
     it("moves to Junk when isSpam=true", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Junk E-Mail");
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.spam("thread-1", ["imap-acc-1-INBOX-100"], true);
 
@@ -359,7 +360,7 @@ describe("ImapSmtpProvider", () => {
 
     it("moves to INBOX when isSpam=false", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Junk");
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.spam("thread-1", ["imap-acc-1-Junk-100"], false);
 
@@ -374,7 +375,7 @@ describe("ImapSmtpProvider", () => {
 
   describe("moveToFolder", () => {
     it("moves messages to specified folder", async () => {
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.moveToFolder("thread-1", ["imap-acc-1-INBOX-100"], "Work");
 
@@ -387,7 +388,7 @@ describe("ImapSmtpProvider", () => {
     });
 
     it("skips messages already in target folder", async () => {
-      vi.mocked(imapMoveMessages).mockResolvedValue(undefined);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
 
       await provider.moveToFolder(
         "thread-1",
@@ -551,7 +552,7 @@ describe("ImapSmtpProvider", () => {
   describe("updateDraft", () => {
     it("deletes old draft and creates new one", async () => {
       vi.mocked(findSpecialFolder).mockResolvedValue("Drafts");
-      vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
       vi.mocked(imapAppendMessage).mockResolvedValue(undefined);
 
       const result = await provider.updateDraft(
@@ -578,7 +579,7 @@ describe("ImapSmtpProvider", () => {
 
   describe("deleteDraft", () => {
     it("deletes draft by parsed message ID", async () => {
-      vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
 
       await provider.deleteDraft("imap-acc-1-Drafts-500");
 
@@ -686,7 +687,7 @@ describe("ImapSmtpProvider", () => {
 
   describe("groupByFolder (via actions)", () => {
     it("groups messages from different folders", async () => {
-      vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
 
       await provider.permanentDelete("thread-1", [
         "imap-acc-1-INBOX-100",
@@ -708,7 +709,7 @@ describe("ImapSmtpProvider", () => {
     });
 
     it("handles folder names with hyphens", async () => {
-      vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
 
       await provider.permanentDelete("thread-1", [
         "imap-acc-1-INBOX.Sub-Folder-100",
@@ -722,13 +723,61 @@ describe("ImapSmtpProvider", () => {
     });
 
     it("skips invalid message IDs", async () => {
-      vi.mocked(imapDeleteMessages).mockResolvedValue(undefined);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
       const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
       await provider.permanentDelete("thread-1", ["invalid-id"]);
 
       expect(imapDeleteMessages).not.toHaveBeenCalled();
       spy.mockRestore();
+    });
+  });
+
+  // ---- REQ-4.2/4.3: a degraded delete must say so ----
+  describe("non-UIDPLUS servers surface a notice", () => {
+    // On a server without UIDPLUS there is no way to expunge a specific UID
+    // set, so Velo flags the messages and stops. That is not a failure, but it
+    // is not the completed deletion the UI would otherwise imply.
+    beforeEach(() => {
+      useUIStore.setState({ notices: [] });
+    });
+
+    it("warns when an archive left the mail on the server", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false });
+
+      await provider.archive("t1", ["imap-acc-1-INBOX-1"]);
+
+      const notices = useUIStore.getState().notices;
+      expect(notices).toHaveLength(1);
+      expect(notices[0]!.text).toContain("Marked for deletion");
+      expect(notices[0]!.text).toContain("INBOX");
+    });
+
+    it("warns when a permanent delete left the mail on the server", async () => {
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: false });
+
+      await provider.permanentDelete("t1", ["imap-acc-1-INBOX-1"]);
+
+      expect(useUIStore.getState().notices).toHaveLength(1);
+    });
+
+    it("stays silent when the messages were actually removed", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true });
+
+      await provider.archive("t1", ["imap-acc-1-INBOX-1"]);
+
+      expect(useUIStore.getState().notices).toHaveLength(0);
+    });
+
+    it("does not turn the degraded case into a failure", async () => {
+      // expunged:false is a partial success. Throwing here would revert the
+      // optimistic UI update and tell the user the archive failed, when the
+      // message really is in the destination folder.
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false });
+
+      await expect(
+        provider.archive("t1", ["imap-acc-1-INBOX-1"]),
+      ).resolves.toBeUndefined();
     });
   });
 });

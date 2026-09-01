@@ -481,15 +481,68 @@ pub async fn set_flags(
         .await?
 }
 
+/// Flag `uid_set` as `\Deleted` and remove **only those messages**.
+///
+/// This is the whole of REQ-2, in one place so both `move_messages` and
+/// `delete_messages` cannot drift apart on it.
+///
+/// The bug being fixed: both used to call `session.expunge()`, which is
+/// untargeted — it permanently removes *every* message in the selected folder
+/// carrying `\Deleted`, including flags set by another client, by another
+/// session of this client, or left behind by an earlier partial failure of this
+/// same function. async-imap's own documentation for that call warns it risks
+/// "the unintended removal of some messages".
+///
+/// Returns whether the messages were actually expunged. `false` is not a
+/// failure: on a server without `UIDPLUS` there is no way to expunge a specific
+/// UID set, and Velo declines to expunge at all rather than removing mail the
+/// user did not select (Decision 1(a)). The caller surfaces that to the user.
+async fn flag_and_expunge(
+    session: &mut ImapSession,
+    uid_set: &str,
+    caps: caps::Caps,
+) -> Result<bool, String> {
+    net::with_timeout(IMAP_CMD_TIMEOUT, "UID STORE +Deleted", async {
+        let store_stream = session
+            .uid_store(uid_set, "+FLAGS (\\Deleted)")
+            .await
+            .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
+        let _: Vec<_> = store_stream.collect().await;
+        Ok::<_, String>(())
+    })
+    .await??;
+
+    if !caps.has_uidplus {
+        // REQ-2.2. The messages stay flagged; a later expunge by the user or
+        // the server removes them. Nothing is destroyed that was not selected.
+        return Ok(false);
+    }
+
+    // REQ-2.1/2.3. A failure here is reported as a failure — it never degrades
+    // to a bare EXPUNGE. After this change there is no path in this codebase
+    // that sends an untargeted EXPUNGE.
+    net::with_timeout(IMAP_CMD_TIMEOUT, "UID EXPUNGE", async {
+        let expunge_stream = session
+            .uid_expunge(uid_set)
+            .await
+            .map_err(|e| format!("UID EXPUNGE failed: {e}"))?;
+        let _: Vec<_> = expunge_stream.collect().await;
+        Ok::<_, String>(())
+    })
+    .await??;
+
+    Ok(true)
+}
+
 /// Move messages between folders.
 ///
-/// Tries MOVE first; falls back to COPY + flag Deleted + EXPUNGE.
+/// Tries MOVE first; falls back to COPY + flag Deleted + targeted expunge.
 pub async fn move_messages(
     session: &mut ImapSession,
     source_folder: &str,
     uid_set: &str,
     dest_folder: &str,
-) -> Result<(), String> {
+) -> Result<RemovalResult, String> {
     net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {source_folder}"), session.select(source_folder))
         .await?
         .map_err(|e| format!("SELECT {source_folder} failed: {e}"))?;
@@ -510,7 +563,9 @@ pub async fn move_messages(
         );
 
         match outcome {
-            MoveOutcome::Moved => return Ok(()),
+            // A server-side MOVE removes the source copy itself, so there is
+            // nothing left flagged and nothing for the caller to warn about.
+            MoveOutcome::Moved => return Ok(RemovalResult { expunged: true }),
             // The server advertised MOVE and still rejected the command. This
             // is the only outcome the COPY fallback was ever written for.
             MoveOutcome::FallBackToCopy(msg) => {
@@ -543,71 +598,51 @@ pub async fn move_messages(
         }
     }
 
-    // Fallback: COPY, then mark Deleted, then EXPUNGE.
-    //
-    // NOTE (REQ-2, not this PR): the EXPUNGE below is untargeted and removes
-    // every message in `source_folder` flagged \Deleted, not just `uid_set`.
-    // That defect is unchanged here and is fixed in the expunge slice, which
-    // is gated on live Dovecot transcripts. REQ-1 only narrows *when* this
-    // path runs — which strictly reduces exposure to it.
+    // Fallback: COPY, then flag Deleted, then expunge only what we copied.
     net::with_timeout(IMAP_CMD_TIMEOUT, "UID COPY", session.uid_copy(uid_set, dest_folder))
         .await?
         .map_err(|e| format!("UID COPY failed: {e}"))?;
 
-    net::with_timeout(IMAP_CMD_TIMEOUT, "UID STORE +Deleted", async {
-        let store_stream = session
-            .uid_store(uid_set, "+FLAGS (\\Deleted)")
-            .await
-            .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-        let _: Vec<_> = store_stream.collect().await;
-        Ok::<_, String>(())
-    })
-    .await??;
+    // REQ-3.1. Past this point the messages exist in `dest_folder`. If removing
+    // them from the source fails, saying only "the move failed" would be a lie
+    // that invites a retry — and the retry would COPY them a second time. The
+    // sentinel marks it unsafe to replay; the text says what actually happened.
+    let expunged = flag_and_expunge(session, uid_set, caps).await.map_err(|e| {
+        format!(
+            "{}Copied to {dest_folder} but not removed from {source_folder}: {e}. \
+             The messages now exist in both folders — removing them from \
+             {source_folder} completes the move; copying again would duplicate them.",
+            move_outcome::OUTCOME_UNKNOWN_PREFIX
+        )
+    })?;
 
-    net::with_timeout(IMAP_CMD_TIMEOUT, "EXPUNGE", async {
-        let expunge_stream = session
-            .expunge()
-            .await
-            .map_err(|e| format!("EXPUNGE failed: {e}"))?;
-        let _: Vec<_> = expunge_stream.collect().await;
-        Ok::<_, String>(())
-    })
-    .await??;
-
-    Ok(())
+    Ok(RemovalResult { expunged })
 }
 
-/// Flag messages as deleted and expunge them.
+/// Flag messages as deleted and remove them from the server.
+///
+/// Carried the untargeted-EXPUNGE defect independently of any MOVE: reached
+/// from `deleteDraft`, discarding a single draft expunged everything flagged
+/// `\Deleted` in the Drafts folder.
 pub async fn delete_messages(
     session: &mut ImapSession,
     folder: &str,
     uid_set: &str,
-) -> Result<(), String> {
+) -> Result<RemovalResult, String> {
     net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {folder}"), session.select(folder))
         .await?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    net::with_timeout(IMAP_CMD_TIMEOUT, "UID STORE +Deleted", async {
-        let store_stream = session
-            .uid_store(uid_set, "+FLAGS (\\Deleted)")
-            .await
-            .map_err(|e| format!("UID STORE +Deleted failed: {e}"))?;
-        let _: Vec<_> = store_stream.collect().await;
-        Ok::<_, String>(())
-    })
-        .await??;
+    // As in `move_messages`, a CAPABILITY timeout leaves the session
+    // desynchronised and must not be followed by a destructive command.
+    let caps = caps::fetch(session, IMAP_CMD_TIMEOUT).await?;
 
-    net::with_timeout(IMAP_CMD_TIMEOUT, "EXPUNGE", async {
-        let expunge_stream = session
-            .expunge()
-            .await
-            .map_err(|e| format!("EXPUNGE failed: {e}"))?;
-        let _: Vec<_> = expunge_stream.collect().await;
-        Ok::<_, String>(())
-    })
-        .await??;
+    // No sentinel here, unlike the move: both halves are idempotent, so a
+    // failure is safe to replay. Re-flagging `\Deleted` and re-expunging the
+    // same UID set changes nothing the first attempt did not.
+    let expunged = flag_and_expunge(session, uid_set, caps).await?;
 
-    Ok(())
+    Ok(RemovalResult { expunged })
 }
 
 /// Append a raw message to a folder (for saving sent mail or drafts).

@@ -103,6 +103,45 @@ export interface DeltaCheckResult {
 
 // ---------- SMTP types ----------
 
+/**
+ * What a move or delete actually did to the source folder.
+ *
+ * Mirrors `RemovalResult` in `src-tauri/src/imap/types.rs`. `expunged: false`
+ * means the messages were flagged `\Deleted` but are still on the server,
+ * because it does not advertise UIDPLUS and there is no way to expunge only
+ * the messages the user selected. Callers must not report that as a completed
+ * deletion.
+ */
+export interface RemovalResult {
+  expunged: boolean;
+}
+
+/**
+ * Validate a `RemovalResult` coming back across the Tauri IPC boundary.
+ *
+ * `CLAUDE.md` requires `invoke()` results to validate their own input. The
+ * other IMAP wrappers in this file predate that rule and still cast blindly;
+ * that gap is real but out of scope here.
+ *
+ * Degrades to `expunged: false` on anything unexpected — including a null or
+ * non-object result, which would otherwise throw on property access and turn a
+ * *successful* delete into a thrown error the caller might retry. Failing this
+ * way over-warns the user, which is the harmless direction: it can only claim
+ * that mail still needs removing, never that it is gone when it is not.
+ */
+function parseRemovalResult(value: unknown): RemovalResult {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "expunged" in value &&
+    typeof (value as { expunged: unknown }).expunged === "boolean"
+  ) {
+    return { expunged: (value as RemovalResult).expunged };
+  }
+  console.warn("Malformed RemovalResult from Rust; assuming not expunged", value);
+  return { expunged: false };
+}
+
 export interface SmtpConfig {
   host: string;
   port: number;
@@ -204,8 +243,10 @@ export async function imapMoveMessages(
   folder: string,
   uids: number[],
   destination: string
-): Promise<void> {
-  return invoke<void>('imap_move_messages', { config, folder, uids, destination });
+): Promise<RemovalResult> {
+  return parseRemovalResult(
+    await invoke('imap_move_messages', { config, folder, uids, destination })
+  );
 }
 
 /**
@@ -215,8 +256,10 @@ export async function imapDeleteMessages(
   config: ImapConfig,
   folder: string,
   uids: number[]
-): Promise<void> {
-  return invoke<void>('imap_delete_messages', { config, folder, uids });
+): Promise<RemovalResult> {
+  return parseRemovalResult(
+    await invoke('imap_delete_messages', { config, folder, uids })
+  );
 }
 
 /**
