@@ -232,7 +232,7 @@ Tailwind CSS v4 — uses `@import "tailwindcss"`, `@theme {}` for custom propert
 
 Vitest + jsdom. Setup file: `src/test/setup.ts` (imports `@testing-library/jest-dom/vitest`). Config: `globals: true` (no imports needed for `describe`, `it`, `expect`). Tests are colocated with source files (e.g., `uiStore.test.ts` next to `uiStore.ts`). Zustand test pattern: `useStore.setState()` in beforeEach, assert via `.getState()`.
 
-144 test files across stores (8), services (70), utils (14), components (32), constants (3), router (1), hooks (2), and config (1).
+149 test files across stores (9), services (71), utils (15), components (34), constants (3), router (1), hooks (2), and config (1).
 
 ## Database
 

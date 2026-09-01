@@ -16,6 +16,21 @@ export interface SidebarNavItem {
   visible: boolean;
 }
 
+/** A transient message shown by `NoticeToast`; auto-dismissed after `NOTICE_TTL_MS`. */
+export interface Notice {
+  id: string;
+  text: string;
+  action?: { label: string; onClick: () => void | Promise<void> };
+}
+
+export const NOTICE_TTL_MS = 6000;
+
+let noticeCounter = 0;
+function nextNoticeId(): string {
+  noticeCounter += 1;
+  return `notice-${Date.now()}-${noticeCounter}`;
+}
+
 interface UIState {
   theme: Theme;
   sidebarCollapsed: boolean;
@@ -62,6 +77,10 @@ interface UIState {
   setCredentialError: (message: string | null) => void;
   setPendingOpsCount: (count: number) => void;
   setSyncingFolder: (folder: string | null) => void;
+  notices: Notice[];
+  /** Queue a notice; returns its id. Dismisses itself after `NOTICE_TTL_MS`. */
+  addNotice: (input: Omit<Notice, "id">) => string;
+  dismissNotice: (id: string) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -161,4 +180,15 @@ export const useUIStore = create<UIState>((set) => ({
   setCredentialError: (credentialError) => set({ credentialError }),
   setPendingOpsCount: (pendingOpsCount) => set({ pendingOpsCount }),
   setSyncingFolder: (isSyncingFolder) => set({ isSyncingFolder }),
+  notices: [],
+  addNotice: (input) => {
+    const id = nextNoticeId();
+    set((state) => ({ notices: [...state.notices, { ...input, id }] }));
+    setTimeout(() => {
+      set((state) => ({ notices: state.notices.filter((n) => n.id !== id) }));
+    }, NOTICE_TTL_MS);
+    return id;
+  },
+  dismissNotice: (id) =>
+    set((state) => ({ notices: state.notices.filter((n) => n.id !== id) })),
 }));

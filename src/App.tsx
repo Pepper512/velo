@@ -71,6 +71,7 @@ import { OfflineBanner } from "./components/ui/OfflineBanner";
 import { CredentialErrorBanner } from "./components/ui/CredentialErrorBanner";
 import { CredentialDecryptError, KeyFileError } from "./utils/crypto";
 import { UpdateToast } from "./components/ui/UpdateToast";
+import { NoticeToast } from "./components/ui/NoticeToast";
 import { ErrorBoundary } from "./components/ui/ErrorBoundary";
 import { formatSyncError } from "./utils/networkErrors";
 import { getThemeById, COLOR_THEMES } from "./constants/themes";
@@ -598,6 +599,7 @@ export default function App() {
       </ErrorBoundary>
       <UndoSendToast />
       <UpdateToast />
+      <NoticeToast />
       <ErrorBoundary name="CommandPalette">
         <CommandPalette
           isOpen={showCommandPalette}
