@@ -46,6 +46,7 @@ export function Composer() {
   const signatureHtml = useComposerStore((s) => s.signatureHtml);
   const isSaving = useComposerStore((s) => s.isSaving);
   const lastSavedAt = useComposerStore((s) => s.lastSavedAt);
+  const saveError = useComposerStore((s) => s.saveError);
   // Note: bodyHtml intentionally NOT subscribed — TipTap manages its own editor state.
   // Subscribing would cause full re-renders on every keystroke.
   const closeComposer = useComposerStore((s) => s.closeComposer);
@@ -422,11 +423,14 @@ export function Composer() {
           ? "Forward"
           : "New Message";
 
+  // A failed auto-save must not read as "Draft saved" (audit P14).
   const savedLabel = isSaving
     ? "Saving..."
-    : lastSavedAt
-      ? "Draft saved"
-      : null;
+    : saveError
+      ? "Draft not saved — keep this window open"
+      : lastSavedAt
+        ? "Draft saved"
+        : null;
 
   return (
     <CSSTransition nodeRef={overlayRef} in={isOpen} timeout={200} classNames="slide-up" unmountOnExit>
@@ -559,7 +563,12 @@ export function Composer() {
               {fromEmail ?? activeAccount?.email ?? "No account"}
             </div>
             {savedLabel && (
-              <span className={`text-xs text-text-tertiary italic transition-opacity duration-200 ${isSaving ? "animate-pulse" : ""}`}>
+              <span
+                className={`text-xs italic transition-opacity duration-200 ${
+                  saveError ? "text-danger not-italic font-medium" : "text-text-tertiary"
+                } ${isSaving ? "animate-pulse" : ""}`}
+                title={saveError ?? undefined}
+              >
                 {savedLabel}
               </span>
             )}

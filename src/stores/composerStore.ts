@@ -29,6 +29,8 @@ export interface ComposerState {
   attachments: ComposerAttachment[];
   lastSavedAt: number | null;
   isSaving: boolean;
+  /** Set when an auto-save fails, so the composer can say so (audit P14). */
+  saveError: string | null;
   fromEmail: string | null;
   viewMode: ComposerViewMode;
   signatureHtml: string;
@@ -60,6 +62,7 @@ export interface ComposerState {
   clearAttachments: () => void;
   setLastSavedAt: (ts: number | null) => void;
   setIsSaving: (saving: boolean) => void;
+  setSaveError: (message: string | null) => void;
   setFromEmail: (email: string | null) => void;
   setViewMode: (mode: ComposerViewMode) => void;
   setSignatureHtml: (html: string) => void;
@@ -85,6 +88,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
   fromEmail: null,
   lastSavedAt: null,
   isSaving: false,
+  saveError: null,
   signatureHtml: "",
   signatureId: null,
 
@@ -106,6 +110,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       attachments: [],
       lastSavedAt: null,
       isSaving: false,
+      saveError: null,
       signatureHtml: "",
       signatureId: null,
     }),
@@ -127,6 +132,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       attachments: [],
       lastSavedAt: null,
       isSaving: false,
+      saveError: null,
       signatureHtml: "",
       signatureId: null,
     }),
@@ -148,6 +154,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
   clearAttachments: () => set({ attachments: [] }),
   setLastSavedAt: (lastSavedAt) => set({ lastSavedAt }),
   setIsSaving: (isSaving) => set({ isSaving }),
+  setSaveError: (saveError) => set({ saveError }),
   setFromEmail: (fromEmail) => set({ fromEmail }),
   setViewMode: (viewMode) => set({ viewMode }),
   setSignatureHtml: (signatureHtml) => set({ signatureHtml }),
