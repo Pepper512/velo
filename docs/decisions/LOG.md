@@ -104,3 +104,66 @@
   any Velo source is compiled. Worked around for verification purposes with
   `cargo check --locked --config 'profile.dev.debug-assertions=false'`, which compiles the same
   `not(debug_assertions)` arm and passes. Linux CI is the real gate.
+- **2026-09-01** — **Agents now perform merges** (Jim, explicit: "new rule do the merges when a merge
+  needs done"; "create the same merge rule for this repo"). Supersedes "agents never merge" in
+  `CLAUDE.md` Part I and is mirrored in the global standard `~/claude-memory/`'s hard-rules list.
+  **Why it had to be changed in both places:** the precedence order puts a repo instruction file
+  (#2) *above* the global standard (#4), so adding the rule globally alone would have left this repo
+  still forbidding it. A rule that only exists at the lower precedence level is not a rule here.
+  **Preconditions on the merge** are in `CLAUDE.md`: every required check green on the *exact* commit
+  merged (a rebase or force-push invalidates the previous run — this bit us three times on
+  2026-09-01, when merging #2 and then #3 each made the remaining branches `DIRTY` on
+  `LOG.md`/`EXCEPTIONS.md` and forced a rebase + full re-run), branch current, no unresolved
+  conversation, and stop-and-ask on any red gate or judgment-call conflict.
+  **The cost is real and is recorded, not hidden:** EX-005 justified running without required
+  approving reviews *because* agents never merged and Jim was the only merger. That mitigation is
+  now withdrawn. EX-005 has been rewritten to say so and to accept the residual risk explicitly —
+  an agent can land its own Tier 0/1 work with no human in the loop. Tier 2+ still requires Jim's
+  plan approval before code, and merging remains an execution step that never counts as approval
+  under `03-agents.md`'s no-self-approval rule.
+- **2026-09-01** — Merge order executed: **#2 (`252bb1a`) → #3 (`6fe932a`) → #4 (`f7e890b`)**.
+  Verified after #3: the Release Please run on that push is **`skipped` (2s)**, where the push
+  before it (the #2 merge, pre-guard) was **`failure` (1m9s)** — the EX-007 guard works. The #2
+  merge also re-created the stray `release-please--branches--main--components--velo` branch, since
+  it landed before the guard; deleted again.
+- **2026-09-01** — **Third audit error found; treat `docs/audits/…` §6 metrics as unverified.**
+  A completion review of the whole backlog turned up that the audit's headline metric
+  **"52% of source files (0% of components) have no test"** is wrong on the components half: there
+  are **32 component test files** (29 using `@testing-library/react`), present at the audit commit
+  `ec47a7a` and still present today. The audit's sibling-test script missed `.test.tsx`.
+  **Why it matters:** "0% component coverage" is the stated blocker for splitting `SettingsPage.tsx`
+  and the other god-components (audit §4 defers them "until component tests exist" — they exist), and
+  it inflates the apparent size of the component-test work. Anything sourced from that script (§6
+  metrics table) needs re-measuring before it is used to size or sequence work.
+  Running tally of audit corrections: (1) `serde_json` "unused" — false, `generate_context!` needs it;
+  (2) P1's six injection sites — an undercount, `async-imap` leaves three more sinks unvalidated;
+  (3) components "0% tested" — false. The audit remains the backlog's source of truth for *what* to
+  fix; its measurements are not trustworthy without a spot-check.
+- **2026-09-01** — **Batch B scope corrected before work started: it is P5, P6, P10 — not P5–P8.**
+  An earlier `HANDOFF.md` draft (and a verbal answer to Jim) said "P5–P8". The audit's delegation map
+  §3 is authoritative: **B** = P5 credential decrypt + P6 migration repair + **P10 LLM output
+  boundary**; **C** = P7, P8, P9, P14. P10 is the item that would have silently slid — it is Tier 2
+  and it is the LLM-output-is-untrusted-input rule from the global standard. Corrected in `HANDOFF.md`
+  §1. Consequence: the doubt raised earlier about whether **`zod`** belongs in Batch B was an artifact
+  of the wrong scope. The 2026-09-01 decisions entry above already says it plainly — *"Approved
+  dependency: `zod` … **first use is P10 (LLM output)**. Dependency block required in the Batch B
+  brief."* Nothing to re-decide; the block goes in the Batch B PR.
+  **Lesson:** the scope error came from re-deriving batch membership from the P-item narrative instead
+  of reading the delegation map (§3), and then repeating that guess in `HANDOFF.md` and to Jim. Read
+  the map.
+- **2026-09-01** — **Jim: pull the P12 real-SQLite test harness forward into Batch B.** ("yes pull the
+  sqlite harness into batch b".) The audit sequences the harness late, but **P6's acceptance criteria
+  cannot be met without it** — P6 is a destructive one-shot repair (`migrations.ts:898-923`) that
+  deletes IMAP attachments and `folder_sync_state`, runs on every launch, and has zero tests; without
+  a harness it would be "fixed" with nothing that ever executes it. It is also a **one-way door**: no
+  down migrations exist, so users on the fixed build cannot be downgraded.
+  **What already exists** (landed in D0, ADR-001): the `better-sqlite3` devDependency, a hand-written
+  `src/test/better-sqlite3.d.ts`, and a smoke test at `src/test/sqliteHarness.test.ts`. **What Batch B
+  adds** is the reusable harness itself — an in-memory DB that `runMigrations` can be pointed at — plus
+  the P6 tests it exists to enable: fresh DB applies all migrations; a second run applies zero
+  (idempotent); a simulated failure between the repair's DELETEs and its flag write leaves **nothing**
+  deleted and the flag unset. No new dependency: ADR-001 already covers this use.
+  **Consequence for scope:** Batch B is now P5 + P6 + P10 + the harness, which makes it materially
+  larger than Batch A. Sequenced first within the batch, since P6's tests depend on it.
+  Note this also unblocks **P8** (FTS5 quoting, Batch C), whose acceptance is likewise written against
+  real SQLite — C gets cheaper as a side effect, but P8 stays in C.

@@ -33,7 +33,18 @@ reading assigned on trust.
 ### Repo-specific rules
 - **Fork of `avihaymenahem/velo`.** Remotes: `origin` = Pepper512/velo (GitHub),
   `upstream` = avihaymenahem/velo. Work on branches; open a PR; **CI is the only
-  source of test status**; Jim reviews and merges. Agents never merge.
+  source of test status**.
+- **Agents perform the merge** (Jim, 2026-09-01 — supersedes the earlier "agents
+  never merge"). Don't leave green PRs sitting. Land them in dependency order,
+  rebasing and re-running the gates as each merge invalidates the next branch.
+  **Preconditions, all required:** every required check green **on the exact commit
+  being merged** (not an earlier push — a rebase or force-push invalidates the
+  previous run), branch up to date with `main`, no unresolved review conversation.
+  **Stop and ask** if a gate is red, or if a rebase conflict needs a judgment call
+  rather than a mechanical resolution. Never merge to clear a queue.
+  Merging is an **execution step, not an approval**: it does not relax *no
+  self-approval*, and Tier 2+ still needs its plan approved before code. The
+  residual risk this creates is recorded in **EX-005**, not waved away.
 - **Dependencies:** ask before adding any (npm, Cargo, Tauri plugin, Cargo
   feature). Approved so far: `better-sqlite3` (dev, ADR-001), `zod` (pending
   first use in Batch B). Prefer a hand-written `.d.ts` over an `@types/*` package.
