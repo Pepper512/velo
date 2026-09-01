@@ -4,44 +4,61 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main`. **Last commit that changed code: `4eac24a`** ("fix(email): make links in
-  plain-text mail clickable and surface failed opens (F-2) (#20)"). This wrap-up commit sits directly
-  on top of it. Check against **that** SHA, not this file's own — docs-only commits above it are
-  expected and harmless.
+- **Branch:** `main`. **Last commit: `5c545f9`** ("fix(imap): expunge only the messages the
+  operation was given (REQ-2/3/4) (#26)"). Unlike previous revisions of this file, the pin **is** the
+  code commit — this refresh landed after it.
 - **Open PRs:** none. Working tree clean. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
-- **⚠️ A parallel session owns a worktree here.** `git worktree list` shows
-  `.claude/worktrees/f2-email-links-open`, **locked** — and it has already been re-pointed to a
-  *different* branch (`fix/f1-snooze-survives-sync`), so **the directory name lags the work inside
-  it**. Trust `git worktree list`, not the path. **Do not touch it.** It is gitignored (`.gitignore:51`) but **not excluded from vitest**, so a bare
-  `npx vitest run` at the repo root also runs *that* branch's tests and reports ~200 failures that
-  have nothing to do with `main`. Always scope your run — see §1. CI is unaffected (clean checkout).
-- **State:** frontend **1,784** tests (149 files) · Rust **47** · **0** prod npm advisories
+- **⚠️ A parallel session is active in this repo and lands work.** `git worktree list` shows
+  `.claude/worktrees/f2-email-links-open`, **locked** — and re-pointed again, now to
+  `deps/pr-a-security-alignment` (the dependency-audit PR A). **The directory name has never matched
+  its branch; trust `git worktree list`, not the path. Do not touch it.** It is gitignored
+  (`.gitignore:51`) but **not excluded from vitest**, so a bare `npx vitest run` at the repo root also
+  runs *that* branch's tests. Always scope your run — see §1. CI is unaffected (clean checkout).
+- **Expect `main` to move under you.** Five merges landed this session from two sessions working in
+  parallel. Rebase before merging, and re-run gates after the rebase.
+- **State:** frontend **1,822** tests (152 files) · Rust **56** · **0** prod npm advisories
   · **0** import cycles containing a service · EX-001/002/004 closed; EX-003/005/006/007 open.
 
 ---
 
 ## 1. Exact next step
 
-**E2 / P15 session pooling is written, reviewed, and blocked on Jim.** The brief is at
-`docs/briefs/2026-09-01-e2-p15-session-pooling.md` (**rev 2**, `3576093`). It has been through an
-independent cross-vendor review that returned **DO NOT BUILD YET**; all findings are folded in.
-**Two things need Jim, and an agent cannot supply either:**
+**Three things are live. In priority order:**
 
-1. **Decision 4 — where the raw-fetch fallback gets its credential.** Three costed options in the
-   brief; the recommendation is **(a)** (pooled command returns `NeedRawFallback`, frontend calls a
-   separate config-carrying command). **Open, and it blocks the build.**
-2. **Rev 2 re-confirmation.** Jim approved rev 1. Rev 2 changed retry semantics, session lifecycle,
-   caps and the fallback design — material enough to need re-approval. `CLAUDE.md` is explicit that
-   agent merge authority does **not** reach Tier 2 plan approval.
+**(A) F-4 rev-4 delta-review — you are the gate, not a formality.** Jim approved F-4 *pending a clean
+delta-review from this session*: clean ⇒ fully approved, anything found ⇒ approval void, back to Jim.
+Spec: `~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/10-Bug-Fixes/SPEC-F-4_Vanished-UID-Reconciliation.md`
+(rev 4). Review **only the rev-4 changes against the seven Gemini findings**, not a fourth full round.
+Two seams the author flagged: whether the >50% catastrophic stop and the batching cap compose sanely
+at the boundary, and whether REQ-2.2's recompute (`|server_list − local_uids|` after the pass's
+new-message fetch) has an ordering hazard.
 
-**While those are open, the highest-value unblocked work is (B).**
+**(B) E2/P15 brief refresh — docs only, no code.** Decision 4 is now **DECIDED: (a)** (Jim,
+2026-09-01). The refresh must: re-verify every line number against `5c545f9` (they were verified at
+`d704ea0`, five merges back, and #26 moved code inside the functions pooling touches); fold in the
+drift #25/#26 created; and record the five Kimi pooling findings, **cancellation-bypassing-eviction
+first — the current design does not cover it**. Keep **rev-2 re-confirmation open at the top**, and
+where a Kimi finding changes what an option costs, say so *next to the decision block*.
 
-- **(B) Write the Tier-1 brief for the `move_messages` duplication bug** (§2c). Found during the E2
-  review, ships today, affects user data. Not part of E2.
-- **(C) Low-risk cleanup:** P16 (1)(2)(4)(5) dedupe (~380 lines), P13 (c)(d)(e), P14 remainder,
-  `react-best-practices` skill trim.
+**(C) Dependency-audit PRs A–E** are being built by the parallel session, in dependency order. Each
+comes to this session for the EX-005 opposite-line review. Expect that load.
+
+**Then, and only after Jim re-confirms rev 2: build E2/P15.**
+
+### What must be re-verified before acting
+
+- **Every line number in the E2 brief.** Verified at `d704ea0`; `main` is `5c545f9`. #25 added
+  `caps.rs`/`move_outcome.rs` and rewrote the `uid_mv` arm; #26 rewrote both removal paths and changed
+  `move_messages`/`delete_messages` to return `RemovalResult`. Re-grep before editing.
+- **Has `main` moved?** `git log --oneline -5`. A second session lands work here continuously.
+- **The parallel worktree's branch** — `git worktree list`. The directory name lies; it has been
+  re-pointed twice.
+- **Upstream drift:** `git fetch upstream && git log --oneline main..upstream/main`. Empty all session.
+- **CI:** `gh run list --branch main --limit 2`. Release Please must read **`skipped`**, never `failure`.
+- **Kimi quota** — it hit its weekly limit on 2026-09-01. Gemini 3.7 via Antigravity is the working
+  cross-vendor seat and is what caught F-4's three HIGHs.
 
 ### Resume commands
 
@@ -57,23 +74,8 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo       # gh otherwise resolves PR numbers against upstream
 ```
 
-Expected: **149 test files, 1,784 tests, all passing.** A wildly higher file count means the exclude
-was dropped and you are running the parallel worktree's tests.
-
-### Re-verify before acting — these may have gone stale
-
-- **Has real work landed since `4eac24a`?** `git log --oneline -5`. Docs-only commits are wrap-ups;
-  anything else means someone has pushed and this file is behind. **A second session is actively
-  landing work in this repo** — expect `main` to move under you and rebase before merging.
-- **Is the parallel worktree still there, and on what branch?** `git worktree list`. If it is gone the
-  vitest exclude is no longer needed — but leaving it in is harmless.
-- **Upstream drift:** `git fetch upstream && git log --oneline main..upstream/main`. Empty all
-  session; if security-relevant `src-tauri/` commits appear, rebase the plan on them first.
-- **CI green?** `gh run list --branch main --limit 2`. Release Please must read **`skipped`**, never
-  `failure` — a failure means the EX-007 guard was removed or bypassed.
-- **Every line number the E2 brief cites was verified at `d704ea0`.** Re-grep before editing.
-- **The audit's measurements are not trustworthy** — §6. Neither were rev 1 of the E2 brief's; see
-  the §6 postscript.
+Expected: **152 test files, 1,822 tests, all passing**, and **56** Rust tests. A wildly higher file
+count means the exclude was dropped and you are running the parallel worktree's tests.
 
 ---
 
@@ -110,19 +112,31 @@ orphans** (`PhishingBanner`, `LinkConfirmDialog`, `phishingScanner`). Nothing in
 build, so a user could click a link believing Velo had screened it. **That claim is corrected**; the
 code is untouched. **Jim decides: re-wire it, or delete it and drop the claim.**
 
-### 2c. `move_messages` duplicates mail on a timeout (live bug, found this session)
+### 2c. ~~`move_messages` duplicates mail on a timeout~~ — **FIXED, both halves**
 
-`src-tauri/src/imap/client.rs:496-497` matches `Ok(Ok(()))` for success and `_` for **everything
-else**, so a timeout or connection error is treated identically to *"this server lacks the MOVE
-extension"* and falls through to COPY + STORE `+Deleted` + EXPUNGE. A `UID MOVE` that **succeeded
-server-side** but whose response timed out is therefore COPY'd again — **the message now exists twice
-in the destination folder.**
+Kept as a record because the shape recurs. Two defects, both live for the project's whole history:
 
-Ships today; independent of session pooling. The fix is to distinguish "MOVE unsupported" (a tagged
-NO/BAD from the server) from a transport failure, and to fail rather than fall back on the latter.
-**Needs its own Tier-1 brief — this is item (B) in §1.**
+1. `move_messages` matched `Ok(Ok(()))` and `_`, collapsing "server lacks MOVE", a `NO` refusal and a
+   timeout into one COPY fallback — so a `UID MOVE` that succeeded server-side but timed out was
+   COPY'd again. Fixed in **#25** (`2066351`).
+2. **The worse one, found in review:** both the COPY fallback and `delete_messages` called a bare
+   `session.expunge()`, which removes *every* `\Deleted`-flagged message in the folder, not just the
+   given UIDs — including another client's flags. `deleteDraft` reached it, so discarding one draft
+   expunged everything flagged in Drafts. Fixed in **#26** (`5c545f9`), proved by live Dovecot
+   transcripts.
 
----
+**The lesson worth keeping:** #25's first cut passed every test written for it and still did not fix
+the bug, because the tests never crossed the IPC boundary. The Rust classifier refused to retry, but
+the error text contained "timed out", `networkErrors.ts` marked it retryable, and `executeEmailAction`
+re-ran the move. **A requirement that spans Rust and TS is not done when the Rust half is done.**
+
+### 2d. `updateMessageImapFolder` has zero callers — latent bug on `main` (**F-5**, queued)
+
+`messageHelper.ts:126` exports it "for after a move operation"; nothing calls it, and nothing else
+writes `messages.imap_folder` outside the sync upsert. So after an archive or move the local row still
+names the **source** folder until the destination folder syncs. Consequences: actions on an
+already-moved message use a stale folder/UID pair, and any naive folder-diff reconciliation would read
+archived mail as vanished (this is what F-4 rev 1 would have done). Not fixed; queued as **F-5**.
 
 ## 3. What we're doing and why
 
@@ -138,7 +152,32 @@ nothing watched. These batches added the watchers.
 
 ## 4. What just happened (2026-09-01)
 
-### This session — E2 brief, its review, and one bug fix
+### Latest session — the move/expunge data-loss fix, end to end
+
+| PR | What |
+|---|---|
+| #23 `60728a1` | **Brief** for the move/expunge defects — Tier 2, approved by Jim in the PR comment |
+| #24 `a96af36` | **Decision:** a peer session may relay Jim's Tier-2 approvals (see §5) |
+| #25 `2066351` | **REQ-1** — classify `UID MOVE` failures; `caps.rs` reads `CAPABILITY` |
+| #26 `5c545f9` | **REQ-2/3/4** — targeted `UID EXPUNGE`; the untargeted one is gone from the tree |
+
+**Verified on merged `main`:** `grep "\.expunge()"` returns **no call site** — only the doc comment
+describing the old bug. Rust 47 → 56, frontend 1,784 → 1,822.
+
+**Merge-gate evidence.** #26's Done-when required live Dovecot transcripts, run by the parallel
+session (Docker's daemon is not running in this session). All three scenarios passed. The decisive
+one: on the UIDPLUS server a second client's bystander survived **with its `\Deleted` flag intact** —
+exactly the message the old bare `EXPUNGE` would have destroyed. The driver called Velo's production
+`delete_messages`, which is what makes it evidence about Velo rather than about Dovecot.
+`docs/testing/dovecot/` ships the harness; the **Alpine variant is the trusted one**, the official
+amd64 compose is kept but labelled unverified (it crash-loops under Rosetta and its credential env
+vars were never honoured).
+
+**Not verified anywhere:** none of this has run against a real provider. Gmail, Fastmail and Exchange
+all advertise UIDPLUS, so the primary path should hold — but that is inference from capability lists,
+not observation.
+
+### Earlier that day — E2 brief, its review, and one bug fix
 
 | PR | What |
 |---|---|
@@ -214,16 +253,44 @@ mutable URL**.
 - **Decision 3 — OAuth sync bug: RESOLVED**, shipped separately as #18 at Jim's direction rather than
   folded into a Tier-2 refactor.
 
-**Pending Jim:** **E2 Decision 4** (raw-fallback credential — recommendation (a)) and **E2 rev 2
-re-confirmation** — both block the build, §1 · P11 approval + QA (§2a) · P19 re-wire-or-delete
-(§2b) · confirmation of the per-provider model default proposal (never answered; the conservative
-reading shipped).
+**Made this session:**
+- **E2 Decision 4 — DECIDED: (a)**, frontend-driven (Jim, 2026-09-01, direct + relayed). Pooled
+  command returns `NeedRawFallback`; the frontend calls a separate config-carrying
+  `imap_raw_fetch_messages`. The password crosses IPC only on that rare non-standard-server path, at
+  the cost of one **named** exemption in the acceptance grep. (c) was killed by the OAuth argument —
+  stored tokens expire, so it would need refresh logic and refresh tokens in long-lived Rust state.
+- **move/expunge Decision 1 — (a)** with four binding conditions (report `expunged:false`, say so in
+  the UI, log the capability miss once per account, never degrade a failed `UID EXPUNGE` to a bare
+  one). *"'Permanently' may degrade to 'eventually' only when the app says so out loud."*
+- **A peer session may relay Jim's Tier-2 approvals** (#24, `LOG.md`). Scope is narrow and matters:
+  merging is still execution not approval; *no self-approval* still holds, so an agent cannot relay
+  approval for its own work; a relay **carries** his authority and does not **create** any. A relayed
+  approval with no durable record is coordination, not approval. **This is the line that stopped E2:**
+  Decision 4 had never been made, so there was nothing to relay until Jim actually made it.
+
+**Pending Jim:**
+- **E2 rev-2 re-confirmation** — deliberately held until the brief refresh lands, so he re-confirms
+  against current facts (the cancellation-bypasses-eviction finding especially). **No pre-commit
+  exists.** Refresh PR → EX-005 review → back to Jim.
+- **F-4** — approved *conditionally on a clean rev-4 delta-review from this session*. Not clean ⇒
+  approval void.
+- P11 approval + QA (§2a) · P19 re-wire-or-delete (§2b) · the per-provider model default proposal
+  (never answered; the conservative reading shipped).
+- **A permission question, unresolved:** a `gh pr merge` that this session's classifier blocked twice
+  was performed from the parallel session instead (#24). The change was uncontroversial; the
+  precedent — that a permission decision in one session is reachable through another — was flagged to
+  Jim and he has not ruled on it.
 
 **Deliberately deferred + reason:**
-- **`move_messages` timeout-fallback duplication** (§2c) — a live bug, but out of scope for E2; a
-  data-affecting fix should not ride inside a Tier-2 credential refactor. Needs its own Tier-1 brief.
-- **E2 build itself** — plan written and reviewed; blocked on Decision 4 and rev 2 re-confirmation,
-  not on engineering.
+- **E2 build itself** — plan written and reviewed; Decision 4 is now settled, so it is blocked on
+  **rev-2 re-confirmation alone**, and on the brief refresh that re-confirmation should be made
+  against. Not blocked on engineering.
+- **F-5 (move-time row hygiene)** — §2d. A latent bug on `main` today, not just an F-4 dependency.
+- **The 11 other IMAP `invoke()` wrappers do not validate their results** (`tauriCommands.ts`),
+  contrary to `CLAUDE.md`'s boundary rule. #26 validated the one it added and left the rest; queued.
+- **`raw_fetch_messages` still opens its own connection** — Decision 4(a) accepts this; Kimi's
+  option (d) (run the raw fetch on the pooled session) is the more elegant end state and is recorded
+  in the brief as a future simplification, not scope.
 - **P13 (c)(d)(e)** — (a)+(b) killed *all* service cycles, which was the point. 49 components still
   import `services/db/*`; `graph:check` reports the trend but does not gate it — a gate nobody can
   turn green gets deleted.
@@ -279,40 +346,46 @@ brief's numbers the same way you verify the audit's — including your own.**
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main`, last code commit **`4eac24a`** (#20) · clean · CI green.
-**Status:** audit backlog (20 items) merged. **E2/P15 session pooling is written and reviewed but NOT built** — it is blocked on Jim, not on engineering.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`5c545f9`** · clean · CI green.
+**Status:** audit backlog merged. **The move/expunge data-loss bug is FIXED and verified** (#25, #26) —
+`grep "\.expunge()"` returns no call site anywhere. E2/P15 is still **not built**.
 
-**Next action — tell Jim these two are waiting on him:**
-- **E2 Decision 4** — where the raw-fetch fallback gets its credential. Three costed options in
-  `docs/briefs/2026-09-01-e2-p15-session-pooling.md`; **recommendation (a)**. Blocks the build.
-- **E2 rev 2 re-confirmation** — he approved rev 1; rev 2 changed retry semantics, session lifecycle,
-  caps and the fallback design. Tier 2 plan approval is the one thing agent merge authority does not
-  reach.
+**Next action — three live items, in order:**
+1. **F-4 rev-4 delta-review.** Jim approved F-4 *conditionally on this coming back clean*; anything
+   found voids the approval and returns it to him. Review the rev-4 changes only, against the seven
+   Gemini findings. Spec in the vault under `10 Projects/Velo/Build Queue/10-Bug-Fixes/`.
+2. **E2/P15 brief refresh — docs only, no code.** Decision 4 is **DECIDED (a)**. Re-verify every line
+   number against `5c545f9`: they were verified at `d704ea0`, five merges back, and #26 rewrote code
+   inside the very functions pooling touches. Fold in the #25/#26 drift and record the five Kimi
+   pooling findings — **cancellation bypassing eviction-on-error is not covered by the current
+   design**. Leave **rev-2 re-confirmation open at the top**: it is the last thing blocking the build,
+   and Jim is holding it deliberately until he can judge it against this refresh.
+3. **EX-005 opposite-line reviews for dependency-audit PRs A–E**, as the parallel session sends them.
 
-**Unblocked meanwhile:** (B) write the Tier-1 brief for the **`move_messages` timeout duplication
-bug** (§2c — a `UID MOVE` that timed out after succeeding gets COPY'd again, duplicating the message;
-ships today) · (C) low-risk cleanup: P16 (1)(2)(4)(5), P13 (c)(d)(e), P14 remainder.
-
-**Verify first:** `git log --oneline -5` shows nothing past `4eac24a` · `git worktree list` — a
-**locked parallel worktree** under `.claude/worktrees/` belongs to another session (its directory
-name lags its branch), **do not touch** · another session is landing work, so **rebase before
-merging** ·
-`git fetch upstream && git log --oneline main..upstream/main` empty · `gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped**.
+**Verify first:** `git log --oneline -5` — a second session lands work here continuously ·
+`git worktree list` — a **locked** worktree under `.claude/worktrees/` belongs to that session and
+**its directory name has never matched its branch**; do not touch it · rebase before merging ·
+`git fetch upstream && git log --oneline main..upstream/main` empty ·
+`gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped**.
 
 **Get running:**
 ```bash
 git checkout main && git pull origin main && npm ci
 npx tsc --noEmit
-npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # expect 149 files / 1,784 tests
+npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # expect 152 files / 1,822 tests
 npm run graph:check && npm run docs:check
-(cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)
+(cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)   # 56 Rust tests
 ```
 
-**Three traps:** a bare `npx vitest run` globs into the parallel worktree and reports ~200 failures
-that are **not yours** — always pass the excludes. `cargo build --release` is broken on this machine
-(sqlx proc-macro dylib — not ours; use `cargo check --locked --config 'profile.dev.debug-assertions=false'`).
-The git-guard hook text-matches protected-branch wording anywhere in a Bash command — pass long text
-via `--body-file` or `git commit -F`, never a heredoc.
+**Four traps:** a bare `npx vitest run` globs into the parallel worktree and reports failures that are
+**not yours** — always pass the excludes. `cargo build --release` is broken on this machine (sqlx
+proc-macro dylib — not ours; use `cargo check --locked --config 'profile.dev.debug-assertions=false'`).
+The git-guard hook text-matches protected-branch wording anywhere in a Bash command — author such text
+with the Write tool and pass it via `--body-file` / `git commit -F`, never a heredoc, and keep the
+push in its own call. Docker's daemon is **not running** here, so Dovecot transcripts cannot be
+produced from this session.
 
-**Read §6 next:** six audit claims failed verification — and rev 1 of our own E2 brief carried four.
-Trust the backlog, not the numbers; re-verify before building.
+**Read §6 next:** six audit claims failed verification, rev 1 of our own E2 brief carried four, and
+this session's first cut of REQ-1 passed every test written for it while still not fixing the bug —
+the tests never crossed the IPC boundary the requirement was about. Trust the backlog, not the
+numbers, including your own.
