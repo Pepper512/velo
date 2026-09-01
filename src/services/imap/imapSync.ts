@@ -7,7 +7,7 @@ import {
   imapSearchFolder,
   imapDeltaCheck,
 } from "./tauriCommands";
-import { buildImapConfig } from "./imapConfigBuilder";
+import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
 import {
   mapFolderToLabel,
   getLabelsForMessage,
@@ -397,7 +397,7 @@ export async function imapInitialSync(
     throw new Error(`Account ${accountId} not found`);
   }
 
-  const config = buildImapConfig(account);
+  const config = await buildImapConfigWithFreshToken(account);
 
   // Phase 1: List and sync folders
   onProgress?.({ phase: "folders", current: 0, total: 1 });
@@ -830,7 +830,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     throw new Error(`Account ${accountId} not found`);
   }
 
-  const config = buildImapConfig(account);
+  const config = await buildImapConfigWithFreshToken(account);
 
   // Get all folders we've synced before
   const syncStates = await getAllFolderSyncStates(accountId);
