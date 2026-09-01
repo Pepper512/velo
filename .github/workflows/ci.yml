@@ -96,7 +96,13 @@ jobs:
         working-directory: src-tauri
         # RUSTSEC-2026-0141 (lettre, Boring TLS backend) is not reachable: this
         # crate uses tokio1-native-tls. Accepted in docs/decisions/EXCEPTIONS.md EX-003.
-        run: cargo audit --ignore RUSTSEC-2026-0141
+        # RUSTSEC-2026-0235 (rkyv) and RUSTSEC-2023-0071 (rsa) are lockfile-only:
+        # `cargo tree --target all -e all` contains neither crate. EX-006.
+        run: >
+          cargo audit
+          --ignore RUSTSEC-2026-0141
+          --ignore RUSTSEC-2026-0235
+          --ignore RUSTSEC-2023-0071
 
   dependency-audit:
     name: npm audit (prod deps)

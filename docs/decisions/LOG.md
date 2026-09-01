@@ -55,3 +55,7 @@
   stale `Cargo.lock` synced; TZ-dependent `icalHelper.test.ts` fixture fixed; `better-sqlite3`
   devDependency added (ADR-001) with hand-written `.d.ts` + smoke test; `@tanstack/react-router`
   bumped. Exceptions EX-002..EX-005 filed; EX-001 closing on merge. ADR-000 amended.
+- **2026-09-01** — Per accepted P18: full semver-compatible `cargo update` (369 crate bumps, lockfile
+  only; `cargo check --locked` green) cleared 13 of 15 RustSec advisories incl. both `quick-xml`
+  (via `plist`) and `h2`. Remaining `rkyv`/`rsa` are lockfile-only → EX-006. Own commit so it can be
+  reverted independently if CI on any platform objects.
