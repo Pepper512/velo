@@ -80,3 +80,27 @@
   no guard — it is `workflow_call`-only and unreachable once `release-please.yml` is guarded. Filed as
   **EX-007** (this fork now has no exercised release path). If Jim later wants signed builds from
   `Pepper512/velo`, that is an ADR (release + signing model), not a reversal of this entry.
+- **2026-09-01** — **Batch A (Rust security hardening) built** on `feat/batch-a-rust-security`, brief at
+  `docs/briefs/2026-09-01-batch-a-rust-security.md`. Three findings changed the shape of the work
+  versus the audit text, all recorded in the brief:
+  1. **P1 is wider than the audit's six `format!` sites.** `async-imap` 0.10.4 validates the mailbox on
+     `select`/`uid_copy`/`uid_mv`/`status`/`login` (`validate_str`) but **not** on `uid_store`,
+     `uid_search`, or `append` — so `flags`, `since_date`, and `append`'s folder were three further
+     injection sinks reachable from `#[tauri::command]` arguments. All now go through `imap::wire`.
+  2. **`serde_json` is NOT an unused dependency** — audit §4 is wrong. `tauri::generate_context!()`
+     expands to code referencing `::serde_json`; removing it fails the build with E0433. Verified by
+     removing it and rebuilding. Restored with a comment so nobody removes it again.
+  3. **`set_flags` and `imap_append_message` changed shape**: both now take unrendered flag names
+     (`["Seen"]`) instead of a pre-built `"(\\Seen)"` string, so rendering happens in `imap::wire`
+     against an allowlist. This touched 2 TS call sites and 4 test assertions — slightly more frontend
+     work than the brief's "Not doing" anticipated, and a deliberate widening.
+  Rust tests went 6 → 45 (`imap/wire.rs`, `imap/client.rs`, and `oauth.rs` had none before).
+  **EX-002 closes on merge.** A `cargo check --release --locked` step was added to `ci.yml` to
+  type-check the `#[cfg(not(debug_assertions))]` arm that compiles the dev-only commands out.
+- **2026-09-01** — **Local release builds are broken on this machine**, unrelated to any Velo code:
+  `cargo build --release` fails in `sqlx 0.8.6` with `dlopen(libsqlx_macros…dylib): mis-aligned
+  LINKEDIT string pool`, a corrupt proc-macro dylib produced by the release profile on this
+  macOS/toolchain combination. It reproduces after a full `cargo clean --release`, and fails before
+  any Velo source is compiled. Worked around for verification purposes with
+  `cargo check --locked --config 'profile.dev.debug-assertions=false'`, which compiles the same
+  `not(debug_assertions)` arm and passes. Linux CI is the real gate.
