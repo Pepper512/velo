@@ -1,3 +1,4 @@
+import type { SettingKey } from "@/constants/settingsKeys";
 export type AiProvider = "claude" | "openai" | "gemini" | "ollama" | "copilot" | "xai";
 
 export interface AiCompletionRequest {
@@ -68,7 +69,7 @@ export const PROVIDER_MODELS: Record<Exclude<AiProvider, "ollama">, ModelOption[
   ],
 };
 
-export const MODEL_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
+export const MODEL_SETTINGS: Record<Exclude<AiProvider, "ollama">, SettingKey> = {
   claude: "claude_model",
   openai: "openai_model",
   gemini: "gemini_model",

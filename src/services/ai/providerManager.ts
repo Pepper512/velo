@@ -1,6 +1,7 @@
 import { getSetting, getSecureSetting } from "@/services/db/settings";
 import { AiError } from "./errors";
 import type { AiProvider, AiProviderClient } from "./types";
+import type { SecureSettingKey } from "@/constants/settingsKeys";
 import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
 import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider, clearOpenAIProvider } from "./providers/openaiProvider";
@@ -9,7 +10,7 @@ import { createOllamaProvider, clearOllamaProvider } from "./providers/ollamaPro
 import { createCopilotProvider, clearCopilotProvider } from "./providers/copilotProvider";
 import { createXaiProvider, clearXaiProvider } from "./providers/xaiProvider";
 
-const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, string> = {
+const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, SecureSettingKey> = {
   claude: "claude_api_key",
   openai: "openai_api_key",
   gemini: "gemini_api_key",

@@ -198,8 +198,12 @@ async function syncCalendarForAccount(accountId: string): Promise<void> {
       }
     }
 
-    // Emit event for UI update
-    window.dispatchEvent(new CustomEvent("velo-calendar-sync-done"));
+    // No event is emitted here. `velo-calendar-sync-done` was dispatched from
+    // this line with **zero listeners anywhere in the app** (audit P17), so it
+    // was pure noise -- and worse, it read as if calendar UI refresh were
+    // wired up when it is not. Deleted rather than given a listener: nothing
+    // currently needs one, and inventing a consumer to justify a producer is
+    // how dead code becomes load-bearing.
   } catch (err) {
     console.warn(`[syncManager] Calendar sync failed for account ${accountId}:`, err);
   }
