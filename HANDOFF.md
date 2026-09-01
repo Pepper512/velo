@@ -147,8 +147,12 @@ question (Opus bundled protection-append + #24).
 
 **Deliberately deferred + reason:**
 - **F-4 build** — after E2/P15 (same files, active rewrite; a second rebase of a Tier-2 credential
-  change is the expensive kind). F-5 (move-time row hygiene) queued behind it; if F-5 slips, F-4's
-  suspect table grows beyond design assumptions (coupling note in the spec).
+  change is the expensive kind).
+- **F-5 (move-time row hygiene)** — not merely an F-4 dependency: `updateMessageImapFolder`
+  (`messageHelper.ts:126`) has **zero callers** and nothing else writes `messages.imap_folder`
+  after a move, so an action on an already-moved message uses a stale folder/UID pair. **A live
+  defect on `main` today** (reviewer-verified at `a230f3a`), queued — and if it slips past F-4,
+  F-4's suspect table grows beyond design assumptions (coupling note in the spec).
 - **PR E** (`async-imap` 0.11, `mail-parser` 0.11, reqwest 0.13) — parked behind E2 for the same
   file-collision reason; reqwest must keep `native-tls` explicit or TLS silently swaps to rustls.
 - **TS 7 direct** — 6.0 bridge first (`baseUrl` removal bites; tsconfig:19).
