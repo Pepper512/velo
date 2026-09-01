@@ -190,6 +190,8 @@ Revert the PR. There is no schema change, no migration, and no persisted state i
 - **No dependency is added.** Per `CLAUDE.md`, none was added without asking, and none is proposed. The notice surface is reused from F-2 (`4eac24a`).
 - HANDOFF §6 warns that both the 2026-09-01 audit and rev 1 of the E2 brief carried unverified numbers. Every line number and API claim here was re-checked at `afeaa9f` before it was written down. The E2 brief's own line numbers were verified at `d704ea0` and should be re-grepped separately.
 - Related: E2/P15's eviction-on-error rule addresses the same desync class REQ-1.4 avoids. Neither change depends on the other.
+- **Landing order** for the three changes that touch `src-tauri/src/imap/client.rs` (Jim, 2026-09-01): **(1)** this brief's fix · **(2)** E2/P15 session pooling · **(3)** the `async-imap` 0.11 bump from the dependency audit (vault: `Pepper Knowledge/10 Projects/Velo/2026-09-01_Velo_Dependency-Audit.md`). Each rebases on the one before it.
+- **After the 0.11 bump, `caps.rs` gets a fast path — but does not go away.** The audit notes that 0.11.3 adds `login_with_capabilities()`, which it describes as removing `caps.rs`'s extra round-trip. **Verified in the 0.11.3 source, and the claim is slightly stronger than the API:** the function returns `(Session, Option<Capabilities>)` (`client.rs:197-201`) and its own doc says capabilities come back *"if the response contained `CAPABILITY` response code"*. Servers that do not volunteer `CAPABILITY` on the LOGIN response still need the explicit call. So the bump turns the round-trip from unconditional into conditional; `caps.rs` keeps its `capabilities()` fallback. `capabilities()` (`:674`) and `uid_expunge()` (`:720`) both still exist in 0.11.3, so nothing in this design breaks across the bump.
 
 ---
 
@@ -200,4 +202,4 @@ Claims sourced from the Kimi K3 second read were checked against the pinned crat
 ## Approval
 
 - **Decision 1:** ✅ **(a) — approved by Jim, 2026-09-01**, with the four conditions folded in as REQ-2.3 and REQ-4.
-- **Tier-2 plan approved by:** __________ date: ______ — *approval of the docs PR carrying this brief is the plan approval. REQ-1 may start on approval.*
+- **Tier-2 plan approved by:** **Jim, 2026-09-01, PR #23 comment** — Decision 1 = (a); REQ-2.3 and REQ-4.1–4.5 binding as written. REQ-1 (the classifier) may start. The expunge slice does not merge without the Done-when 5/6 Dovecot transcripts attached to its PR.
