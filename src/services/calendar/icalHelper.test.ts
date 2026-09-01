@@ -48,10 +48,13 @@ describe("generateVEvent", () => {
   });
 
   it("generates an all-day event with VALUE=DATE format", () => {
+    // All-day boundaries are *local* midnight (formatDateOnly / parseICalDateTime
+    // both use local getters). Build the fixture the same way so the test is
+    // independent of the runner's TZ — a UTC literal fails west of UTC.
     const event: CreateEventInput = {
       summary: "Holiday",
-      startTime: "2025-12-25T00:00:00Z",
-      endTime: "2025-12-26T00:00:00Z",
+      startTime: new Date(2025, 11, 25).toISOString(),
+      endTime: new Date(2025, 11, 26).toISOString(),
       isAllDay: true,
     };
 
