@@ -1,0 +1,34 @@
+# Disposable Dovecot for the REQ-2 expunge transcripts.
+#
+# Two servers, differing only in whether UIDPLUS is advertised, because the
+# whole point of the brief's Decision 1(a) is what Velo does when it is absent.
+#
+# Throwaway credentials for a throwaway container on localhost. They are not a
+# secret and must never be reused anywhere: this stack is plaintext IMAP on a
+# loopback port with no TLS, which is exactly why it must not be exposed.
+services:
+  # Advertises UIDPLUS. Velo should issue UID EXPUNGE and remove only the
+  # selected UIDs.
+  dovecot-uidplus:
+    image: dovecot/dovecot:2.3.21
+    container_name: velo-dovecot-uidplus
+    ports:
+      - "127.0.0.1:11143:143"
+    volumes:
+      - ./dovecot-uidplus.conf:/etc/dovecot/conf.d/99-velo.conf:ro
+    environment:
+      - DOVECOT_USER=velo
+      - DOVECOT_PASS=velo-test-only
+
+  # Same server with UIDPLUS suppressed. Velo should flag \Deleted, expunge
+  # nothing, report expunged:false and show the notice.
+  dovecot-no-uidplus:
+    image: dovecot/dovecot:2.3.21
+    container_name: velo-dovecot-no-uidplus
+    ports:
+      - "127.0.0.1:11144:143"
+    volumes:
+      - ./dovecot-no-uidplus.conf:/etc/dovecot/conf.d/99-velo.conf:ro
+    environment:
+      - DOVECOT_USER=velo
+      - DOVECOT_PASS=velo-test-only

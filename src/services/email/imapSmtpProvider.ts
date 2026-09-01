@@ -1,3 +1,4 @@
+import { useUIStore } from "@/stores/uiStore";
 import type { EmailProvider, EmailFolder, SyncResult } from "./types";
 import type { ParsedMessage } from "../gmail/messageParser";
 import { buildImapConfig, buildSmtpConfig } from "../imap/imapConfigBuilder";
@@ -102,6 +103,28 @@ function extractSnippet(raw: string, maxLen = 200): string {
  * EmailProvider adapter for IMAP/SMTP accounts.
  * Delegates to Tauri IMAP/SMTP commands via the imapSync engine.
  */
+/**
+ * Tell the user when mail was flagged for deletion but not actually removed
+ * (brief REQ-4.2/4.3).
+ *
+ * A server without UIDPLUS cannot expunge a specific UID set, so Velo declines
+ * to expunge at all rather than removing messages the user did not select. The
+ * operation is not a failure, but it is not the completed deletion the UI would
+ * otherwise imply — "permanently" may degrade to "eventually" only when the app
+ * says so out loud.
+ *
+ * Raised here rather than through `EmailProvider`, whose methods return
+ * `Promise<void>` and are shared with the Gmail path, where none of this
+ * applies. Calling the store directly from a service is the established pattern
+ * (`services/links/openLink.ts`, `emailActions.ts`, `queueProcessor.ts`).
+ */
+function noticeIfNotExpunged(result: { expunged: boolean }, sourceFolder: string): void {
+  if (result.expunged) return;
+  useUIStore.getState().addNotice({
+    text: `Marked for deletion in ${sourceFolder} — the server will remove it later`,
+  });
+}
+
 export class ImapSmtpProvider implements EmailProvider {
   readonly accountId: string;
   readonly type = "imap" as const;
@@ -276,7 +299,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       if (folder === archiveFolder) continue;
-      await imapMoveMessages(config, folder, uids, archiveFolder);
+      const result = await imapMoveMessages(config, folder, uids, archiveFolder);
+      noticeIfNotExpunged(result, folder);
     }
   }
 
@@ -291,7 +315,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       if (folder === trashFolder) continue;
-      await imapMoveMessages(config, folder, uids, trashFolder);
+      const result = await imapMoveMessages(config, folder, uids, trashFolder);
+      noticeIfNotExpunged(result, folder);
     }
   }
 
@@ -303,7 +328,8 @@ export class ImapSmtpProvider implements EmailProvider {
     const grouped = this.groupByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
-      await imapDeleteMessages(config, folder, uids);
+      const result = await imapDeleteMessages(config, folder, uids);
+      noticeIfNotExpunged(result, folder);
     }
   }
 
@@ -346,7 +372,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       if (folder === destination) continue;
-      await imapMoveMessages(config, folder, uids, destination);
+      const result = await imapMoveMessages(config, folder, uids, destination);
+      noticeIfNotExpunged(result, folder);
     }
   }
 
@@ -360,7 +387,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       if (folder === folderPath) continue;
-      await imapMoveMessages(config, folder, uids, folderPath);
+      const result = await imapMoveMessages(config, folder, uids, folderPath);
+      noticeIfNotExpunged(result, folder);
     }
   }
 
@@ -547,7 +575,8 @@ export class ImapSmtpProvider implements EmailProvider {
 
     if (uid !== null && folder) {
       const config = await this.getImapConfig();
-      await imapDeleteMessages(config, folder, [uid]);
+      const result = await imapDeleteMessages(config, folder, [uid]);
+      noticeIfNotExpunged(result, folder);
     } else {
       // Generated draft IDs (imap-draft-...) can't be mapped back to a server UID
       console.warn(

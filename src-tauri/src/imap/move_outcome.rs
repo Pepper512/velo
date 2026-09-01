@@ -33,9 +33,19 @@ use async_imap::error::Error as ImapError;
 /// achieves nothing if the caller retries for it. `classifyError` matches this
 /// prefix ahead of its network patterns and returns `isRetryable: false`.
 ///
+/// **It marks two different states, deliberately.** A timed-out `UID MOVE` is
+/// genuinely unknown — the server may or may not have acted. A COPY that
+/// succeeded before its expunge failed is a *known* partial state: the messages
+/// are definitely in both folders. They share this prefix because they share
+/// the only property the caller acts on — replaying the operation would
+/// duplicate mail — not because they are the same condition.
+///
 /// Interim by design: E2/P15 replaces the stringly-typed IPC error with a
-/// serialized enum, at which point this prefix goes away. Until then the two
-/// sides are pinned by `networkErrors.test.ts`, which asserts this literal.
+/// serialized enum, at which point this prefix goes away. **That migration
+/// should split these two cases rather than collapse them**: "unknown" wants a
+/// reconciling read, "copied but not removed" wants the delete completed. Until
+/// then the two sides are pinned by `networkErrors.test.ts`, which asserts this
+/// literal.
 pub const OUTCOME_UNKNOWN_PREFIX: &str = "VELO_OUTCOME_UNKNOWN:";
 
 /// What to do after attempting `UID MOVE`.

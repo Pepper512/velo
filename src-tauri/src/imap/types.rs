@@ -103,3 +103,15 @@ pub struct DeltaCheckResult {
     pub new_uids: Vec<u32>,
     pub uidvalidity_changed: bool,
 }
+
+/// What a move or delete actually did to the source folder (brief REQ-4.1).
+///
+/// `expunged: false` means the messages were flagged `\Deleted` but are still
+/// on the server, because it does not advertise `UIDPLUS` and there is no way
+/// to expunge only the messages the user selected. The UI must say so rather
+/// than reporting a completed deletion — "permanently" may degrade to
+/// "eventually" only when the app says so out loud (Decision 1(a)).
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct RemovalResult {
+    pub expunged: bool,
+}

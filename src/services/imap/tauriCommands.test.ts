@@ -270,3 +270,41 @@ describe('SMTP Tauri commands', () => {
     );
   });
 });
+
+describe("RemovalResult boundary validation", () => {
+  // CLAUDE.md requires invoke() results to validate their own input. The
+  // degraded direction is deliberate: claiming mail still needs removing is
+  // harmless, claiming it is gone when it is not is the bug this brief fixes.
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("passes a well-formed result through", async () => {
+    vi.mocked(invoke).mockResolvedValue({ expunged: true });
+    await expect(
+      imapDeleteMessages(testImapConfig, "INBOX", [1]),
+    ).resolves.toEqual({ expunged: true });
+  });
+
+  it.each([
+    ["undefined", undefined],
+    ["null", null],
+    ["a non-object", "ok"],
+    ["an object without the field", {}],
+    ["a non-boolean field", { expunged: "yes" }],
+  ])("degrades to not-expunged for %s", async (_label, value) => {
+    vi.mocked(invoke).mockResolvedValue(value);
+    await expect(
+      imapDeleteMessages(testImapConfig, "INBOX", [1]),
+    ).resolves.toEqual({ expunged: false });
+  });
+
+  it("does not throw on a null result", async () => {
+    // Property access on null would throw, turning a successful delete into an
+    // error the caller might classify and retry.
+    vi.mocked(invoke).mockResolvedValue(null);
+    await expect(
+      imapMoveMessages(testImapConfig, "INBOX", [1], "Archive"),
+    ).resolves.toBeDefined();
+  });
+});

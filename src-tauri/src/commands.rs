@@ -1,7 +1,9 @@
+use crate::imap;
 use crate::imap::client as imap_client;
 use crate::imap::types::{
     DeltaCheckRequest, DeltaCheckResult, ImapConfig, ImapFetchResult, ImapFolder,
     ImapFolderSearchResult, ImapFolderStatus, ImapFolderSyncResult, ImapMessage,
+    RemovalResult,
 };
 use crate::smtp::client as smtp_client;
 use crate::smtp::types::{SmtpConfig, SmtpSendResult};
@@ -138,9 +140,10 @@ pub async fn imap_move_messages(
     folder: String,
     uids: Vec<u32>,
     destination: String,
-) -> Result<(), String> {
+) -> Result<RemovalResult, String> {
     if uids.is_empty() {
-        return Ok(());
+        // Nothing was flagged, so nothing is pending removal.
+        return Ok(RemovalResult { expunged: true });
     }
 
     let mut session = imap_client::connect(&config).await?;
@@ -151,9 +154,14 @@ pub async fn imap_move_messages(
         .collect::<Vec<_>>()
         .join(",");
 
-    imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?;
+    let result = imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?;
     let _ = session.logout().await;
-    Ok(())
+
+    if !result.expunged {
+        imap::caps::warn_uidplus_missing_once(&config.username, &config.host);
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
@@ -161,9 +169,10 @@ pub async fn imap_delete_messages(
     config: ImapConfig,
     folder: String,
     uids: Vec<u32>,
-) -> Result<(), String> {
+) -> Result<RemovalResult, String> {
     if uids.is_empty() {
-        return Ok(());
+        // Nothing was flagged, so nothing is pending removal.
+        return Ok(RemovalResult { expunged: true });
     }
 
     let mut session = imap_client::connect(&config).await?;
@@ -174,9 +183,14 @@ pub async fn imap_delete_messages(
         .collect::<Vec<_>>()
         .join(",");
 
-    imap_client::delete_messages(&mut session, &folder, &uid_set).await?;
+    let result = imap_client::delete_messages(&mut session, &folder, &uid_set).await?;
     let _ = session.logout().await;
-    Ok(())
+
+    if !result.expunged {
+        imap::caps::warn_uidplus_missing_once(&config.username, &config.host);
+    }
+
+    Ok(result)
 }
 
 #[tauri::command]
