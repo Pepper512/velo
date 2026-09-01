@@ -167,3 +167,26 @@
   larger than Batch A. Sequenced first within the batch, since P6's tests depend on it.
   Note this also unblocks **P8** (FTS5 quoting, Batch C), whose acceptance is likewise written against
   real SQLite — C gets cheaper as a side effect, but P8 stays in C.
+- **2026-09-01** — **Batch B built** on `feat/batch-b-credentials-migrations-llm` (plan approved by Jim
+  on PR #6 **before code** — the first batch to follow `02-work-loop.md`'s Tier 2 sequence properly;
+  Batch A ran on a blanket pre-approval given after the fact). Four commits: P12 harness + P6, then
+  P5, then P10. **Rust tests untouched; frontend suite 1,562 → 1,610.**
+  Three things worth recording because they contradict or extend the plan:
+  1. **`isEncrypted` cannot be made correct by shape alone, and the brief implied it could.** A
+     12-byte GCM IV encodes to exactly 16 base64 characters, so plaintext of the form
+     `<16 base64 chars>:<base64>` is *structurally identical* to real ciphertext. The check was still
+     tightened (canonical base64 including `length % 4`, which `atob` does not enforce; IV must decode
+     to exactly `IV_LENGTH`), but the residual ambiguity is **asserted by a test on purpose** so nobody
+     "fixes" it into something that silently guesses. What actually makes it safe is the fail-closed
+     caller: a wrong guess now raises `CredentialDecryptError` instead of putting the value on the wire.
+  2. **P10's injection surface was wider than the audit's wording.** The audit named the email *body*;
+     `subject`, `snippet`, and `from_address` are interpolated identically and are equally
+     attacker-controlled. All are fenced. Separately, `generateSmartReplies` wrapped its
+     already-fenced, joined messages in a **second outer fence** that the first inner closing tag
+     ended — a pre-existing bug found only by writing the test.
+  3. **P6's repair is now migration v24.** Because there are no down migrations anywhere in this
+     project, this is a one-way door: it is in its own commit so P5 and P10 stay independently
+     revertible. Unlike Batch A — where the promised per-item commit split proved fictional because
+     the edits interleaved — here the files are genuinely disjoint and the split is real.
+  `zod` used in `services/ai/modelOutput.ts` **and nowhere else**, matching the 2026-09-01 approval
+  that named P10 as its first use.
