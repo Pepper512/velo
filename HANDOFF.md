@@ -2,32 +2,58 @@
 
 > Living document, edited in place. Pinned to repo state at the top; next step first.
 
-- **Branch:** `main` @ `9a206e7` — Batch B is built and in review on `feat/batch-b-credentials-migrations-llm`.
-- **Open PRs:** the **Batch B** PR. D0, the handoff, the release guard, the merge rule, **Batch A** and the Batch B brief are merged.
+- **Branch:** `main` @ `1ab7518` — D0, A, B, C and Batch G's dependency half are all merged.
+- **Open PRs:** the one landing this edit (the **P11 brief**). No code PRs open.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
+- **State:** frontend suite **1,709** (was 1,562) · Rust **45** (was 6) · **0 prod npm advisories** (was 3).
 
 ---
 
-## 1. Exact next step — review and land the **Batch B** PR, then start **Batch C**
+## 1. Exact next step — **P11 needs Jim, then Batch E**
 
-Batch B (P5 credentials, P6 migrations, P10 LLM boundary, plus the P12 real-SQLite harness pulled
-forward) is **built, tested and pushed**. Frontend suite **1,562 → 1,610**. Plan was approved before
-code, per `02-work-loop.md`.
+### 1a. P11 is the one item an agent cannot finish
 
-**Batch C is next: P7, P8, P9, P14.** Two notes that change how it should be planned:
-- **P8 is now cheap.** Its acceptance is written against real SQLite, and the harness Batch B built
-  (`src/test/sqliteHarness.ts`) is exactly what it needed.
-- **P9 is half of the biggest open risk in the codebase.** The sanitizer has no adversarial tests and
-  still allows the `style` attribute, feeding an iframe with `sandbox="allow-same-origin"`, inside a
-  webview whose flat `capabilities/default.json` grants **every** window `sql:*`, `fs` write, and
-  `http://*`. The other half is **P11, which sits in Batch G**. One sanitizer bypass reaches the whole
-  local mail DB and unrestricted exfil. **Consider pulling P11 forward into C** so the chain closes in
-  one batch instead of staying open across two.
+Brief: `docs/briefs/2026-09-01-batch-g-p11-capabilities.md`. It is written and **not built**, for two
+reasons that are both recorded there:
+
+1. **The audit's proposed split is not viable as written.** It would give pop-out windows "read-only
+   sql", but `ThreadWindow.tsx` calls `runMigrations()` and renders the full `Composer` (draft
+   auto-save writes every 3 s), and `ActionBar`/`MessageItem` expose one-click unsubscribe, which
+   POSTs to **arbitrary sender-supplied URLs** — so `http` cannot be narrowed until unsubscribe moves
+   to a Rust command with URL validation. The brief proposes a smaller, honest narrowing instead.
+2. **Its acceptance cannot be automated.** The audit says so itself: *"no automated harness exists for
+   capability denial"*. An over-narrow grant fails at **runtime**, in a window that only opens on user
+   action — CI cannot catch it.
+
+**What Jim has to do:** approve the brief, then run the five manual QA steps in its *Verification*
+section against a dev build. Step 5 (a `fs|remove` invoke from a pop-out's console being **denied**)
+is the one positive security assertion; if it succeeds, the split achieved nothing.
+
+### 1b. Then Batch E (P13, P15)
+
+Per the audit order, E follows G. Both items are large and are **pure refactoring**, not security:
+P13 is the 40-file import cycle that drags the router into Gmail sync; P15 is the Rust `MailError`
+enum plus `open_stream()` dedupe. Together they are roughly a quarter of all remaining effort.
 
 ---
 
-## 1a. Superseded — the Batch B brief (kept for the audit trail)
+## 2. Standing instruction — verify the audit before building to it
+
+**Five of its claims have now failed verification.** It remains the right backlog for *what* to fix;
+its *measurements* are not reliable. Spot-check anything from it before sizing or sequencing work.
+
+| # | Claim | Reality |
+|---|---|---|
+| 1 | `serde_json` is an unused dependency (§4) | `tauri::generate_context!()` requires it; removing it fails the build with `E0433` |
+| 2 | P1 has six IMAP injection sites | Nine — `async-imap` leaves `uid_store`, `uid_search` and `append` unvalidated |
+| 3 | Components have 0% test coverage (§6) | 32 component test files exist; the metric script missed `.test.tsx` |
+| 4 | P9 lists six missing remote-image vectors | Five were already handled; five **different** ones were live and unlisted |
+| 5 | P14: poison queue op "retried forever, no ceiling" | `classifyError` defaults to non-retryable *and* `incrementRetry` already has a ceiling |
+
+---
+
+## 3. Superseded sections (kept for the audit trail)
 
 Batch B is **Tier 2** on all three counts (P5 credentials, P6 migrations, P10 LLM boundary).
 Write the brief the way Batch A's was written
