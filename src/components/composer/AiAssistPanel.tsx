@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { Editor } from "@tiptap/react";
-import { Wand2, Sparkles, ArrowDown, Briefcase } from "lucide-react";
+import { WandSparkles, Sparkles, ArrowDown, Briefcase } from "lucide-react";
 import { isAiAvailable } from "@/services/ai/providerManager";
 import {
   composeFromPrompt,
@@ -130,7 +130,7 @@ export function AiAssistPanel({ editor, isReplyMode, threadMessages }: AiAssistP
       <div className="flex items-center gap-1.5">
         <span className="text-xs text-text-tertiary mr-1">Transform:</span>
         <QuickAction
-          icon={<Wand2 size={11} />}
+          icon={<WandSparkles size={11} />}
           label="Improve"
           onClick={() => handleTransform("improve")}
           disabled={loading}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { Trash2, Pencil, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
+import { Trash2, Pencil, ChevronDown, ChevronUp, LoaderCircle } from "lucide-react";
 import { TextField } from "@/components/ui/TextField";
 import { useAccountStore } from "@/stores/accountStore";
 import { getLabelsForAccount, type DbLabel } from "@/services/db/labels";
@@ -151,7 +151,7 @@ export function SmartLabelEditor() {
           disabled={backfilling}
           className="text-xs text-accent hover:text-accent-hover disabled:opacity-50 flex items-center gap-1.5"
         >
-          {backfilling && <Loader2 size={12} className="animate-spin" />}
+          {backfilling && <LoaderCircle size={12} className="animate-spin" />}
           {backfilling ? "Applying to existing emails..." : "Apply to existing emails"}
         </button>
       )}

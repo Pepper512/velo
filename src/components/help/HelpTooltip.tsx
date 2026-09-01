@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
-import { HelpCircle } from "lucide-react";
+import { CircleQuestionMark } from "lucide-react";
 import { CONTEXTUAL_TIPS } from "@/constants/helpContent";
 import { navigateToHelp } from "@/router/navigate";
 
@@ -49,7 +49,7 @@ export function HelpTooltip({ contextId, size = 14 }: HelpTooltipProps) {
         className="inline-flex items-center text-text-tertiary hover:text-text-secondary transition-colors"
         aria-label={`Help: ${tip.title}`}
       >
-        <HelpCircle size={size} />
+        <CircleQuestionMark size={size} />
       </button>
       {open &&
         rect &&

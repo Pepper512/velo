@@ -2,9 +2,9 @@ import { useState, useCallback } from "react";
 import {
   ArrowLeft,
   ArrowRight,
-  CheckCircle2,
-  XCircle,
-  Loader2,
+  CircleCheck,
+  CircleX,
+  LoaderCircle,
   Calendar,
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
@@ -212,14 +212,14 @@ export function AddCalDavAccount({ onClose, onSuccess, onBack }: AddCalDavAccoun
             <div className="text-center py-6">
               {testing && (
                 <>
-                  <Loader2 size={32} className="animate-spin text-accent mx-auto mb-3" />
+                  <LoaderCircle size={32} className="animate-spin text-accent mx-auto mb-3" />
                   <p className="text-sm text-text-secondary">Testing connection...</p>
                 </>
               )}
 
               {!testing && testResult?.success && (
                 <>
-                  <CheckCircle2 size={32} className="text-success mx-auto mb-3" />
+                  <CircleCheck size={32} className="text-success mx-auto mb-3" />
                   <p className="text-sm font-medium text-text-primary">{testResult.message}</p>
                   {calendarCount > 0 && (
                     <p className="text-xs text-text-tertiary mt-1">
@@ -231,7 +231,7 @@ export function AddCalDavAccount({ onClose, onSuccess, onBack }: AddCalDavAccoun
 
               {!testing && testResult && !testResult.success && (
                 <>
-                  <XCircle size={32} className="text-danger mx-auto mb-3" />
+                  <CircleX size={32} className="text-danger mx-auto mb-3" />
                   <p className="text-sm font-medium text-text-primary">Connection failed</p>
                   <p className="text-xs text-text-tertiary mt-1">{testResult.message}</p>
                 </>
@@ -269,7 +269,7 @@ export function AddCalDavAccount({ onClose, onSuccess, onBack }: AddCalDavAccoun
 
         {step === "done" && (
           <div className="text-center py-6">
-            <CheckCircle2 size={32} className="text-success mx-auto mb-3" />
+            <CircleCheck size={32} className="text-success mx-auto mb-3" />
             <p className="text-sm font-medium text-text-primary">CalDAV account added!</p>
             <p className="text-xs text-text-tertiary mt-1">
               Your calendars will sync automatically.

@@ -33,7 +33,7 @@ import {
   GripVertical,
   BellRing,
   MessageSquare,
-  Wand2,
+  WandSparkles,
   Brain,
   MailQuestion,
   MailMinus,
@@ -44,7 +44,7 @@ import {
   Globe,
   Minimize2,
   ExternalLink,
-  AlertTriangle,
+  TriangleAlert,
   CheckCircle,
   ImageOff,
   LinkIcon,
@@ -740,7 +740,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
       },
       {
         id: "spam",
-        icon: AlertTriangle,
+        icon: TriangleAlert,
         title: "Spam",
         summary: "Report spam or rescue legitimate emails.",
         description:
@@ -809,7 +809,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
       },
       {
         id: "ai-compose",
-        icon: Wand2,
+        icon: WandSparkles,
         title: "AI compose & transform",
         summary: "Draft emails or rewrite text with AI assistance.",
         description:
@@ -940,7 +940,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
     cards: [
       {
         id: "phishing-detection",
-        icon: AlertTriangle,
+        icon: TriangleAlert,
         title: "Phishing detection",
         summary: "Automatic scanning of email links for threats.",
         description:
