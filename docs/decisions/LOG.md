@@ -190,3 +190,37 @@
      the edits interleaved — here the files are genuinely disjoint and the split is real.
   `zod` used in `services/ai/modelOutput.ts` **and nowhere else**, matching the 2026-09-01 approval
   that named P10 as its first use.
+- **2026-09-01** — **Batch C built** (P7, P8, P9, P14) on `feat/batch-c-rendering-and-capabilities`.
+  Suite **1,657 → 1,709**. Built under Jim's standing pre-approval ("preapprove next 10 tasks");
+  all four are **Tier 1**. **P11 is deliberately NOT in this PR** — see the entry below.
+  **Two more audit claims failed verification, bringing the running total to five:**
+  4. **P9 listed six missing remote-image vectors; five were already handled.** `srcset`,
+     `<picture><source>`, `<video poster>`, `<link rel=prefetch>` and unquoted `src` are all removed
+     by `sanitizeHtml`'s attribute **allowlist** before the blocker runs. Probing found **five
+     different** live bypasses the audit did not list: `<input type=image>`, `<audio src>`,
+     `<track src>`, CSS `image-set()`, and a newline inside the URL scheme (browsers strip it and
+     fetch anyway). That lesson drove the fix: `stripRemoteImages` is now **DOM-based** rather than
+     regex, so new vectors are covered by construction instead of by having been enumerated.
+  5. **P14's queue claim is wrong on both counts.** A malformed `op.params` is **not** "retried
+     forever", and there **is** a retry ceiling: `classifyError` defaults to
+     `permanent`/non-retryable (`networkErrors.ts:80`), so a JSON `SyntaxError` dead-letters on the
+     first attempt, and `incrementRetry` (`pendingOperations.ts:86`) already fails the op at
+     `max_retries`. Tests were added to pin the working behaviour rather than to "fix" it.
+  **New: ADR-002** — the three-bucket error-handling policy (propagate / surface / log). Applied to
+  draft auto-save, which was the worst shape of the class: failing silently while the user typed,
+  under a label reading "Draft saved". The send-path and sync sites are named in the ADR but left for
+  a later batch — they are bucket 2 and need UI surfaces that are design decisions, not mechanical edits.
+- **2026-09-01** — **P11 deferred out of Batch C, with a finding that invalidates the audit's plan.**
+  The audit proposes splitting `capabilities/default.json` into a window-scoped pair, giving
+  `splashscreen`/`thread-*`/`compose-*` only "events + window controls + read-only sql if needed".
+  **That is not viable as written:** `ThreadWindow.tsx` calls `runMigrations()` (which needs SQL
+  *execute*) and renders the full `ThreadView` + `Composer`, including the unsubscribe flow and the AI
+  features — so pop-out windows legitimately need `sql:allow-execute` and, for unsubscribe against
+  arbitrary sender URLs, broad `http`. Narrowing `http` therefore depends on first moving unsubscribe
+  POSTs to a Rust command with URL validation (the audit's own alternative), which is separate work.
+  **It is also the one item in the backlog whose acceptance cannot be automated** — the audit says so:
+  "a `thread-*` window attempting `fs.writeTextFile` is denied (manual QA step … no automated harness
+  exists for capability denial)". Shipping an unverifiable Tier-2 security-config change that could
+  break pop-out windows for users is worse than sequencing it deliberately, so it gets its own brief
+  and PR, gated on Jim's manual QA. **Consequence: the P9+P11 chain stays half-open** — P9's side is
+  closed here; P11's is not.
