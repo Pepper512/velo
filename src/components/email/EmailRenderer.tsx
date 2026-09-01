@@ -1,9 +1,10 @@
 import { useRef, useCallback, useLayoutEffect, useMemo, useState, useEffect } from "react";
 import { ImageOff } from "lucide-react";
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openEmailLink } from "@/services/links/openLink";
 import { stripRemoteImages, hasBlockedImages } from "@/utils/imageBlocker";
 import { addToAllowlist } from "@/services/db/imageAllowlist";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
+import { linkifyEscapedText } from "@/utils/linkify";
 import { useUIStore } from "@/stores/uiStore";
 import type { DbAttachment } from "@/services/db/attachments";
 
@@ -93,7 +94,7 @@ export function EmailRenderer({
 
   const bodyHtml = useMemo(() => {
     let body = sanitizedBody
-      ?? `<pre style="white-space: pre-wrap; font-family: inherit;">${escapeHtml(text ?? "")}</pre>`;
+      ?? `<pre style="white-space: pre-wrap; font-family: inherit;">${linkifyEscapedText(escapeHtml(text ?? ""))}</pre>`;
 
     if (shouldBlock && sanitizedBody) {
       body = stripRemoteImages(body);
@@ -180,16 +181,16 @@ export function EmailRenderer({
     resizeObserver.observe(doc.body);
     observerRef.current = resizeObserver;
 
-    // Open links in external browser via Tauri opener
+    // Every anchor click leaves through openEmailLink (SPEC-F-2 REQ-2): it
+    // decides between the system browser, a silent no-op for in-page anchors,
+    // and a visible notice when the OS refuses. Navigation inside the sandboxed
+    // iframe is always prevented.
     const handleClick = (e: MouseEvent) => {
       const target = e.target as HTMLElement;
       const anchor = target.closest("a");
-      if (anchor?.href) {
-        e.preventDefault();
-        openUrl(anchor.href).catch((err) => {
-          console.error("Failed to open link:", err);
-        });
-      }
+      if (!anchor) return;
+      e.preventDefault();
+      void openEmailLink(anchor.getAttribute("href") ? anchor.href : null, window.location.origin);
     };
     doc.addEventListener("click", handleClick);
 
