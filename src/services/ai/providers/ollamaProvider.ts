@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { fetch } from "@tauri-apps/plugin-http";
-import type { AiProviderClient, AiCompletionRequest } from "../types";
+import type { AiProviderClient } from "../types";
+import { createOpenAICompatibleProvider } from "./openAiCompatible";
 
 let instance: OpenAI | null = null;
 let cachedKey: string | null = null;
@@ -22,33 +23,7 @@ function getClient(serverUrl: string, model: string): OpenAI {
 export function createOllamaProvider(serverUrl: string, model: string): AiProviderClient {
   const client = getClient(serverUrl, model);
 
-  return {
-    async complete(req: AiCompletionRequest): Promise<string> {
-      const response = await client.chat.completions.create({
-        model,
-        max_tokens: req.maxTokens ?? 1024,
-        messages: [
-          { role: "system", content: req.systemPrompt },
-          { role: "user", content: req.userContent },
-        ],
-      });
-
-      return response.choices[0]?.message?.content ?? "";
-    },
-
-    async testConnection(): Promise<boolean> {
-      try {
-        await client.chat.completions.create({
-          model,
-          max_tokens: 10,
-          messages: [{ role: "user", content: "Say hi" }],
-        });
-        return true;
-      } catch {
-        return false;
-      }
-    },
-  };
+  return createOpenAICompatibleProvider(client, model);
 }
 
 export function clearOllamaProvider(): void {

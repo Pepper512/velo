@@ -1,4 +1,5 @@
 import { useMatches } from "@tanstack/react-router";
+import { routeIdToLabel } from "@/router/routeIdToLabel";
 
 /**
  * Safely call useMatches — returns [] when no router context is available
@@ -14,31 +15,13 @@ function useMatchesSafe() {
 
 /**
  * Derive the active label from the current route.
- * Returns the same string format as the old uiStore.activeLabel.
+ *
+ * Shares `routeIdToLabel` with the non-React `getActiveLabel` (audit P16(6)).
+ * This copy was missing the `/attachments` and `/tasks` branches, so the sidebar
+ * highlighted "Inbox" on those pages.
  */
 export function useActiveLabel(): string {
-  const matches = useMatchesSafe();
-  for (const match of matches) {
-    if (match.routeId === "/mail/$label" || match.routeId === "/mail/$label/thread/$threadId") {
-      return (match.params as { label: string }).label;
-    }
-    if (match.routeId === "/label/$labelId" || match.routeId === "/label/$labelId/thread/$threadId") {
-      return (match.params as { labelId: string }).labelId;
-    }
-    if (match.routeId === "/smart-folder/$folderId" || match.routeId === "/smart-folder/$folderId/thread/$threadId") {
-      return `smart-folder:${(match.params as { folderId: string }).folderId}`;
-    }
-    if (match.routeId === "/settings/$tab" || match.routeId === "/settings") {
-      return "settings";
-    }
-    if (match.routeId === "/calendar") {
-      return "calendar";
-    }
-    if (match.routeId === "/help/$topic" || match.routeId === "/help") {
-      return "help";
-    }
-  }
-  return "inbox";
+  return routeIdToLabel(useMatchesSafe());
 }
 
 /**

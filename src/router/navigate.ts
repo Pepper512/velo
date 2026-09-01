@@ -1,4 +1,5 @@
 import { router } from "./index";
+import { routeIdToLabel } from "./routeIdToLabel";
 
 /** Known system labels that map to /mail/$label */
 const SYSTEM_LABELS = new Set([
@@ -193,36 +194,12 @@ export function navigateBack(): void {
 
 /**
  * Get the active label from the current router state (non-React helper).
+ *
+ * Shares `routeIdToLabel` with the React `useActiveLabel` (audit P16(6)); the
+ * two used to be separate copies and had drifted.
  */
 export function getActiveLabel(): string {
-  const matches = router.state.matches;
-  for (const match of matches) {
-    if (match.routeId === "/mail/$label" || match.routeId === "/mail/$label/thread/$threadId") {
-      return (match.params as { label: string }).label;
-    }
-    if (match.routeId === "/label/$labelId" || match.routeId === "/label/$labelId/thread/$threadId") {
-      return (match.params as { labelId: string }).labelId;
-    }
-    if (match.routeId === "/smart-folder/$folderId" || match.routeId === "/smart-folder/$folderId/thread/$threadId") {
-      return `smart-folder:${(match.params as { folderId: string }).folderId}`;
-    }
-    if (match.routeId === "/settings/$tab" || match.routeId === "/settings") {
-      return "settings";
-    }
-    if (match.routeId === "/attachments") {
-      return "attachments";
-    }
-    if (match.routeId === "/tasks") {
-      return "tasks";
-    }
-    if (match.routeId === "/calendar") {
-      return "calendar";
-    }
-    if (match.routeId === "/help/$topic" || match.routeId === "/help") {
-      return "help";
-    }
-  }
-  return "inbox";
+  return routeIdToLabel(router.state.matches);
 }
 
 /**

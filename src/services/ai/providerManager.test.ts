@@ -97,7 +97,10 @@ describe("providerManager", () => {
       });
 
       await getActiveProvider();
-      expect(createClaudeProvider).toHaveBeenCalledWith("sk-ant-test", "claude-haiku-4-5-20251001");
+      // The current Claude model ID carries no date suffix. The previous value
+      // `claude-haiku-4-5-20251001` was a stale form (audit: refresh provider
+      // model lists).
+      expect(createClaudeProvider).toHaveBeenCalledWith("sk-ant-test", "claude-haiku-4-5");
     });
 
     it("creates openai provider with default model", async () => {
