@@ -8,6 +8,7 @@ use tokio::net::TcpStream;
 use tokio_native_tls::TlsStream;
 
 use super::types::*;
+use super::wire;
 
 // ---------- Timeout constants ----------
 
@@ -308,7 +309,19 @@ pub async fn fetch_messages(
         // Extract INTERNALDATE as fallback for messages with unparseable Date headers
         let internal_date = fetch.internal_date().map(|dt| dt.timestamp());
 
-        match parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, internal_date) {
+        match parse_message(
+                    &parser,
+                    raw,
+                    FetchEnvelope {
+                        uid,
+                        folder,
+                        raw_size,
+                        is_read,
+                        is_starred,
+                        is_draft,
+                        internal_date,
+                    },
+                ) {
             Ok(msg) => messages.push(msg),
             Err(e) => {
                 log::warn!("Failed to parse message UID {uid}: {e}");
@@ -363,7 +376,19 @@ pub async fn fetch_message_body(
     let is_draft = flags.iter().any(|f| matches!(f, Flag::Draft));
 
     let parser = MessageParser::default();
-    parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, None)
+    parse_message(
+        &parser,
+        raw,
+        FetchEnvelope {
+            uid,
+            folder,
+            raw_size,
+            is_read,
+            is_starred,
+            is_draft,
+            internal_date: None,
+        },
+    )
 }
 
 /// Get UIDs of messages newer than `last_uid`.
@@ -412,21 +437,31 @@ pub async fn search_all_uids(
 
 /// Set or remove flags on messages.
 ///
-/// `flag_op`: "+FLAGS" to add, "-FLAGS" to remove
-/// `flags`: e.g. "(\\Seen)" or "(\\Flagged)"
+/// `add`: `true` sends `+FLAGS`, `false` sends `-FLAGS`.
+/// `flags`: unrendered flag names, with or without the leading backslash
+/// (`["Seen"]`, `["\\Flagged"]`). Rendering happens here, next to the wire, so
+/// there is no window in which an unvalidated flag string exists.
 pub async fn set_flags(
     session: &mut ImapSession,
     folder: &str,
     uid_set: &str,
-    flag_op: &str,
-    flags: &str,
+    add: bool,
+    flags: &[String],
 ) -> Result<(), String> {
+    // Validate before opening the mailbox: a rejected flag should not cost a SELECT.
+    //
+    // `async-imap` interpolates `uid_store`'s arguments verbatim (verified in
+    // async-imap 0.10.4 `client.rs:808-828`) — unlike `select`/`uid_copy`/`uid_mv`,
+    // it applies no `validate_str`. Both halves are therefore checked here.
+    let flag_op = if add { "+FLAGS" } else { "-FLAGS" };
+    let query = format!("{flag_op} {}", wire::build_flag_list(flags)?);
+    wire::validate_uid_set(uid_set)?;
+
     tokio::time::timeout(IMAP_CMD_TIMEOUT, session.select(folder))
         .await
         .map_err(|_| format!("SELECT {folder} timed out after {}s — check your server settings or network connection", IMAP_CMD_TIMEOUT.as_secs()))?
         .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
 
-    let query = format!("{flag_op} {flags}");
     tokio::time::timeout(IMAP_CMD_TIMEOUT, async {
         let stream = session
             .uid_store(uid_set, &query)
@@ -527,13 +562,26 @@ pub async fn delete_messages(
 }
 
 /// Append a raw message to a folder (for saving sent mail or drafts).
+///
+/// `async-imap`'s `append` is the one mailbox-taking call that does **not** run
+/// `validate_str` — it interpolates both the mailbox and the flag list straight into
+/// the command (verified in async-imap 0.10.4 `client.rs:1119-1136`). Validate both here.
 pub async fn append_message(
     session: &mut ImapSession,
     folder: &str,
-    flags: Option<&str>,
+    flags: Option<&[String]>,
     raw_message: &[u8],
 ) -> Result<(), String> {
-    tokio::time::timeout(IMAP_FETCH_TIMEOUT, session.append(folder, flags, None, raw_message))
+    wire::validate_mailbox(folder)?;
+    let rendered_flags = match flags {
+        Some(f) if !f.is_empty() => Some(wire::build_flag_list(f)?),
+        _ => None,
+    };
+
+    tokio::time::timeout(
+        IMAP_FETCH_TIMEOUT,
+        session.append(folder, rendered_flags.as_deref(), None, raw_message),
+    )
         .await
         .map_err(|_| format!("APPEND timed out after {}s — check your server settings or network connection", IMAP_FETCH_TIMEOUT.as_secs()))?
         .map_err(|e| format!("APPEND failed: {e}"))
@@ -768,7 +816,7 @@ pub async fn search_folder(
 
     // UID SEARCH with optional SINCE date filter (RFC 3501 §6.4.4)
     let search_query = match &since_date {
-        Some(date) => format!("SINCE {date}"),
+        Some(date) => format!("SINCE {}", wire::validate_search_date(date)?),
         None => "ALL".to_string(),
     };
     let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
@@ -821,7 +869,7 @@ pub async fn sync_folder(
 
     // UID SEARCH with optional SINCE date filter (RFC 3501 §6.4.4)
     let search_query = match &since_date {
-        Some(date) => format!("SINCE {date}"),
+        Some(date) => format!("SINCE {}", wire::validate_search_date(date)?),
         None => "ALL".to_string(),
     };
     let uids_raw = tokio::time::timeout(IMAP_SEARCH_TIMEOUT, session.uid_search(&search_query))
@@ -888,7 +936,19 @@ pub async fn sync_folder(
                     let is_draft = flags.iter().any(|fl| matches!(fl, Flag::Draft));
                     let internal_date = f.internal_date().map(|dt| dt.timestamp());
 
-                    match parse_message(&parser, raw, uid, folder, raw_size, is_read, is_starred, is_draft, internal_date) {
+                    match parse_message(
+                    &parser,
+                    raw,
+                    FetchEnvelope {
+                        uid,
+                        folder,
+                        raw_size,
+                        is_read,
+                        is_starred,
+                        is_draft,
+                        internal_date,
+                    },
+                ) {
                         Ok(msg) => all_messages.push(msg),
                         Err(e) => log::warn!("sync_folder: failed to parse UID {uid}: {e}"),
                     }
@@ -959,18 +1019,11 @@ pub async fn raw_fetch_messages(
     }
 
     // LOGIN
-    let login_cmd = if config.auth_method == "oauth2" {
-        // XOAUTH2: AUTHENTICATE XOAUTH2 <base64>
-        let xoauth2 = format!("user={}\x01auth=Bearer {}\x01\x01", config.username, config.password);
-        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, xoauth2.as_bytes());
-        format!("a1 AUTHENTICATE XOAUTH2 {b64}\r\n")
-    } else {
-        format!("a1 LOGIN \"{}\" \"{}\"\r\n", config.username, config.password)
-    };
+    let login_cmd = build_raw_login_command(config)?;
     raw_send_and_wait(&mut reader, login_cmd.as_bytes(), "a1").await?;
 
     // SELECT
-    let select_cmd = format!("a2 SELECT \"{folder}\"\r\n");
+    let select_cmd = format!("a2 SELECT {}\r\n", wire::quote_string(folder)?);
     let select_response = raw_send_and_wait(&mut reader, select_cmd.as_bytes(), "a2").await?;
 
     // Parse SELECT response for UIDVALIDITY, EXISTS, UNSEEN
@@ -1002,7 +1055,10 @@ pub async fn raw_fetch_messages(
     };
 
     // UID FETCH with full body
-    let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS INTERNALDATE BODY.PEEK[])\r\n");
+    let fetch_cmd = format!(
+        "a3 UID FETCH {} (UID FLAGS INTERNALDATE BODY.PEEK[])\r\n",
+        wire::validate_uid_set(uid_range)?
+    );
     reader.get_mut().write_all(fetch_cmd.as_bytes()).await
         .map_err(|e| format!("FETCH write: {e}"))?;
 
@@ -1019,13 +1075,15 @@ pub async fn raw_fetch_messages(
         match parse_message(
             &parser,
             &raw_msg.body,
-            raw_msg.uid,
-            folder,
-            raw_msg.body.len() as u32,
-            raw_msg.is_read,
-            raw_msg.is_starred,
-            raw_msg.is_draft,
-            raw_msg.internal_date,
+            FetchEnvelope {
+                uid: raw_msg.uid,
+                folder,
+                raw_size: raw_msg.body.len() as u32,
+                is_read: raw_msg.is_read,
+                is_starred: raw_msg.is_starred,
+                is_draft: raw_msg.is_draft,
+                internal_date: raw_msg.internal_date,
+            },
         ) {
             Ok(msg) => messages.push(msg),
             Err(e) => log::warn!("RAW FETCH: failed to parse UID {}: {e}", raw_msg.uid),
@@ -1041,6 +1099,12 @@ pub async fn raw_fetch_messages(
 /// Raw IMAP diagnostic: connect via raw TCP/TLS (bypassing async-imap),
 /// authenticate, SELECT folder, FETCH, and return raw server response.
 /// This helps diagnose servers that async-imap can't parse.
+///
+/// **Debug builds only** (audit P3). This function returns a transcript of a live
+/// authenticated IMAP session; that transcript can contain credential material if
+/// the server echoes part of the authentication line back in a `BAD` response. It
+/// is a developer tool and has no place in a shipped binary.
+#[cfg(debug_assertions)]
 pub async fn raw_fetch_diagnostic(
     config: &ImapConfig,
     folder: &str,
@@ -1062,21 +1126,26 @@ pub async fn raw_fetch_diagnostic(
         output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
     }
 
-    // LOGIN
-    let login_cmd = format!("a1 LOGIN \"{}\" \"{}\"\r\n", config.username, config.password);
+    // AUTHENTICATE / LOGIN — honours `auth_method`, so an OAuth access token goes
+    // out as an XOAUTH2 bearer token and never as a plaintext LOGIN password.
+    let login_cmd = build_raw_login_command(config)?;
     stream.write_all(login_cmd.as_bytes()).await.map_err(|e| format!("LOGIN: {e}"))?;
     let n = stream.read(&mut buf).await.map_err(|e| format!("LOGIN read: {e}"))?;
-    output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
+    // The server's reply to the auth command may quote the credential we just sent.
+    output.push_str(&format!("S: {}", redact_auth_echo(&String::from_utf8_lossy(&buf[..n]), config)));
 
     // SELECT
-    let select_cmd = format!("a2 SELECT \"{folder}\"\r\n");
+    let select_cmd = format!("a2 SELECT {}\r\n", wire::quote_string(folder)?);
     stream.write_all(select_cmd.as_bytes()).await.map_err(|e| format!("SELECT: {e}"))?;
     tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     let n = stream.read(&mut buf).await.map_err(|e| format!("SELECT read: {e}"))?;
     output.push_str(&format!("S: {}", String::from_utf8_lossy(&buf[..n])));
 
     // UID FETCH — just get UID and FLAGS first (small response)
-    let fetch_cmd = format!("a3 UID FETCH {uid_range} (UID FLAGS)\r\n");
+    let fetch_cmd = format!(
+        "a3 UID FETCH {} (UID FLAGS)\r\n",
+        wire::validate_uid_set(uid_range)?
+    );
     stream.write_all(fetch_cmd.as_bytes()).await.map_err(|e| format!("FETCH: {e}"))?;
 
     let mut fetch_response = String::new();
@@ -1098,12 +1167,62 @@ pub async fn raw_fetch_diagnostic(
 
     let _ = stream.write_all(b"a4 LOGOUT\r\n").await;
 
-    log::info!("RAW IMAP DIAGNOSTIC for {folder}:\n{output}");
+    // `debug!`, not `info!`: this is a full session transcript. In a debug build the
+    // log level is `debug`, so it is still visible to a developer who wants it; it
+    // never reaches a release log because the whole command is compiled out.
+    log::debug!("RAW IMAP DIAGNOSTIC for {folder}:\n{output}");
 
     Ok(output)
 }
 
+/// Blank out any credential the server echoed back to us.
+///
+/// A server that dislikes our authentication line may quote it verbatim in its
+/// `BAD`/`NO` response. Since the diagnostic transcript is both returned to the UI
+/// and written to the log, scrub the username and secret out of it first.
+#[cfg(debug_assertions)]
+fn redact_auth_echo(response: &str, config: &ImapConfig) -> String {
+    let mut scrubbed = response.to_string();
+    for secret in [config.password.as_str(), config.username.as_str()] {
+        if secret.len() >= 4 {
+            scrubbed = scrubbed.replace(secret, "[redacted]");
+        }
+    }
+    scrubbed
+}
+
 // ---------- Raw TCP helpers ----------
+
+/// Build the tag-`a1` authentication command for the raw (non-`async-imap`) paths.
+///
+/// Both raw paths share this so they cannot drift apart again: before Batch A,
+/// `raw_fetch_messages` branched on `auth_method` correctly while
+/// `raw_fetch_diagnostic` always used `LOGIN` — which, for an OAuth account, sent
+/// the **access token as a plaintext password** (audit P3).
+///
+/// Every interpolated value is validated: `quote_string` for the `LOGIN` arguments,
+/// `validate_sasl_username` for the XOAUTH2 blob (which is base64-encoded, so CRLF
+/// cannot break framing there, but a `\x01` would desynchronise the field split).
+fn build_raw_login_command(config: &ImapConfig) -> Result<String, String> {
+    if config.auth_method == "oauth2" {
+        let xoauth2 = format!(
+            "user={}\x01auth=Bearer {}\x01\x01",
+            wire::validate_sasl_username(&config.username)?,
+            config.password
+        );
+        let b64 = base64::Engine::encode(
+            &base64::engine::general_purpose::STANDARD,
+            xoauth2.as_bytes(),
+        );
+        Ok(format!("a1 AUTHENTICATE XOAUTH2 {b64}\r\n"))
+    } else {
+        Ok(format!(
+            "a1 LOGIN {} {}\r\n",
+            wire::quote_string(&config.username)?,
+            wire::quote_string(&config.password)?
+        ))
+    }
+}
 
 /// Intermediate struct for a raw-parsed IMAP message before mail-parser processing.
 struct RawFetchedMessage {
@@ -1255,7 +1374,7 @@ async fn raw_parse_fetch_responses(
                 if uid == 0 {
                     log::warn!("RAW FETCH: could not parse UID from: {}", line.trim());
                     // Still need to consume any literal
-                    if let Some(literal_size) = extract_literal_size(&line) {
+                    if let Some(literal_size) = extract_literal_size(&line)? {
                         let mut discard = vec![0u8; literal_size];
                         reader.read_exact(&mut discard).await
                             .map_err(|e| format!("discard literal: {e}"))?;
@@ -1273,7 +1392,7 @@ async fn raw_parse_fetch_responses(
                 let internal_date = extract_internal_date(&line);
 
                 // Check for literal: {size}
-                if let Some(literal_size) = extract_literal_size(&line) {
+                if let Some(literal_size) = extract_literal_size(&line)? {
                     // Read exactly `literal_size` bytes
                     let mut body = vec![0u8; literal_size];
                     reader.read_exact(&mut body).await
@@ -1389,14 +1508,37 @@ fn is_leap_year(y: i64) -> bool {
     (y % 4 == 0 && y % 100 != 0) || (y % 400 == 0)
 }
 
+/// Largest IMAP literal Velo will allocate for, in bytes.
+///
+/// The size comes from the server (`{N}`) and is used directly as an allocation
+/// length. Rust's allocation-failure path **aborts the process** — it is not a
+/// catchable error — so `{4294967295}` from a hostile or merely broken server is a
+/// remote kill switch (audit P4). 64 MiB is far above any real message and far
+/// below anything that hurts.
+const MAX_LITERAL_BYTES: usize = 64 * 1024 * 1024;
+
 /// Extract literal size from a line ending with {1234}\r\n
-fn extract_literal_size(line: &str) -> Option<usize> {
+///
+/// `Ok(None)` means "this line declares no literal". `Err` means "it declares one we
+/// refuse to allocate" — the caller must not fall back to treating that as `None`,
+/// or the literal bytes would be re-parsed as protocol.
+fn extract_literal_size(line: &str) -> Result<Option<usize>, String> {
     let trimmed = line.trim_end();
     if !trimmed.ends_with('}') {
-        return None;
+        return Ok(None);
     }
-    let brace_start = trimmed.rfind('{')?;
-    trimmed[brace_start + 1..trimmed.len() - 1].parse().ok()
+    let Some(brace_start) = trimmed.rfind('{') else {
+        return Ok(None);
+    };
+    let Ok(size) = trimmed[brace_start + 1..trimmed.len() - 1].parse::<usize>() else {
+        return Ok(None);
+    };
+    if size > MAX_LITERAL_BYTES {
+        return Err(format!(
+            "server declared a {size}-byte literal, above the {MAX_LITERAL_BYTES}-byte limit"
+        ));
+    }
+    Ok(Some(size))
 }
 
 // ---------- Internal helpers ----------
@@ -1571,21 +1713,41 @@ fn detect_special_use(name: &async_imap::types::Name) -> Option<String> {
     }
 }
 
-/// Parse a raw email message into our ImapMessage struct.
+/// Everything about a fetched message that comes from the IMAP envelope rather
+/// than from the MIME body: the identity of the message and the server's flags.
 ///
-/// `internal_date`: optional INTERNALDATE timestamp from the IMAP server,
-/// used as fallback when the Date header cannot be parsed.
-fn parse_message(
-    parser: &MessageParser,
-    raw: &[u8],
+/// Exists so `parse_message` takes three arguments instead of nine — the six
+/// scalars below were previously positional, which meant three consecutive `bool`s
+/// (`is_read`, `is_starred`, `is_draft`) that the compiler could not tell apart if
+/// a call site got them out of order.
+struct FetchEnvelope<'a> {
     uid: u32,
-    folder: &str,
+    folder: &'a str,
     raw_size: u32,
     is_read: bool,
     is_starred: bool,
     is_draft: bool,
+    /// INTERNALDATE from the server, used as a fallback when the `Date` header is
+    /// missing or unparseable.
     internal_date: Option<i64>,
+}
+
+/// Parse a raw email message into our ImapMessage struct.
+fn parse_message(
+    parser: &MessageParser,
+    raw: &[u8],
+    envelope: FetchEnvelope<'_>,
 ) -> Result<ImapMessage, String> {
+    let FetchEnvelope {
+        uid,
+        folder,
+        raw_size,
+        is_read,
+        is_starred,
+        is_draft,
+        internal_date,
+    } = envelope;
+
     let message = parser.parse(raw).ok_or("Failed to parse MIME message")?;
 
     let message_id = message.message_id().map(|s| s.to_string());
@@ -1701,7 +1863,7 @@ fn parse_message(
                 mime_type,
                 size: att.len() as u32,
                 content_id: att.content_id().map(|s| s.to_string()),
-                is_inline: att.content_disposition().map_or(false, |cd| cd.is_inline()),
+                is_inline: att.content_disposition().is_some_and(|cd| cd.is_inline()),
             })
         })
         .collect();
@@ -1812,10 +1974,7 @@ fn extract_first_address(
 
 /// Format an address list as a comma-separated string of "Name <email>" or "email".
 fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
-    let addr = match addr {
-        Some(a) => a,
-        None => return None,
-    };
+    let addr = addr?;
 
     let parts: Vec<String> = addr
         .iter()
@@ -1832,5 +1991,154 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
         None
     } else {
         Some(parts.join(", "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------- extract_literal_size (audit P4) ----------
+
+    #[test]
+    fn literal_size_parses_a_normal_fetch_line() {
+        let line = "* 1 FETCH (UID 42 FLAGS (\\Seen) BODY[] {1024}\r\n";
+        assert_eq!(extract_literal_size(line).unwrap(), Some(1024));
+    }
+
+    #[test]
+    fn literal_size_is_none_when_no_literal_is_declared() {
+        for line in [
+            "* 1 FETCH (UID 42 FLAGS (\\Seen))\r\n",
+            "a3 OK FETCH completed\r\n",
+            "",
+            "* 1 FETCH (UID 42 {notanumber}\r\n",
+        ] {
+            assert_eq!(
+                extract_literal_size(line).unwrap(),
+                None,
+                "line {line:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_size_rejects_a_hostile_allocation() {
+        // The bug: this value went straight into `vec![0u8; n]`. Rust aborts the
+        // process on allocation failure — it is not a catchable error — so a
+        // hostile or broken server could kill the app remotely.
+        let line = "* 1 FETCH (UID 42 BODY[] {99999999999}\r\n";
+        let err = extract_literal_size(line).unwrap_err();
+        assert!(err.contains("above the"), "got {err}");
+
+        // 4 GiB, the value named in the audit.
+        let line = "* 1 FETCH (UID 42 BODY[] {4294967295}\r\n";
+        assert!(extract_literal_size(line).is_err());
+    }
+
+    #[test]
+    fn literal_size_boundary_is_exact() {
+        let at_limit = format!("* 1 FETCH (BODY[] {{{MAX_LITERAL_BYTES}}}\r\n");
+        assert_eq!(
+            extract_literal_size(&at_limit).unwrap(),
+            Some(MAX_LITERAL_BYTES)
+        );
+
+        let over_limit = format!("* 1 FETCH (BODY[] {{{}}}\r\n", MAX_LITERAL_BYTES + 1);
+        assert!(extract_literal_size(&over_limit).is_err());
+    }
+
+    // ---------- raw command construction (audit P1) ----------
+
+    fn config(auth_method: &str, username: &str, password: &str) -> ImapConfig {
+        ImapConfig {
+            host: "imap.example.com".to_string(),
+            port: 993,
+            username: username.to_string(),
+            password: password.to_string(),
+            security: "tls".to_string(),
+            auth_method: auth_method.to_string(),
+            accept_invalid_certs: false,
+        }
+    }
+
+    #[test]
+    fn raw_login_quotes_its_arguments() {
+        let cmd = build_raw_login_command(&config("password", "user@example.com", "p@ss")).unwrap();
+        assert_eq!(cmd, "a1 LOGIN \"user@example.com\" \"p@ss\"\r\n");
+    }
+
+    #[test]
+    fn raw_login_escapes_quotes_in_a_password() {
+        let cmd = build_raw_login_command(&config("password", "u", "a\"b\\c")).unwrap();
+        assert_eq!(cmd, "a1 LOGIN \"u\" \"a\\\"b\\\\c\"\r\n");
+        // Exactly one CRLF: the command terminator.
+        assert_eq!(cmd.matches("\r\n").count(), 1);
+    }
+
+    #[test]
+    fn raw_login_rejects_crlf_injection() {
+        let hostile = build_raw_login_command(&config(
+            "password",
+            "user\r\na9 DELETE INBOX",
+            "pw",
+        ));
+        assert!(hostile.is_err());
+    }
+
+    /// Stand-in for an OAuth access token. Deliberately does NOT use a realistic
+    /// `ya29.`-style prefix: gitleaks flags that shape as a live credential, and a
+    /// secret-scanning gate that cries wolf on its own test fixtures is a gate
+    /// people learn to ignore. The tests below only care that this exact string
+    /// does not appear where it should not.
+    const FAKE_TOKEN: &str = "test-token-not-a-real-credential";
+
+    #[test]
+    fn oauth_accounts_never_send_a_login_password() {
+        // Audit P3: the diagnostic path used to ignore `auth_method` and send the
+        // access token as a plaintext LOGIN password.
+        let cmd =
+            build_raw_login_command(&config("oauth2", "user@example.com", FAKE_TOKEN)).unwrap();
+        assert!(cmd.starts_with("a1 AUTHENTICATE XOAUTH2 "), "got {cmd}");
+        assert!(!cmd.contains("LOGIN"));
+        assert!(
+            !cmd.contains(FAKE_TOKEN),
+            "the token must be base64-encoded, not literal"
+        );
+    }
+
+    #[test]
+    fn select_and_fetch_commands_cannot_be_split() {
+        // Rendering the same way the raw paths do.
+        let hostile_folder = "INBOX\"\r\na9 DELETE \"Important";
+        assert!(wire::quote_string(hostile_folder).is_err());
+
+        let hostile_range = "1:*\r\na9 LOGOUT";
+        assert!(wire::validate_uid_set(hostile_range).is_err());
+
+        // And the benign forms still render exactly as before.
+        assert_eq!(
+            format!("a2 SELECT {}\r\n", wire::quote_string("INBOX").unwrap()),
+            "a2 SELECT \"INBOX\"\r\n"
+        );
+        assert_eq!(
+            format!(
+                "a3 UID FETCH {} (UID FLAGS)\r\n",
+                wire::validate_uid_set("1,5,9").unwrap()
+            ),
+            "a3 UID FETCH 1,5,9 (UID FLAGS)\r\n"
+        );
+    }
+
+    // ---------- redaction (audit P3) ----------
+
+    #[test]
+    fn diagnostic_transcript_redacts_echoed_credentials() {
+        let cfg = config("oauth2", "user@example.com", FAKE_TOKEN);
+        let echoed = format!("a1 BAD rejected {FAKE_TOKEN} for user@example.com\r\n");
+        let scrubbed = redact_auth_echo(&echoed, &cfg);
+        assert!(!scrubbed.contains(FAKE_TOKEN), "got {scrubbed}");
+        assert!(!scrubbed.contains("user@example.com"), "got {scrubbed}");
+        assert!(scrubbed.contains("[redacted]"));
     }
 }

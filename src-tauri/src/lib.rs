@@ -40,6 +40,14 @@ fn set_tray_tooltip(app: tauri::AppHandle, tooltip: String) -> Result<(), String
     }
 }
 
+/// Open the WebView inspector. **Debug builds only** (audit P3).
+///
+/// The main window renders untrusted email HTML; a DevTools hook reachable from a
+/// release build hands a debugger to anything that reaches the IPC bridge. Tauri
+/// enables DevTools automatically in debug builds, so gating the command here and
+/// dropping the `devtools` Cargo feature (which exists only to force them *on in
+/// release*) leaves developer ergonomics untouched.
+#[cfg(debug_assertions)]
 #[tauri::command]
 fn open_devtools(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -59,6 +67,68 @@ pub fn run() {
             let _ = SetCurrentProcessExplicitAppUserModelID(w!("com.velomail.app"));
         }
     }
+
+    // Two handler lists rather than `#[cfg]` inside `generate_handler!`, which the
+    // macro does not accept on its entries. `open_devtools` and
+    // `imap_raw_fetch_diagnostic` are developer tools that must not be reachable
+    // over IPC in a shipped binary (audit P3); only one arm is ever compiled, so a
+    // release build has no registration for either name and Tauri answers an
+    // invoke with "command not found".
+    #[cfg(debug_assertions)]
+    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        oauth::start_oauth_server,
+        oauth::oauth_exchange_token,
+        oauth::oauth_refresh_token,
+        set_tray_tooltip,
+        close_splashscreen,
+        open_devtools,
+        commands::imap_test_connection,
+        commands::imap_list_folders,
+        commands::imap_fetch_messages,
+        commands::imap_fetch_new_uids,
+        commands::imap_search_all_uids,
+        commands::imap_fetch_message_body,
+        commands::imap_fetch_raw_message,
+        commands::imap_set_flags,
+        commands::imap_move_messages,
+        commands::imap_delete_messages,
+        commands::imap_get_folder_status,
+        commands::imap_fetch_attachment,
+        commands::imap_append_message,
+        commands::imap_search_folder,
+        commands::imap_sync_folder,
+        commands::imap_raw_fetch_diagnostic,
+        commands::imap_delta_check,
+        commands::smtp_send_email,
+        commands::smtp_test_connection,
+    ];
+
+    #[cfg(not(debug_assertions))]
+    let invoke_handler: fn(tauri::ipc::Invoke<tauri::Wry>) -> bool = tauri::generate_handler![
+        oauth::start_oauth_server,
+        oauth::oauth_exchange_token,
+        oauth::oauth_refresh_token,
+        set_tray_tooltip,
+        close_splashscreen,
+        commands::imap_test_connection,
+        commands::imap_list_folders,
+        commands::imap_fetch_messages,
+        commands::imap_fetch_new_uids,
+        commands::imap_search_all_uids,
+        commands::imap_fetch_message_body,
+        commands::imap_fetch_raw_message,
+        commands::imap_set_flags,
+        commands::imap_move_messages,
+        commands::imap_delete_messages,
+        commands::imap_get_folder_status,
+        commands::imap_fetch_attachment,
+        commands::imap_append_message,
+        commands::imap_search_folder,
+        commands::imap_sync_folder,
+        commands::imap_delta_check,
+        commands::smtp_send_email,
+        commands::smtp_test_connection,
+    ];
 
     tauri::Builder::default()
         // Single instance MUST be first
@@ -86,33 +156,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
-        .invoke_handler(tauri::generate_handler![
-            oauth::start_oauth_server,
-            oauth::oauth_exchange_token,
-            oauth::oauth_refresh_token,
-            set_tray_tooltip,
-            close_splashscreen,
-            open_devtools,
-            commands::imap_test_connection,
-            commands::imap_list_folders,
-            commands::imap_fetch_messages,
-            commands::imap_fetch_new_uids,
-            commands::imap_search_all_uids,
-            commands::imap_fetch_message_body,
-            commands::imap_fetch_raw_message,
-            commands::imap_set_flags,
-            commands::imap_move_messages,
-            commands::imap_delete_messages,
-            commands::imap_get_folder_status,
-            commands::imap_fetch_attachment,
-            commands::imap_append_message,
-            commands::imap_search_folder,
-            commands::imap_sync_folder,
-            commands::imap_raw_fetch_diagnostic,
-            commands::imap_delta_check,
-            commands::smtp_send_email,
-            commands::smtp_test_connection,
-        ])
+        .invoke_handler(invoke_handler)
         .setup(|app| {
             {
                 let level = if cfg!(debug_assertions) {

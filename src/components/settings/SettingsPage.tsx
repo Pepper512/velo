@@ -1700,6 +1700,13 @@ function DeveloperTab() {
         </div>
       </Section>
 
+      {/*
+        Developer tools are compiled out of release builds (audit P3): the `open_devtools`
+        and `imap_raw_fetch_diagnostic` commands are gated on `#[cfg(debug_assertions)]`
+        in src-tauri, so in a shipped binary these buttons would only produce a
+        "command not found" error. Hide the whole section rather than show dead controls.
+      */}
+      {import.meta.env.DEV && (
       <Section title="Developer Tools">
         <div className="flex items-center justify-between">
           <div>
@@ -1721,6 +1728,7 @@ function DeveloperTab() {
           </Button>
         </div>
       </Section>
+      )}
     </>
   );
 }

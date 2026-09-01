@@ -16,10 +16,17 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2.5.4", features = [] }
 
 [dependencies]
-serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+# Required even though `src/` never names it: `tauri::generate_context!()` expands
+# to code that refers to `::serde_json` in the calling crate, so removing it fails
+# the build with E0433. The 2026-09-01 audit §4 listed it as an unused dependency;
+# that is incorrect, and Batch A verified it by removing it and rebuilding.
+serde_json = "1.0"
 log = "0.4"
-tauri = { version = "2.10.0", features = ["tray-icon", "devtools"] }
+# NOTE: no "devtools" feature. Tauri enables DevTools automatically in debug
+# builds; the feature exists only to force them ON in release, which would hand a
+# debugger to a window that renders untrusted email HTML (audit P3).
+tauri = { version = "2.10.0", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 tauri-plugin-notification = "2"

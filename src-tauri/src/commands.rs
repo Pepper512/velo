@@ -112,6 +112,12 @@ pub async fn imap_set_flags(
         return Ok(());
     }
 
+    // Validate before connecting: a rejected flag should not cost a TCP+TLS session.
+    // Rendering happens inside `set_flags`, against an allowlist — previously this
+    // built the flag list by string concatenation, so a flag containing CRLF became
+    // a second IMAP command running in the user's authenticated session (audit P1).
+    crate::imap::wire::build_flag_list(&flags)?;
+
     let mut session = imap_client::connect(&config).await?;
 
     let uid_set: String = uids
@@ -120,26 +126,7 @@ pub async fn imap_set_flags(
         .collect::<Vec<_>>()
         .join(",");
 
-    let flag_op = if add { "+FLAGS" } else { "-FLAGS" };
-
-    // Format flags like "(\Seen \Flagged)"
-    let flags_str = format!(
-        "({})",
-        flags
-            .iter()
-            .map(|f| {
-                // Ensure flags have the backslash prefix if they're standard flags
-                if f.starts_with('\\') {
-                    f.clone()
-                } else {
-                    format!("\\{f}")
-                }
-            })
-            .collect::<Vec<_>>()
-            .join(" ")
-    );
-
-    imap_client::set_flags(&mut session, &folder, &uid_set, flag_op, &flags_str).await?;
+    imap_client::set_flags(&mut session, &folder, &uid_set, add, &flags).await?;
     let _ = session.logout().await;
     Ok(())
 }
@@ -219,16 +206,26 @@ pub async fn imap_fetch_attachment(
 pub async fn imap_append_message(
     config: ImapConfig,
     folder: String,
-    flags: Option<String>,
+    flags: Option<Vec<String>>,
     raw_message: String,
 ) -> Result<(), String> {
-    let mut session = imap_client::connect(&config).await?;
+    // Unrendered flag names (`["Seen"]`), not a pre-built `"(\\Seen)"` string: the
+    // rendering is what has to be trusted, so it happens in `imap::wire` where it can
+    // be validated. `async-imap`'s `append` validates neither the mailbox nor the
+    // flags it is handed (audit P1, extended).
+    crate::imap::wire::validate_mailbox(&folder)?;
+    if let Some(f) = flags.as_deref() {
+        if !f.is_empty() {
+            crate::imap::wire::build_flag_list(f)?;
+        }
+    }
 
     // raw_message is base64url-encoded; decode it
     let raw_bytes = base64url_decode(&raw_message)?;
 
-    let flags_ref = flags.as_deref();
-    imap_client::append_message(&mut session, &folder, flags_ref, &raw_bytes).await?;
+    let mut session = imap_client::connect(&config).await?;
+
+    imap_client::append_message(&mut session, &folder, flags.as_deref(), &raw_bytes).await?;
     let _ = session.logout().await;
     Ok(())
 }
@@ -266,6 +263,10 @@ pub async fn imap_sync_folder(
     result
 }
 
+/// Developer-only IMAP session transcript. **Not compiled into release builds**
+/// (audit P3) — it returns a live authenticated transcript that can contain
+/// credential material echoed back by the server.
+#[cfg(debug_assertions)]
 #[tauri::command]
 pub async fn imap_raw_fetch_diagnostic(
     config: ImapConfig,
