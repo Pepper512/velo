@@ -1,5 +1,16 @@
-import { describe, it, expect } from "vitest";
-import { buildImapConfig, buildSmtpConfig } from "./imapConfigBuilder";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+// vi.mock() is hoisted — inline factory, no external references.
+vi.mock("../oauth/oauthTokenManager", () => ({
+  ensureFreshToken: vi.fn(),
+}));
+
+import {
+  buildImapConfig,
+  buildSmtpConfig,
+  buildImapConfigWithFreshToken,
+} from "./imapConfigBuilder";
+import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { createMockDbAccount } from "@/test/mocks";
 
 describe("buildImapConfig", () => {
@@ -161,5 +172,66 @@ describe("accept_invalid_certs", () => {
     const smtpConfig = buildSmtpConfig(account);
     expect(imapConfig.accept_invalid_certs).toBe(true);
     expect(smtpConfig.accept_invalid_certs).toBe(true);
+  });
+});
+
+/**
+ * Regression guard for the OAuth-over-IMAP sync bug.
+ *
+ * `imapInitialSync` and `imapDeltaSync` used to call `buildImapConfig(account)`
+ * with no token. For an OAuth IMAP account `imap_password` is NULL by
+ * construction — `insertOAuthImapAccount` writes the literal NULL and keeps the
+ * credential in `access_token` — so the sync path authenticated with `""` while
+ * the interactive path (which did pass a token) worked. The account could
+ * archive and read mail but never sync.
+ *
+ * This helper is the single place that gets it right, so the mistake cannot be
+ * made once per call site again.
+ */
+describe("buildImapConfigWithFreshToken", () => {
+  const mockEnsureFreshToken = vi.mocked(ensureFreshToken);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses a freshly refreshed token as the password for oauth2 accounts", async () => {
+    mockEnsureFreshToken.mockResolvedValue("fresh-oauth-token");
+    // Exactly how the DB stores an OAuth IMAP account: no imap_password at all.
+    const account = createMockDbAccount({
+      auth_method: "oauth2",
+      imap_password: null,
+      access_token: "stale-token",
+    });
+
+    const config = await buildImapConfigWithFreshToken(account);
+
+    expect(mockEnsureFreshToken).toHaveBeenCalledWith(account);
+    expect(config.password).toBe("fresh-oauth-token");
+    expect(config.auth_method).toBe("oauth2");
+  });
+
+  it("never produces an empty password for an oauth2 account with no imap_password", async () => {
+    mockEnsureFreshToken.mockResolvedValue("fresh-oauth-token");
+    const account = createMockDbAccount({
+      auth_method: "oauth2",
+      imap_password: null,
+    });
+
+    const config = await buildImapConfigWithFreshToken(account);
+
+    expect(config.password).not.toBe("");
+  });
+
+  it("does not call the token manager for password accounts", async () => {
+    const account = createMockDbAccount({
+      auth_method: "password",
+      imap_password: "secret-password",
+    });
+
+    const config = await buildImapConfigWithFreshToken(account);
+
+    expect(mockEnsureFreshToken).not.toHaveBeenCalled();
+    expect(config.password).toBe("secret-password");
   });
 });

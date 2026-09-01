@@ -19,6 +19,18 @@ vi.mock("./imapConfigBuilder", () => ({
     password: "secret",
     auth_method: "password",
   })),
+  // The token-aware builder the sync path must use. Returns a *different*
+  // password for oauth2 accounts so a test can tell the two builders apart.
+  buildImapConfigWithFreshToken: vi.fn(
+    async (account: { auth_method: string | null }) => ({
+      host: "imap.example.com",
+      port: 993,
+      security: "ssl",
+      username: "user@example.com",
+      password: account.auth_method === "oauth2" ? "fresh-oauth-token" : "secret",
+      auth_method: account.auth_method === "oauth2" ? "oauth2" : "password",
+    }),
+  ),
 }));
 vi.mock("./folderMapper", () => ({
   mapFolderToLabel: vi.fn((folder: { path: string }) => ({
@@ -64,7 +76,7 @@ vi.mock("../db/pendingOperations", () => ({
   getPendingOpsForResource: vi.fn(() => []),
 }));
 
-import { imapMessageToParsedMessage, imapInitialSync, formatImapDate, computeSinceDate, isConnectionError } from "./imapSync";
+import { imapMessageToParsedMessage, imapInitialSync, imapDeltaSync, formatImapDate, computeSinceDate, isConnectionError } from "./imapSync";
 import {
   createMockImapMessage,
   createMockImapAccount,
@@ -79,6 +91,7 @@ import { upsertMessage, updateMessageThreadIds } from "../db/messages";
 import { upsertThread, deleteThread } from "../db/threads";
 import { upsertAttachment } from "../db/attachments";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { getAllFolderSyncStates } from "../db/folderSyncState";
 
 describe("imapMessageToParsedMessage", () => {
   it("converts basic IMAP message to ParsedMessage format", () => {
@@ -744,5 +757,68 @@ describe("imapInitialSync — placeholder cleanup", () => {
     // Threading should merge the two messages into one thread,
     // so at least one placeholder thread (the one not chosen as thread ID) should be deleted
     expect(mockDeleteThread).toHaveBeenCalled();
+  });
+});
+
+/**
+ * Regression guard: the sync path must authenticate with a live credential.
+ *
+ * Both sync entry points used to build their config with `buildImapConfig(account)`
+ * and no token. For an OAuth IMAP account `imap_password` is NULL by construction
+ * (`insertOAuthImapAccount` writes the literal NULL), so the config that reached
+ * the Rust IMAP layer carried `password: ""`. The interactive path in
+ * `imapSmtpProvider` passed a token and worked, which is why the account could
+ * archive and read mail while never syncing — and why no test caught it.
+ *
+ * These assert on the config handed to the IMAP layer, not on which helper was
+ * called, so they still hold if the wiring is refactored again.
+ */
+describe("sync credential wiring for OAuth accounts", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockGetAllFolderSyncStates = vi.mocked(getAllFolderSyncStates);
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockImapListFolders.mockResolvedValue([]);
+    mockGetAllFolderSyncStates.mockResolvedValue([]);
+  });
+
+  afterEach(() => {
+    mockImapListFolders.mockReset();
+  });
+
+  it("imapInitialSync sends the fresh OAuth token, not an empty password", async () => {
+    mockGetAccount.mockResolvedValue(
+      createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
+    );
+
+    await imapInitialSync("acc-1");
+
+    const config = mockImapListFolders.mock.calls[0]![0];
+    expect(config.password).toBe("fresh-oauth-token");
+    expect(config.password).not.toBe("");
+  });
+
+  it("imapDeltaSync sends the fresh OAuth token, not an empty password", async () => {
+    mockGetAccount.mockResolvedValue(
+      createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
+    );
+
+    await imapDeltaSync("acc-1");
+
+    const config = mockImapListFolders.mock.calls[0]![0];
+    expect(config.password).toBe("fresh-oauth-token");
+    expect(config.password).not.toBe("");
+  });
+
+  it("leaves password accounts on their stored password", async () => {
+    mockGetAccount.mockResolvedValue(
+      createMockImapAccount({ id: "acc-1", auth_method: "password" }),
+    );
+
+    await imapInitialSync("acc-1");
+
+    expect(mockImapListFolders.mock.calls[0]![0].password).toBe("secret");
   });
 });
