@@ -109,7 +109,9 @@ export function createGeminiProvider(apiKey: string, modelId: string): AiProvide
   return {
     async complete(req: AiCompletionRequest): Promise<string> {
       const parsed = await postGenerateContent(apiKey, modelId, {
-        systemInstruction: { parts: [{ text: req.systemPrompt }] },
+        // The API rejects an empty text part, so an empty system prompt means
+        // no systemInstruction at all rather than `{ text: "" }`.
+        ...(req.systemPrompt ? { systemInstruction: { parts: [{ text: req.systemPrompt }] } } : {}),
         contents: [{ role: "user", parts: [{ text: req.userContent }] }],
         generationConfig: { maxOutputTokens: req.maxTokens ?? DEFAULT_MAX_TOKENS },
       });

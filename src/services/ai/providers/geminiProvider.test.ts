@@ -73,6 +73,32 @@ describe("geminiProvider", () => {
     });
   });
 
+  it("omits systemInstruction entirely when the system prompt is empty", async () => {
+    // The API rejects an empty text part; an empty prompt must not become `{ text: "" }`.
+    mockFetch.mockResolvedValue(reply({ text: "hi" }));
+
+    await createGeminiProvider("k", MODEL).complete({ systemPrompt: "", userContent: "u" });
+
+    expect(lastRequest().body).not.toHaveProperty("systemInstruction");
+  });
+
+  it("does not double the models/ prefix when the id already carries it", async () => {
+    mockFetch.mockResolvedValue(reply({ text: "hi" }));
+
+    await createGeminiProvider("k", `models/${MODEL}`).complete({ systemPrompt: "s", userContent: "u" });
+
+    expect(lastRequest().url).toBe(ENDPOINT);
+  });
+
+  it("throws a typed error when a 200 carries a body that is not JSON at all", async () => {
+    // An intermediary can answer 200 with an HTML page; that must be an AiError, not a SyntaxError.
+    mockFetch.mockResolvedValue(new Response("<html>Proxy Error</html>", { status: 200 }));
+
+    await expect(
+      createGeminiProvider("k", MODEL).complete({ systemPrompt: "s", userContent: "u" }),
+    ).rejects.toMatchObject({ code: "NETWORK_ERROR", message: "Gemini returned a non-JSON response" });
+  });
+
   it("honours maxTokens and applies the shared default when the caller gives none", async () => {
     // A Response body can be read once, so each call needs a fresh one.
     mockFetch.mockImplementation(() => Promise.resolve(reply({ text: "hi" })));
