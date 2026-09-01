@@ -21,6 +21,7 @@ import { upsertThread, setThreadLabels, deleteThread } from "../db/threads";
 import { upsertAttachment } from "../db/attachments";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
 import { withTransaction } from "../db/connection";
+import { getOwnAddresses, clearSnoozeForNewExternalMessages } from "../snooze/snoozeSync";
 import {
   upsertFolderSyncState,
   getAllFolderSyncStates,
@@ -212,6 +213,7 @@ async function storeThreadsAndMessages(
   labelsByRfcId?: Map<string, Set<string>>,
 ): Promise<ParsedMessage[]> {
   const storedMessages: ParsedMessage[] = [];
+  const ownAddresses = await getOwnAddresses(accountId);
 
   // Pre-check pending ops OUTSIDE any transaction
   const skippedThreadIds = new Set<string>();
@@ -272,6 +274,14 @@ async function storeThreadsAndMessages(
         const isRead = messages.every((m) => m.isRead);
         const isStarred = messages.some((m) => m.isStarred);
         const hasAttachments = messages.some((m) => m.hasAttachments);
+
+        // SPEC-F-1 REQ-1.3 — decided before upsertThread overwrites last_message_at.
+        await clearSnoozeForNewExternalMessages(
+          accountId,
+          group.threadId,
+          messages.map((m) => ({ id: m.id, fromAddress: m.fromAddress })),
+          ownAddresses,
+        );
 
         await upsertThread({
           id: group.threadId,
@@ -396,6 +406,7 @@ export async function imapInitialSync(
   if (!account) {
     throw new Error(`Account ${accountId} not found`);
   }
+  const ownAddresses = await getOwnAddresses(accountId);
 
   const config = await buildImapConfigWithFreshToken(account);
 
@@ -425,6 +436,7 @@ export async function imapInitialSync(
     subject: string | null;
     snippet: string;
     date: number;
+    fromAddress: string | null;
   }
 
   const allThreadable: ThreadableMessage[] = [];
@@ -619,6 +631,7 @@ export async function imapInitialSync(
             subject: parsed.subject,
             snippet: parsed.snippet,
             date: parsed.date,
+            fromAddress: parsed.fromAddress,
           };
           allMeta.set(parsed.id, meta);
           allThreadable.push(threadable);
@@ -744,6 +757,14 @@ export async function imapInitialSync(
         const isRead = messages.every((m) => m.isRead);
         const isStarred = messages.some((m) => m.isStarred);
         const hasAttachments = messages.some((m) => m.hasAttachments);
+
+        // SPEC-F-1 REQ-1.3 — decided before upsertThread overwrites last_message_at.
+        await clearSnoozeForNewExternalMessages(
+          accountId,
+          group.threadId,
+          messages.map((m) => ({ id: m.id, fromAddress: m.fromAddress })),
+          ownAddresses,
+        );
 
         await upsertThread({
           id: group.threadId,

@@ -172,3 +172,28 @@ export async function getRecentSentMessages(
     [accountId, accountEmail, limit],
   );
 }
+
+/**
+ * Which of `ids` are already stored for this account (SPEC-F-1 REQ-1.3 — lets
+ * sync tell a genuinely new message from a re-fetched one). Chunked so a large
+ * batch never exceeds SQLite's bound-parameter limit.
+ */
+export async function getExistingMessageIds(
+  accountId: string,
+  ids: string[],
+): Promise<Set<string>> {
+  const found = new Set<string>();
+  if (ids.length === 0) return found;
+  const db = await getDb();
+  const CHUNK = 500;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map((_, j) => `$${j + 2}`).join(", ");
+    const rows = await db.select<{ id: string }[]>(
+      `SELECT id FROM messages WHERE account_id = $1 AND id IN (${placeholders})`,
+      [accountId, ...chunk],
+    );
+    for (const row of rows) found.add(row.id);
+  }
+  return found;
+}

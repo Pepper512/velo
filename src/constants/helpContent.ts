@@ -699,12 +699,13 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "Snooze",
         summary: "Temporarily hide a thread, resurface it later.",
         description:
-          "Snooze removes a thread from your inbox and brings it back at a date and time you choose. This lets you defer emails you can't handle right now without losing track of them. When the snooze time arrives, the thread reappears in your inbox as if it just arrived. Snoozed threads are visible in the Snoozed folder in the sidebar. Technically, snoozing removes the INBOX label and adds a SNOOZED label.",
+          "Snooze removes a thread from your inbox and brings it back at a date and time you choose. This lets you defer emails you can't handle right now without losing track of them. The thread stays out of your inbox through every sync until it is due; when the snooze time arrives it reappears in your inbox as if it just arrived. If someone else replies while it is snoozed, it comes back early — your own replies sent from another device do not wake it. Snoozed threads are visible in the Snoozed folder in the sidebar, soonest-due first. On Gmail accounts the snooze is mirrored to the server, so the thread leaves your inbox on other devices too. Technically, snoozing removes the INBOX label and adds a SNOOZED label.",
         tips: [
           { text: "Click the snooze icon in the thread action bar." },
           { text: "Choose from presets (later today, tomorrow, next week) or pick a custom time." },
           { text: "View all snoozed threads in the Snoozed folder in the sidebar." },
           { text: "Unsnooze a thread early by opening it and clicking Unsnooze." },
+          { text: "A new reply from someone else un-snoozes the thread automatically." },
         ],
       },
       {
