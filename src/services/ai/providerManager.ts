@@ -5,7 +5,7 @@ import type { SecureSettingKey } from "@/constants/settingsKeys";
 import { DEFAULT_MODELS, MODEL_SETTINGS } from "./types";
 import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider, clearOpenAIProvider } from "./providers/openaiProvider";
-import { createGeminiProvider, clearGeminiProvider } from "./providers/geminiProvider";
+import { createGeminiProvider } from "./providers/geminiProvider";
 import { createOllamaProvider, clearOllamaProvider } from "./providers/ollamaProvider";
 import { createCopilotProvider, clearCopilotProvider } from "./providers/copilotProvider";
 import { createXaiProvider, clearXaiProvider } from "./providers/xaiProvider";
@@ -113,7 +113,6 @@ export function clearProviderClients(): void {
   cachedProvider = null;
   clearClaudeProvider();
   clearOpenAIProvider();
-  clearGeminiProvider();
   clearOllamaProvider();
   clearCopilotProvider();
   clearXaiProvider();
