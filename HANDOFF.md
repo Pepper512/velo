@@ -4,27 +4,41 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main` @ `6c44194`. **Last commit that changed anything but this file: `be2610b`**
-  ("Batch H — CI-checked doc counts, rewrite two risky skills (P20) (#14)"). Use that second SHA when
-  checking whether work has landed since — a handoff-only commit on top is expected and harmless.
+- **Branch:** `main` @ `3576093`. **Last commit that changed code: `d704ea0`** ("fix: IMAP sync
+  authenticated OAuth accounts with an empty password (#18)"). Use that second SHA when checking
+  whether work has landed since — docs-only commits on top are expected and harmless.
 - **Open PRs:** none. Working tree clean. CI green on `main`; Release Please **skipped** (EX-007 guard holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
-- **State:** frontend **1,751** tests (was 1,562) · Rust **47** (was 6) · **0** prod npm advisories (was 3)
-  · **0** import cycles containing a service (was 54) · EX-001/002/004 closed; EX-003/005/006/007 open.
+- **⚠️ A parallel session owns a worktree here.** `git worktree list` shows
+  `.claude/worktrees/f2-email-links-open` (branch `fix/f2-email-links-open` @ `1bf2184`, **locked**).
+  **Do not touch it.** It is gitignored (`.gitignore:51`) but **not excluded from vitest**, so a bare
+  `npx vitest run` at the repo root also runs *that* branch's tests and reports ~200 failures that
+  have nothing to do with `main`. Always scope your run — see §1. CI is unaffected (clean checkout).
+- **State:** frontend **1,757** tests (144 files) · Rust **47** · **0** prod npm advisories
+  · **0** import cycles containing a service · EX-001/002/004 closed; EX-003/005/006/007 open.
 
 ---
 
 ## 1. Exact next step
 
-**The whole accepted audit backlog is merged. Nothing is half-finished.** Pick one:
+**E2 / P15 session pooling is written, reviewed, and blocked on Jim.** The brief is at
+`docs/briefs/2026-09-01-e2-p15-session-pooling.md` (**rev 2**, `3576093`). It has been through an
+independent cross-vendor review that returned **DO NOT BUILD YET**; all findings are folded in.
+**Two things need Jim, and an agent cannot supply either:**
 
-- **(A) E2 — IMAP session pooling (P15 Tier 2).** The only remaining item with user-visible
-  performance impact: removes a TLS handshake per action and takes the password off the hot IPC
-  path. **Tier 2** — write the brief first (`docs/briefs/` has three worked examples), get Jim's
-  approval, *then* build.
-- **(B) Unblock Jim's two items** — §2. Both need him, not an agent.
-- **(C) Low-risk cleanup** — P16 (1)(2)(4)(5) dedupe (~380 lines), P13 (c)(d)(e), P14 remainder,
+1. **Decision 4 — where the raw-fetch fallback gets its credential.** Three costed options in the
+   brief; the recommendation is **(a)** (pooled command returns `NeedRawFallback`, frontend calls a
+   separate config-carrying command). **Open, and it blocks the build.**
+2. **Rev 2 re-confirmation.** Jim approved rev 1. Rev 2 changed retry semantics, session lifecycle,
+   caps and the fallback design — material enough to need re-approval. `CLAUDE.md` is explicit that
+   agent merge authority does **not** reach Tier 2 plan approval.
+
+**While those are open, the highest-value unblocked work is (B).**
+
+- **(B) Write the Tier-1 brief for the `move_messages` duplication bug** (§2c). Found during the E2
+  review, ships today, affects user data. Not part of E2.
+- **(C) Low-risk cleanup:** P16 (1)(2)(4)(5) dedupe (~380 lines), P13 (c)(d)(e), P14 remainder,
   `react-best-practices` skill trim.
 
 ### Resume commands
@@ -33,23 +47,30 @@
 cd /Users/jpepper/Developer/Claude/Velo-Build/velo
 git checkout main && git pull origin main
 npm ci                                   # node_modules is gitignored
-npx tsc --noEmit && npx vitest run --reporter=dot
+
+# NOTE the exclude — a parallel worktree lives under .claude/ and vitest will glob into it
+npx tsc --noEmit && npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'
 npm run graph:check && npm run docs:check
 (cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)
 gh repo set-default Pepper512/velo       # gh otherwise resolves PR numbers against upstream
 ```
 
+Expected: **144 test files, 1,757 tests, all passing.** Any other file count means the exclude was
+dropped or the worktree changed.
+
 ### Re-verify before acting — these may have gone stale
 
-- **Has real work landed since?** `git log --oneline -5`. Commits touching only `HANDOFF.md` are
-  wrap-ups and can be ignored; anything else means someone has pushed and this file is behind.
+- **Has real work landed since?** `git log --oneline -5`. Docs-only commits are wrap-ups; anything
+  else means someone has pushed and this file is behind.
+- **Is the parallel worktree still there?** `git worktree list`. If `f2-email-links-open` is gone the
+  vitest exclude is no longer needed — but leaving it in is harmless.
 - **Upstream drift:** `git fetch upstream && git log --oneline main..upstream/main`. Empty all
   session; if security-relevant `src-tauri/` commits appear, rebase the plan on them first.
 - **CI green?** `gh run list --branch main --limit 2`. Release Please must read **`skipped`**, never
   `failure` — a failure means the EX-007 guard was removed or bypassed.
-- **Line numbers cited in the audit and briefs** were verified against earlier commits and **eight
-  batches have since moved code**. Re-grep before editing anything they reference.
-- **The audit's measurements are not trustworthy** — §6.
+- **Every line number the E2 brief cites was verified at `d704ea0`.** Re-grep before editing.
+- **The audit's measurements are not trustworthy** — §6. Neither were rev 1 of the E2 brief's; see
+  the §6 postscript.
 
 ---
 
@@ -86,6 +107,18 @@ orphans** (`PhishingBanner`, `LinkConfirmDialog`, `phishingScanner`). Nothing in
 build, so a user could click a link believing Velo had screened it. **That claim is corrected**; the
 code is untouched. **Jim decides: re-wire it, or delete it and drop the claim.**
 
+### 2c. `move_messages` duplicates mail on a timeout (live bug, found this session)
+
+`src-tauri/src/imap/client.rs:496-497` matches `Ok(Ok(()))` for success and `_` for **everything
+else**, so a timeout or connection error is treated identically to *"this server lacks the MOVE
+extension"* and falls through to COPY + STORE `+Deleted` + EXPUNGE. A `UID MOVE` that **succeeded
+server-side** but whose response timed out is therefore COPY'd again — **the message now exists twice
+in the destination folder.**
+
+Ships today; independent of session pooling. The fix is to distinguish "MOVE unsupported" (a tagged
+NO/BAD from the server) from a transport failure, and to fail rather than fall back on the latter.
+**Needs its own Tier-1 brief — this is item (B) in §1.**
+
 ---
 
 ## 3. What we're doing and why
@@ -101,6 +134,32 @@ nothing watched. These batches added the watchers.
 ---
 
 ## 4. What just happened (2026-09-01)
+
+### This session — E2 brief, its review, and one bug fix
+
+| PR | What |
+|---|---|
+| #17 `bdadce4` | **E2/P15 brief, rev 1** — session pooling plan (Tier 2, docs only) |
+| #18 `d704ea0` | **fix:** IMAP sync authenticated OAuth accounts with an **empty password** |
+| #19 `3576093` | **E2/P15 brief, rev 2** — independent review, three blockers folded in |
+
+**#18 was a live bug found while writing the brief.** `imapSync.ts:400`/`:833` built the sync config
+with no access token; for an OAuth IMAP account `imap_password` is `NULL` by construction
+(`insertOAuthImapAccount`, `db/accounts.ts:331`), so background sync authenticated with `""`. The
+interactive path passed a token, so such an account could archive and read mail while **never
+syncing**. Fixed with `buildImapConfigWithFreshToken` + regression tests written first. Diagnosed
+from code and schema — **not yet confirmed against a live OAuth IMAP account**; the tests are what
+make it settled.
+
+**#19 followed a cross-vendor review (Kimi K3) that returned DO NOT BUILD YET** — 3 blockers, 6
+majors, 4 factual errors, every claim re-verified before acceptance. The blockers, all real:
+*poison-on-error* (a `with_timeout` firing mid-protocol leaves a desynchronised session that the pool
+would hand to the next caller — rev 1 never mentioned it and argued an irrelevant `Arc`-vs-take-out
+point instead); *retry policy by idempotency* (rev 1's blanket retry would duplicate Sent mail and
+COPY-fallback moves — its acceptance criterion **mandated** the bug); and *the raw-fetch fallback's
+credential source*, which rev 1 deferred to "call this out in review" and is now Decision 4.
+
+### Earlier — the audit backlog
 
 Thirteen PRs merged — batches **D0 → A → B → C → G-deps → E → F → H**.
 
@@ -142,11 +201,26 @@ mutable URL**.
 - **AI model defaults deliberately unchanged** — fast/cheap tier per provider, because Velo runs one
   model for *all* features and the highest-volume one is background categorisation on every sync.
 
-**Pending Jim:** P11 approval + QA (§2a) · P19 re-wire-or-delete (§2b) · confirmation of the
-per-provider model default proposal (never answered; the conservative reading shipped).
+**Made this session — E2/P15 (all recorded in the brief's §Approval):**
+- **Decision 1 — typed error: DECIDED.** A minimal `MailError` (`NoSuchSession` / `TooManySessions` /
+  `NeedRawFallback` / `Other(String)`). `Other` keeps `isConnectionError` working unchanged, so the
+  brief does not have to re-classify every IMAP failure. `SessionClosed` was **dropped** in rev 2 —
+  poison-on-error makes eviction a fact about the map rather than a string classification.
+- **Decision 2 — dependency: DECIDED, `getrandom = "0.3"`** (Jim). Already in `Cargo.lock`
+  transitively, so a declaration and no new transitive cost. The **only** dependency E2 may add.
+- **Decision 3 — OAuth sync bug: RESOLVED**, shipped separately as #18 at Jim's direction rather than
+  folded into a Tier-2 refactor.
+
+**Pending Jim:** **E2 Decision 4** (raw-fallback credential — recommendation (a)) and **E2 rev 2
+re-confirmation** — both block the build, §1 · P11 approval + QA (§2a) · P19 re-wire-or-delete
+(§2b) · confirmation of the per-provider model default proposal (never answered; the conservative
+reading shipped).
 
 **Deliberately deferred + reason:**
-- **E2 session pooling** — Tier 2, changes credential lifecycle; needs its own brief.
+- **`move_messages` timeout-fallback duplication** (§2c) — a live bug, but out of scope for E2; a
+  data-affecting fix should not ride inside a Tier-2 credential refactor. Needs its own Tier-1 brief.
+- **E2 build itself** — plan written and reviewed; blocked on Decision 4 and rev 2 re-confirmation,
+  not on engineering.
 - **P13 (c)(d)(e)** — (a)+(b) killed *all* service cycles, which was the point. 49 components still
   import `services/db/*`; `graph:check` reports the trend but does not gate it — a gate nobody can
   turn green gets deleted.
@@ -159,6 +233,10 @@ per-provider model default proposal (never answered; the conservative reading sh
 - `~/.claude/hooks/git-guard.sh` blocks `git add -A/.` and text-matches protected-branch wording
   across the *whole* Bash command — heredocs and PR bodies included. Author such text with Write and
   pass it via `--body-file` / `git commit -F`; keep `git push` in its own call.
+- **A parallel session's worktree under `.claude/worktrees/` breaks a bare `npx vitest run`** — it is
+  gitignored but not vitest-excluded, so the root run picks up another branch's tests and reports
+  failures that are not yours. Scope the run (§1). This cost real diagnosis time; check
+  `git worktree list` before believing a sudden mass failure.
 - Branch protection is **strict**: every merge invalidates the branches behind it, and PRs that all
   append to `LOG.md`/`EXCEPTIONS.md` conflict rather than merely going out of date. Sequence
   doc-touching PRs one at a time.
@@ -185,38 +263,51 @@ missed every real bypass. It is why the image blocker is DOM-based rather than a
 Three CI gates now enforce what used to be prose: `graph.mjs --check`, `docs-check.mjs --check`, and
 `cargo check --release`.
 
+**Postscript, 2026-09-01 — the same rule applies to our own briefs.** Rev 1 of the E2 brief carried
+**four factual errors**, including its headline metric: it gave one login-cost formula for both sync
+paths when `INTER_FOLDER_DELAY_MS` applies only to `imapInitialSync` (`imapSync.ts:473-475`) and
+delta sync fetches at `BATCH_SIZE = 50` (`:39`), not `CHUNK_SIZE = 200` (`:41`). A cross-vendor
+reviewer caught three of the four, plus the design blocker the author had missed entirely. **Verify a
+brief's numbers the same way you verify the audit's — including your own.**
+
 ---
 
 <!-- ─────── RESUME CARD · `tail -30 HANDOFF.md` is self-contained ─────── -->
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`6c44194`** (last non-handoff commit **`be2610b`**) · no open PRs · clean · CI green.
-**Status:** the whole accepted audit backlog (20 items) is **merged** — 1,751 frontend tests, 47 Rust, 0 prod advisories, 0 service import cycles.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ **`3576093`** (last code commit **`d704ea0`**) · no open PRs · clean · CI green.
+**Status:** audit backlog (20 items) merged. **E2/P15 session pooling is written and reviewed but NOT built** — it is blocked on Jim, not on engineering.
 
-**Next action — pick one:**
-- **(A)** Write the brief for **E2 / P15 session pooling** (Tier 2 → Jim approves before code). The
-  only item left with user-visible performance impact.
-- **(B)** Nudge Jim on his two blocked items: **P11** needs his manual QA (acceptance cannot be
-  automated); **P19** needs a re-wire-or-delete call (phishing detection is dark; the false
-  SECURITY.md claim is already corrected).
-- **(C)** Low-risk cleanup: P16 (1)(2)(4)(5) dedupe, P13 (c)(d)(e), P14 remainder.
+**Next action — tell Jim these two are waiting on him:**
+- **E2 Decision 4** — where the raw-fetch fallback gets its credential. Three costed options in
+  `docs/briefs/2026-09-01-e2-p15-session-pooling.md`; **recommendation (a)**. Blocks the build.
+- **E2 rev 2 re-confirmation** — he approved rev 1; rev 2 changed retry semantics, session lifecycle,
+  caps and the fallback design. Tier 2 plan approval is the one thing agent merge authority does not
+  reach.
 
-**Verify first:** `git log --oneline -5` shows no commit past `be2610b` that touches more than
-`HANDOFF.md` · `git fetch upstream && git log --oneline main..upstream/main` empty · `gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped** ·
-re-grep any line numbers the audit or briefs cite.
+**Unblocked meanwhile:** (B) write the Tier-1 brief for the **`move_messages` timeout duplication
+bug** (§2c — a `UID MOVE` that timed out after succeeding gets COPY'd again, duplicating the message;
+ships today) · (C) low-risk cleanup: P16 (1)(2)(4)(5), P13 (c)(d)(e), P14 remainder.
+
+**Verify first:** `git log --oneline -5` shows nothing past `3576093` · `git worktree list` — a
+**locked parallel worktree** `f2-email-links-open` belongs to another session, **do not touch** ·
+`git fetch upstream && git log --oneline main..upstream/main` empty · `gh run list --branch main --limit 2` shows CI **success** + Release Please **skipped**.
 
 **Get running:**
 ```bash
 git checkout main && git pull origin main && npm ci
-npx tsc --noEmit && npx vitest run --reporter=dot
+npx tsc --noEmit
+npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'   # expect 144 files / 1,757 tests
 npm run graph:check && npm run docs:check
 (cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)
 ```
 
-**Two traps:** `cargo build --release` is broken on this machine (sqlx proc-macro dylib — not ours;
-use `cargo check --locked --config 'profile.dev.debug-assertions=false'`). The git-guard hook
-text-matches protected-branch wording anywhere in a Bash command — pass long text via `--body-file`
-or `git commit -F`, never a heredoc.
+**Three traps:** a bare `npx vitest run` globs into the parallel worktree and reports ~200 failures
+that are **not yours** — always pass the excludes. `cargo build --release` is broken on this machine
+(sqlx proc-macro dylib — not ours; use `cargo check --locked --config 'profile.dev.debug-assertions=false'`).
+The git-guard hook text-matches protected-branch wording anywhere in a Bash command — pass long text
+via `--body-file` or `git commit -F`, never a heredoc.
 
-**Read §6 next:** six audit claims failed verification — trust its backlog, not its numbers.
+**Read §6 next:** six audit claims failed verification — and rev 1 of our own E2 brief carried four.
+Trust the backlog, not the numbers; re-verify before building.
