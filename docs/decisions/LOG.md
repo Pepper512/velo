@@ -429,3 +429,13 @@
     both seats) — **CHANGES REQUESTED**, five must-fix items, design sound; a Gemini 3.7
     cross-vendor pass reached the same verdict independently. Merges remain permission-blocked
     for both seats and remain Jim's.
+  - **Merge execution assigned to the Opus seat** (Jim, in person, 2026-09-02 ~03:30 UTC: the
+    Opus seat "has been approved to commit, push, PR, merge — have him do it when it needs done"
+    and "remind him that is in the rules"). This is the standing rule in `CLAUDE.md` Part I —
+    *Agents perform the merge* — applied to a named seat now that Jim has granted it the
+    permission his own session settings control. **Nothing else changes:** every required check
+    green on the exact commit merged, branch up to date, no unresolved review conversation,
+    Tier 2 with its plan approved before code, and merging is execution, not approval (EX-005).
+    Order: **#33 → #34 → #35 → #36**, then **#37** only after its must-fix items land and the
+    re-review at the new head is recorded. The Fable seat's merges stay blocked and are not
+    routed anywhere; this entry is the record the Opus seat can point at.
