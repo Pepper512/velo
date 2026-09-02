@@ -8,6 +8,7 @@ use tauri_plugin_autostart::MacosLauncher;
 
 mod ai_fetch;
 mod commands;
+mod connection_tests;
 mod db;
 mod imap;
 mod oauth;
@@ -97,6 +98,7 @@ pub fn run() {
         oauth::oauth_exchange_token,
         oauth::oauth_refresh_token,
         ai_fetch::ai_fetch,
+        connection_tests::connection_test_cancel,
         set_tray_tooltip,
         close_splashscreen,
         open_devtools,
@@ -138,6 +140,7 @@ pub fn run() {
         oauth::oauth_exchange_token,
         oauth::oauth_refresh_token,
         ai_fetch::ai_fetch,
+        connection_tests::connection_test_cancel,
         set_tray_tooltip,
         close_splashscreen,
         commands::imap_test_connection,
@@ -199,6 +202,7 @@ pub fn run() {
         .plugin(tauri_plugin_os::init())
         .manage(commands::ImapPool::new())
         .manage(db::tx::TxManager::new())
+        .manage(connection_tests::ConnectionTests::new())
         .invoke_handler(invoke_handler)
         .setup(|app| {
             // SPEC-240: the pinned-transaction idle watchdog.

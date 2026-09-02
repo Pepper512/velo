@@ -1106,3 +1106,69 @@
   every `Upload … to release` step is now enumerated and checked. **Questions:** no aarch64
   bundle is planned (runners are x86_64; recorded); release checksums are a follow-up for
   the release ADR. Raw output in `docs/reviews/2026-09-03-pr67-gemini-raw.md`.
+- **2026-09-03 — #204 built (cancel an in-flight connection test)** on Jim's instruction,
+  bug-fix queue item 12, **Tier 2** (new commands on the Rust IMAP/SMTP client path; the
+  form carries credentials). Of the issue's three complaints, "database is locked" was
+  closed by #240 and the first-attempt `AUTHENTICATIONFAILED` is provider-specific; the
+  residual is the test that "cannot be broken". Verified first: the form awaited two raw
+  `invoke`s with no way to stop them and the IMAP test's timeout ladder holds a silent host
+  for up to ~90 s; an IPC call cannot be cancelled from the webview. **Decision:** abort at
+  the task boundary — `connection_tests.rs` keeps an `AbortHandle` per caller-minted id
+  (never a config), `imap_test_connection`/`smtp_test_connection` take an optional `testId`
+  and run as a spawned task when given (wire shape backward-compatible), and
+  `connection_test_cancel(testId) -> bool` aborts it; over a UI-only cancel (the socket and
+  the credential-carrying attempt would run on) and over threading a cancellation token
+  through `connect` (more invasive for the same effect). TypeScript: `tauriCommands`
+  wrappers, a pure `connectionTestRun` (ids, a generation so a late result after Cancel or a
+  re-test is dropped, cancel only the ids still in flight), and the form's Cancel button
+  beside "Testing..."; the form's two raw `invoke` calls are gone. TDD: Rust — registry
+  unit tests and the real IMAP test against a `TcpListener` that accepts and never answers,
+  cancelled after 100 ms and back in under a second; TS — the run module (distinct ids,
+  delivery, cancel invokes both ids and drops late results, finished tests not cancelled,
+  re-test supersedes) and the wrapper shapes. Spec
+  `docs/briefs/2026-09-03-204-cancel-connection-test.md`, committed before the code.
+  Gates: cargo test 154 (+5), clippy `-D warnings`, 169 files / 2,199 tests, tsc, graph,
+  docs. Both review legs to follow (second: Grok if affordable, else Gemini 3.8 Flash).
+- **2026-09-03 — PR #68 (#204) review, leg 1.** Gemini 3.7 Flash: APPROVE WITH NITS (1L 3N);
+  it confirmed the abort closes the socket at the current await point, that the registry
+  never sees a config, and the wire shape (`null` → `None`, 53-bit id → `u64`).
+  **Adopted:** L1 — a `start()` over a run still in flight now cancels the old ids first
+  (they would have held their sockets to the timeout); N2 — lazy `useRef`, one run per
+  mount; N3 — spawn and register under one registry lock, so a cancel racing the call
+  either finds the handle or is answered `false` before the task exists; N4 — a panicking
+  task is reported and its entry removed, and the real **SMTP** test against a silent
+  socket is cancelled in under a second like the IMAP one. **Declined:** a component test
+  for unmount cleanup — no `AddImapAccount` test exists and the cleanup is one effect over
+  the tested `cancel()`. A failed cancel IPC is now warned, still swallowed. The first
+  push failed CI's Rust job on `in_flight` being unused outside tests — `#[cfg(test)]` now.
+  Raw output in `docs/reviews/2026-09-03-pr68-gemini-raw.md`.
+- **2026-09-03 — PR #68 (#204) review, legs 2 and 3.** Grok 4.6 (twelve minutes again, run
+  in parallel with the fallback): CHANGES REQUESTED (4M 4L 1N). Gemini 3.8 Flash (Jim's
+  fallback rule): CHANGES REQUESTED (1H 2M 2L 1N). Both reviewed the diff at `25ee8e0`.
+  **Real defects, all adopted:** (1) **cancel-before-register** — the sync cancel command
+  can be polled before the async test command's first poll; a lock around spawn+register
+  (Gemini 3.7 N3) does not cover that. `cancel` now leaves a **tombstone** for an id it has
+  not seen; the test command finds it and never spawns; tombstones expire after 60 s and
+  are swept on every registry write (Grok 1 = Gemini 3.8 M3; test with no sleep at all).
+  (2) **`mapSecurity` fail-open** — my rewrite defaulted an unknown value to `"none"`, i.e.
+  a password on a plaintext socket; the form's union is `ssl|starttls|none` so no live
+  path hit it, but it is exactly the wrong default on a credential path. Now an exhaustive
+  `switch` over `SecurityType` with a `never` arm (Grok 3 = Gemini 3.8 H1). (3) a `start`
+  over a running run orphaned the old tasks (Grok 2 = Gemini 3.8 M2 = Gemini 3.7 L1) —
+  adopted earlier. (4) SMTP abort unproven (Grok 4) — the silent-socket SMTP test, and
+  now both socket tests assert the **server saw EOF**, i.e. the abort really closed the
+  socket (Gemini 3.8 L4). **Grok's LOWs, adopted:** a **drop guard** — the command future
+  dropped mid-flight (webview teardown) used to detach the task and leak the entry; the
+  guard aborts and removes, scoped by a per-registration sequence so a displaced
+  registration's cleanup cannot remove the one that replaced it (found by the duplicate-id
+  test); a **duplicate id** now aborts the displaced test instead of orphaning it; the
+  modal's own close path cancels too (the parent does unmount the form, so this is a belt);
+  a panic in the work yields a fixed string and the detail goes to the log. **Gemini 3.8's
+  extras:** the SMTP wrapper's `testId` pinned; `isRunning()` now guards a double click.
+  **Declined:** none. **Questions answered:** app commands need no capability entry
+  (`core:default`, as `db_tx_*`/`ai_fetch`); lettre's transport is async — the SMTP
+  silent-socket test proves the abort in <1 s; the modal unmounts the form; the security
+  union has no `"tls"`; `crypto.getRandomValues` exists in every webview Tauri ships on.
+  **Comparison:** Grok and Gemini 3.8 each found the three MEDIUM-class defects Gemini 3.7
+  missed; Grok alone found the drop-guard and duplicate-id leaks. Raw outputs in
+  `docs/reviews/2026-09-03-pr68-{grok,gemini38}-raw.md`.

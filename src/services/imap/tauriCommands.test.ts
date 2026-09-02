@@ -10,6 +10,7 @@ const mockInvoke = vi.mocked(invoke);
 
 import {
   imapTestConnection,
+  cancelConnectionTest,
   imapListFolders,
   imapFetchMessages,
   imapFetchNewUids,
@@ -51,14 +52,28 @@ beforeEach(() => {
 });
 
 describe('IMAP Tauri commands', () => {
+  // SPEC-204: a test that carries an id is cancellable through connection_test_cancel.
+  it('imapTestConnection passes the testId through, and cancelConnectionTest names it', async () => {
+    mockInvoke.mockResolvedValueOnce('ok').mockResolvedValueOnce(true);
+
+    await imapTestConnection(testImapConfig, 12345);
+    const cancelled = await cancelConnectionTest(12345);
+
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, 'imap_test_connection', { config: testImapConfig, testId: 12345 });
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, 'connection_test_cancel', { testId: 12345 });
+    expect(cancelled).toBe(true);
+  });
+
   it('imapTestConnection invokes with correct command and params', async () => {
     mockInvoke.mockResolvedValue('Connected successfully. Found 5 folder(s).');
 
     const result = await imapTestConnection(testImapConfig);
 
     // Still a config, deliberately: account setup runs before a session exists.
+    // No id: the test runs inline, as before SPEC-204.
     expect(mockInvoke).toHaveBeenCalledWith('imap_test_connection', {
       config: testImapConfig,
+      testId: null,
     });
     expect(result).toBe('Connected successfully. Found 5 folder(s).');
   });
@@ -248,6 +263,14 @@ describe('SMTP Tauri commands', () => {
     expect(result).toEqual(sendResult);
   });
 
+  it('smtpTestConnection passes the testId through (SPEC-204)', async () => {
+    mockInvoke.mockResolvedValue({ success: true, message: 'Connection successful' });
+
+    await smtpTestConnection(testSmtpConfig, 777);
+
+    expect(mockInvoke).toHaveBeenCalledWith('smtp_test_connection', { config: testSmtpConfig, testId: 777 });
+  });
+
   it('smtpTestConnection invokes with correct command and params', async () => {
     const testResult = { success: true, message: 'Connection successful' };
     mockInvoke.mockResolvedValue(testResult);
@@ -256,6 +279,7 @@ describe('SMTP Tauri commands', () => {
 
     expect(mockInvoke).toHaveBeenCalledWith('smtp_test_connection', {
       config: testSmtpConfig,
+      testId: null,
     });
     expect(result).toEqual(testResult);
   });

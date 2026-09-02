@@ -1,5 +1,6 @@
-import { useState, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useState, useCallback, useRef, useEffect } from "react";
+import { createConnectionTestRun, type ConnectionTestRun } from "./connectionTestRun";
+import type { ImapConfig, SmtpConfig } from "@/services/imap/tauriCommands";
 import {
   ArrowLeft,
   ArrowRight,
@@ -125,10 +126,24 @@ function smtpCredentialInputs(form: FormState, isOAuth: boolean): SmtpCredential
   };
 }
 
-/** Map UI security value ("ssl") to Rust config value ("tls") */
-function mapSecurity(security: string): string {
-  if (security === "ssl") return "tls";
-  return security;
+/**
+ * Map the UI security value ("ssl") to the Rust config value ("tls").
+ * Exhaustive on purpose: an unknown value must never fall through to "none"
+ * and put a password on a plaintext socket (#68 review, Grok 3).
+ */
+function mapSecurity(security: SecurityType): ImapConfig["security"] {
+  switch (security) {
+    case "ssl":
+      return "tls";
+    case "starttls":
+      return "starttls";
+    case "none":
+      return "none";
+    default: {
+      const unknown: never = security;
+      throw new Error(`Unknown security setting: ${String(unknown)}`);
+    }
+  }
 }
 
 export function AddImapAccount({
@@ -297,62 +312,59 @@ export function AddImapAccount({
     }
   };
 
-  const testImapConnection = async () => {
-    setImapTest({ state: "testing" });
-    try {
-      const result = await invoke<string>(
-        "imap_test_connection",
-        {
-          config: {
-            host: form.imapHost,
-            port: form.imapPort,
-            security: mapSecurity(form.imapSecurity),
-            username: form.imapUsername || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
-            password: isOAuth ? (form.oauthAccessToken ?? "") : form.password,
-            auth_method: isOAuth ? "oauth2" : "password",
-            accept_invalid_certs: form.acceptInvalidCerts,
-          },
-        },
-      );
-      setImapTest({ state: "success", message: result });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setImapTest({ state: "error", message });
-    }
+  const imapTestConfig = (): ImapConfig => ({
+    host: form.imapHost,
+    port: form.imapPort,
+    security: mapSecurity(form.imapSecurity),
+    username: form.imapUsername || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
+    password: isOAuth ? (form.oauthAccessToken ?? "") : form.password,
+    auth_method: isOAuth ? "oauth2" : "password",
+    accept_invalid_certs: form.acceptInvalidCerts,
+  });
+
+  const smtpTestConfig = (): SmtpConfig => {
+    // SPEC-252 REQ-1.3: the same resolver the save uses, so the test can
+    // never pass with credentials the account will not keep.
+    const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, isOAuth));
+    return {
+      host: form.smtpHost,
+      port: form.smtpPort,
+      security: mapSecurity(form.smtpSecurity),
+      username: smtp.username || form.imapUsername.trim() || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
+      password: smtp.password,
+      auth_method: isOAuth ? "oauth2" : "password",
+      accept_invalid_certs: form.acceptInvalidCerts,
+    };
   };
 
-  const testSmtpConnection = async () => {
-    setSmtpTest({ state: "testing" });
-    try {
-      // SPEC-252 REQ-1.3: the same resolver the save uses, so the test can
-      // never pass with credentials the account will not keep.
-      const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, isOAuth));
-      const result = await invoke<{ success: boolean; message: string }>(
-        "smtp_test_connection",
-        {
-          config: {
-            host: form.smtpHost,
-            port: form.smtpPort,
-            security: mapSecurity(form.smtpSecurity),
-            username: smtp.username || form.imapUsername.trim() || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
-            password: smtp.password,
-            auth_method: isOAuth ? "oauth2" : "password",
-            accept_invalid_certs: form.acceptInvalidCerts,
-          },
-        },
-      );
-      setSmtpTest({
-        state: result.success ? "success" : "error",
-        message: result.message,
-      });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setSmtpTest({ state: "error", message });
-    }
+  // SPEC-204: one cancellable run for both tests. A result that arrives after
+  // Cancel or a re-test is dropped by the run, never by a state check here.
+  const testRun = useRef<ConnectionTestRun | null>(null);
+  if (!testRun.current) testRun.current = createConnectionTestRun(); // lazy: one per mount, not per render
+  const runOf = () => testRun.current!;
+  useEffect(() => () => { void runOf().cancel(); }, []);
+
+  // Closing the sheet by any path stops the tests too, not only unmount
+  // (#68 review, Grok 7).
+  const handleClose = () => {
+    void runOf().cancel();
+    onClose();
   };
 
   const testBothConnections = async () => {
-    await Promise.all([testImapConnection(), testSmtpConnection()]);
+    if (runOf().isRunning()) return; // a second click before the row repaints
+    setImapTest({ state: "testing" });
+    setSmtpTest({ state: "testing" });
+    await runOf().start(imapTestConfig(), smtpTestConfig(), {
+      onImap: (r) => setImapTest({ state: r.ok ? "success" : "error", message: r.message }),
+      onSmtp: (r) => setSmtpTest({ state: r.ok ? "success" : "error", message: r.message }),
+    });
+  };
+
+  const cancelConnectionTests = async () => {
+    setImapTest({ state: "idle" });
+    setSmtpTest({ state: "idle" });
+    await runOf().cancel();
   };
 
   const handleSave = async () => {
@@ -903,17 +915,32 @@ export function AddImapAccount({
         {renderTestResult("SMTP Connection", smtpTest)}
       </div>
 
-      <button
-        onClick={testBothConnections}
-        disabled={imapTest.state === "testing" || smtpTest.state === "testing"}
-        className="w-full px-4 py-2 text-sm bg-bg-secondary border border-border-primary rounded-lg text-text-primary hover:bg-bg-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {imapTest.state === "testing" || smtpTest.state === "testing"
-          ? "Testing..."
-          : imapTest.state === "idle" && smtpTest.state === "idle"
+      {imapTest.state === "testing" || smtpTest.state === "testing" ? (
+        <div className="flex gap-2">
+          <button
+            disabled
+            className="flex-1 px-4 py-2 text-sm bg-bg-secondary border border-border-primary rounded-lg text-text-primary opacity-50 cursor-not-allowed"
+          >
+            Testing...
+          </button>
+          <button
+            onClick={cancelConnectionTests}
+            className="px-4 py-2 text-sm bg-bg-secondary border border-border-primary rounded-lg text-text-primary hover:bg-bg-hover transition-colors"
+            title="Stop the connection test"
+          >
+            Cancel test
+          </button>
+        </div>
+      ) : (
+        <button
+          onClick={testBothConnections}
+          className="w-full px-4 py-2 text-sm bg-bg-secondary border border-border-primary rounded-lg text-text-primary hover:bg-bg-hover transition-colors"
+        >
+          {imapTest.state === "idle" && smtpTest.state === "idle"
             ? "Test Connection"
             : "Re-test Connection"}
-      </button>
+        </button>
+      )}
 
       {saveError && (
         <div className="bg-danger/10 border border-danger/20 rounded-lg p-3 text-sm text-danger">
@@ -939,7 +966,7 @@ export function AddImapAccount({
   return (
     <Modal
       isOpen={true}
-      onClose={onClose}
+      onClose={handleClose}
       title="Add IMAP/SMTP Account"
       width="w-full max-w-lg"
     >
@@ -958,7 +985,7 @@ export function AddImapAccount({
 
           <div className="flex gap-2">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
             >
               Cancel

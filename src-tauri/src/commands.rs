@@ -7,14 +7,21 @@ use crate::imap::types::{
     ImapFolderSearchResult, ImapFolderStatus, ImapFolderSyncResult, ImapMessage,
     MoveResult, RemovalResult,
 };
+use crate::connection_tests::{run_cancellable, ConnectionTests};
 use crate::smtp::client as smtp_client;
 use crate::smtp::types::{SmtpConfig, SmtpSendResult};
 
 // ---------- IMAP commands ----------
 
+/// `test_id` (SPEC-204) makes the test cancellable through
+/// `connection_test_cancel`; without it the test runs inline as before.
 #[tauri::command]
-pub async fn imap_test_connection(config: ImapConfig) -> Result<String, String> {
-    imap_client::test_connection(&config).await
+pub async fn imap_test_connection(
+    config: ImapConfig,
+    test_id: Option<u64>,
+    tests: tauri::State<'_, ConnectionTests>,
+) -> Result<String, String> {
+    run_cancellable(&tests, test_id, async move { imap_client::test_connection(&config).await }).await
 }
 
 // ---------- Pooled session lifecycle (brief E2/P15) ----------
@@ -575,6 +582,10 @@ pub async fn smtp_send_email(
 }
 
 #[tauri::command]
-pub async fn smtp_test_connection(config: SmtpConfig) -> Result<SmtpSendResult, String> {
-    smtp_client::test_connection(&config).await
+pub async fn smtp_test_connection(
+    config: SmtpConfig,
+    test_id: Option<u64>,
+    tests: tauri::State<'_, ConnectionTests>,
+) -> Result<SmtpSendResult, String> {
+    run_cancellable(&tests, test_id, async move { smtp_client::test_connection(&config).await }).await
 }
