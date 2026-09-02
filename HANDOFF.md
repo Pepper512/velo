@@ -40,6 +40,10 @@
 
 ## 1. Exact next step
 
+**The full ordered plan is `docs/ROADMAP.md`** (pinned 2026-09-02): F-4 follow-up → bug-fix queue
+(#297, #240, …) → carried hardening → Superhuman-parity waves, with the decisions only Jim can
+make listed separately and the copy-paste prompt for the next session at the end.
+
 **Build the F-4 follow-up: REQ-2.3's `NOT DELETED` belt (one Rust command), REQ-4's reconcile
 queue op (`compactQueue` branch, 3-strike degrade, migration 27), and the "folder gone" path (a
 folder deleted on the server keeps its `folder_sync_state` row and now blocks attestation until
