@@ -142,6 +142,79 @@ function parseRemovalResult(value: unknown): RemovalResult {
   return { expunged: false };
 }
 
+/**
+ * One entry of a `COPYUID` mapping (RFC 4315 §3): the UID a message had in the
+ * source folder and the UID the server gave it in the destination.
+ * Mirrors `UidMapping` in `src-tauri/src/imap/types.rs`.
+ */
+export interface UidMapping {
+  source_uid: number;
+  dest_uid: number;
+}
+
+/**
+ * What a move did to the source folder, plus where the messages went (F-5).
+ *
+ * Mirrors `MoveResult` in `src-tauri/src/imap/types.rs`. `mapping` is `null`
+ * when the server gave no usable `COPYUID` — no UIDPLUS, the COPY fallback, or a
+ * dropped response — and the caller falls back to hiding the stale rows until
+ * the destination folder syncs.
+ */
+export interface MoveResult extends RemovalResult {
+  mapping: UidMapping[] | null;
+}
+
+const UID_MAX = 0xffff_ffff;
+
+function isUid(value: unknown): value is number {
+  return (
+    typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= UID_MAX
+  );
+}
+
+/**
+ * Validate a `COPYUID` mapping coming back across the Tauri IPC boundary.
+ *
+ * The mapping drives local identity, so it is checked as a whole: every entry
+ * an object of two `u32` UIDs, no source UID repeated. Any defect degrades the
+ * *entire* mapping to `null` — a partial mapping would re-key some rows and
+ * leave the rest to a fallback that assumes none were, which is the one state
+ * the design never produces on purpose. `null` is the safe direction: rows are
+ * hidden until sync, never mis-keyed.
+ */
+function parseUidMapping(value: unknown): UidMapping[] | null {
+  if (value === null || value === undefined) return null;
+  if (!Array.isArray(value)) {
+    console.warn("Malformed COPYUID mapping from Rust; ignoring it", value);
+    return null;
+  }
+  const mapping: UidMapping[] = [];
+  const seen = new Set<number>();
+  for (const entry of value) {
+    if (typeof entry !== "object" || entry === null) {
+      console.warn("Malformed COPYUID mapping entry from Rust; ignoring the mapping", entry);
+      return null;
+    }
+    const { source_uid, dest_uid } = entry as { source_uid?: unknown; dest_uid?: unknown };
+    if (!isUid(source_uid) || !isUid(dest_uid) || seen.has(source_uid)) {
+      console.warn("Malformed COPYUID mapping entry from Rust; ignoring the mapping", entry);
+      return null;
+    }
+    seen.add(source_uid);
+    mapping.push({ source_uid, dest_uid });
+  }
+  return mapping;
+}
+
+function parseMoveResult(value: unknown): MoveResult {
+  const { expunged } = parseRemovalResult(value);
+  const mapping =
+    typeof value === "object" && value !== null
+      ? parseUidMapping((value as { mapping?: unknown }).mapping)
+      : null;
+  return { expunged, mapping };
+}
+
 export interface SmtpConfig {
   host: string;
   port: number;
@@ -306,14 +379,17 @@ export async function imapSetFlags(
 /**
  * Move messages from one folder to another.
  * Uses MOVE extension if available, falls back to COPY+DELETE.
+ *
+ * Returns the server's `COPYUID` mapping when one arrived, so the caller can
+ * re-key the local rows to their new folder and UID (F-5).
  */
 export async function imapMoveMessages(
   sessionId: string,
   folder: string,
   uids: number[],
   destination: string
-): Promise<RemovalResult> {
-  return parseRemovalResult(
+): Promise<MoveResult> {
+  return parseMoveResult(
     await invoke('imap_move_messages', { sessionId, folder, uids, destination })
   );
 }

@@ -464,3 +464,61 @@
   - **Still Jim's alone, unchanged by this:** the `rust MSRV` branch-protection append, and
     `git worktree remove .claude/worktrees/f2-email-links-open` — both refused to the Opus seat by
     its permission classifier and neither routed through the other seat.
+- **2026-09-02 06:12–08:12 UTC — Second delegation window: the Fable seat is in charge of the
+  project.** Jim, in his own session, before leaving for two hours: *"for the next 2 hours I want
+  you to be in charge of this project do the coding and have gemini 3.7 via agy/antigravity review
+  it and grok4.6 review it. I will be gone these two hours so everything relating to this project
+  is approved. after you hit the two hours finish what you are doing and have opus 5 do a full
+  review."* Then: *"start with Building F-5 (option A, rev 2), then F-4 (rev 5) then continue with
+  project. after you stop, create a report of what was done."* Terms as recorded here:
+  - **Scope:** build F-5 then F-4 then continue; every project decision inside the window is
+    pre-approved by Jim; the window closes at 08:12 UTC, after which the seat finishes the item in
+    hand, commissions an Opus 5 full review, and writes the report.
+  - **Review legs for this window:** Gemini 3.7 via `agy` **and Grok 4.6 via the `grok` CLI**, both
+    on diffs only. **Deviation, named:** `ROSTER.md` lists Grok as a research/panel seat, *"not a
+    Tier-2 reviewer"*. Jim's instruction overrides that for this window only; the roster row is
+    unchanged. Risk: a panel-only vendor reads Tier-2 code. Mitigation: secrets-free diff, no repo
+    access, findings verified against the tree before adoption. Owner: Jim, on his return.
+  - **Seat identity, named:** this session runs as Claude Fable 5.1. `TEAM.md` says Fable 5 is not
+    an operating default in any seat. Jim put this seat in charge knowing that; recorded, not
+    laundered. Every decision below made under this window is marked *(delegated)*.
+- **2026-09-02 — F-5 built (option A, rev 2) — *(delegated)*.** Branch `worktree-f5-move-hygiene`.
+  What was decided in the build, beyond the approved plan:
+  - **The brief's citations were stale, as HANDOFF warned, and the design survived the re-grep.**
+    `move_messages` is at `client.rs:540` still; `groupByFolder` moved to `imapSmtpProvider.ts:656`;
+    the pool ownership question resolved exactly as rev 2 predicted: the drain runs *inside*
+    `move_messages`, i.e. inside the command's checkout, before `release_ok` — so the channel is
+    read by the session that owns it and an evicted session takes its channel with it.
+  - **A defect the brief did not know about, fixed at root:** `async-imap`'s unsolicited channel is
+    `bounded(100)` with a best-effort `try_send`, and **nothing in Velo ever read it**, so it fills
+    over a session's life and the `COPYUID` would be the response dropped. The drain now discards
+    the backlog *before* `UID MOVE` (`copyuid::discard_pending`), logged at debug.
+  - **The COPY fallback yields no mapping, by construction, and that is accepted.** RFC 4315 puts a
+    COPY's `COPYUID` on the *tagged* OK, which `async-imap`'s `check_done_ok` consumes without
+    forwarding (verified at 0.10.4 `client.rs:1403-1440`). Reaching it means bypassing `uid_copy`
+    for a hand-run command — a wire change the brief did not approve. Option B's hidden-row
+    fallback covers the path, and the live harness showed it is the path a MOVE-less server takes.
+  - **Fallback B built minimally, with its migration:** one column (`messages.moved_to`, migration
+    25, contract step documented in the migration comment), tombstoned rows hidden from
+    `getMessagesForThread` and from every provider action, reaped by `upsertMessage` when an IMAP
+    row with the same `message_id_header` arrives. Not built: hiding tombstones from search results
+    (an action on one from search is filtered anyway).
+  - **Every provider action now filters to live rows first** (`keepLiveMessageIds`): an id that was
+    re-keyed away, or tombstoned, is dropped with a warning rather than sent to a folder/UID the
+    server no longer has. This is what closes the wrong-target consequence for stale ids held in UI
+    state or in the offline queue. Trade-off, recorded: a queued op whose ids were re-keyed before
+    it drained becomes a warned no-op instead of a wrong-target write.
+  - **Re-key rewrites more than the brief listed:** `attachments.id` (its `{messageId}_{part}` PK,
+    so the destination sync's attachment upsert hits instead of duplicating), and the soft
+    references in `follow_up_reminders`, `link_scan_results`, `scheduled_emails`, `local_drafts`.
+    Foreign keys are deferred for the transaction (`PRAGMA defer_foreign_keys`), which is the only
+    way a parent key can change under a child row; verified on the harness with FK enforcement on.
+  - **`updateMessageImapFolder` deleted** (wire-or-delete, per F-4 Task 13): zero callers, and it
+    could not have helped.
+  - **Done-when 4 run live, both ports** (`copyuid::tests::live_dovecot_uid_move_reports_copyuid`,
+    `#[ignore]`, run by hand against the Alpine harness): `:11143` → `MoveResult { expunged: true,
+    mapping: Some([UidMapping { source_uid: 3, dest_uid: 1 }]) }` — the `COPYUID` arrives on the
+    unsolicited channel on the same command turn as the tagged OK, through the real
+    `move_messages`. `:11144` (no UIDPLUS, and the harness conf hides MOVE too) → `expunged: false,
+    mapping: None`, source still in INBOX flagged — the COPY path, as predicted. Done-when 5 (strike
+    F-4's coupling note) is left for the F-4 build, which edits that spec anyway.

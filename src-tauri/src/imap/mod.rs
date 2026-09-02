@@ -1,5 +1,6 @@
 pub mod caps;
 pub mod client;
+pub mod copyuid;
 pub mod move_outcome;
 pub mod net;
 pub mod pool;

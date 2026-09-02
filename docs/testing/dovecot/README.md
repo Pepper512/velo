@@ -103,6 +103,27 @@ command Velo issued, and which UIDs survived — not a screenshot of a mailbox.
 docker compose -f compose-arm64.yml down -v   # -v so maildirs do not persist
 ```
 
+## F-5: does the `COPYUID` really arrive? (automated against this harness)
+
+F-5 re-keys a moved message's local row from the server's `COPYUID`, which
+`async-imap` forwards on the session's unsolicited channel. Whether that
+response lands on the same command turn as the tagged `OK` to `UID MOVE` is
+exactly what no unit test can prove, so there is an ignored Rust test that
+drives the real `move_messages` against both servers:
+
+```bash
+cd docs/testing/dovecot && docker compose -f compose-arm64.yml up -d --build
+cd ../../../src-tauri && cargo test --locked -- --ignored live_dovecot --nocapture
+```
+
+**Pass:** `:11143` prints `mapping: Some([UidMapping { source_uid: N, dest_uid: M }])`
+where `M` is the UID the destination folder actually lists; `:11144` prints
+`expunged: false, mapping: None` with the source still in INBOX — the harness
+hides MOVE along with UIDPLUS, so that server takes the COPY fallback, whose
+`COPYUID` rides the tagged OK `async-imap` does not forward. The test appends
+its own messages and deletes its own destination folder; the `\Deleted` copy
+it leaves in INBOX on `:11144` is harmless in a disposable server.
+
 ## Evidence already on the record
 
 PR #26 carries a passing run of all three scenarios, produced with the Alpine

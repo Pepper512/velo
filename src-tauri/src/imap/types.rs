@@ -137,6 +137,29 @@ pub struct RemovalResult {
     pub expunged: bool,
 }
 
+/// One entry of a `COPYUID` mapping: the UID a message had in the source
+/// folder and the UID the server gave it in the destination (RFC 4315 §3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UidMapping {
+    pub source_uid: u32,
+    pub dest_uid: u32,
+}
+
+/// What a move did to the source folder, plus where the messages went (F-5).
+///
+/// `expunged` carries the same meaning as [`RemovalResult`]. `mapping` is the
+/// server's `COPYUID` answer, validated in `imap::copyuid`, or `None` when no
+/// usable mapping arrived — a non-UIDPLUS server, the COPY fallback (whose
+/// `COPYUID` rides the tagged OK that `async-imap` consumes), or a response the
+/// best-effort unsolicited channel dropped. The frontend treats `None` as
+/// "the row cannot be re-keyed" and falls back to hiding it until the
+/// destination folder syncs. **Wire contract with `parseMoveResult`.**
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MoveResult {
+    pub expunged: bool,
+    pub mapping: Option<Vec<UidMapping>>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -308,6 +308,83 @@ describe("RemovalResult boundary validation", () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await expect(
       imapMoveMessages('session-abc', "INBOX", [1], "Archive"),
-    ).resolves.toBeDefined();
+    ).resolves.toEqual({ expunged: false, mapping: null });
+  });
+});
+
+describe("MoveResult boundary validation (F-5)", () => {
+  // The COPYUID mapping drives local identity, so any defect degrades the whole
+  // mapping to null — rows are then hidden until sync, never mis-keyed.
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  it("passes a well-formed mapping through", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      expunged: true,
+      mapping: [
+        { source_uid: 5, dest_uid: 3 },
+        { source_uid: 6, dest_uid: 4 },
+      ],
+    });
+    await expect(imapMoveMessages("s", "INBOX", [5, 6], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: [
+        { source_uid: 5, dest_uid: 3 },
+        { source_uid: 6, dest_uid: 4 },
+      ],
+    });
+  });
+
+  it("keeps an explicit null mapping and an empty mapping distinct", async () => {
+    vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping: null });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: null,
+    });
+
+    vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping: [] });
+    await expect(imapMoveMessages("s", "INBOX", [], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: [],
+    });
+  });
+
+  it.each([
+    ["a non-array mapping", "5:3"],
+    ["a non-object entry", [5]],
+    ["a null entry", [null]],
+    ["a missing field", [{ source_uid: 5 }]],
+    ["a non-integer UID", [{ source_uid: 5.5, dest_uid: 3 }]],
+    ["a zero UID", [{ source_uid: 0, dest_uid: 3 }]],
+    ["a UID above u32", [{ source_uid: 5, dest_uid: 4_294_967_296 }]],
+    ["a string UID", [{ source_uid: "5", dest_uid: 3 }]],
+    ["a repeated source UID", [{ source_uid: 5, dest_uid: 3 }, { source_uid: 5, dest_uid: 4 }]],
+  ])("degrades the whole mapping to null for %s", async (_label, mapping) => {
+    vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: null,
+    });
+  });
+
+  it("does not let a malformed mapping disturb the expunged flag", async () => {
+    vi.mocked(invoke).mockResolvedValue({ expunged: false, mapping: "bad" });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: false,
+      mapping: null,
+    });
+  });
+
+  it("strips unknown fields from mapping entries", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      expunged: true,
+      mapping: [{ source_uid: 5, dest_uid: 3, extra: "ignored" }],
+    });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: [{ source_uid: 5, dest_uid: 3 }],
+    });
   });
 });

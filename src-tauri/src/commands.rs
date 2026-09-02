@@ -5,7 +5,7 @@ use crate::imap::pool::{AccountIdent, AccountKey, SessionPool};
 use crate::imap::types::{
     DeltaCheckRequest, DeltaCheckResult, ImapConfig, ImapFetchResult, ImapFolder,
     ImapFolderSearchResult, ImapFolderStatus, ImapFolderSyncResult, ImapMessage,
-    RemovalResult,
+    MoveResult, RemovalResult,
 };
 use crate::smtp::client as smtp_client;
 use crate::smtp::types::{SmtpConfig, SmtpSendResult};
@@ -351,10 +351,11 @@ pub async fn imap_move_messages(
     folder: String,
     uids: Vec<u32>,
     destination: String,
-) -> Result<RemovalResult, String> {
+) -> Result<MoveResult, String> {
     if uids.is_empty() {
-        // Nothing was flagged, so nothing is pending removal.
-        return Ok(RemovalResult { expunged: true });
+        // Nothing was flagged, so nothing is pending removal — and nothing moved,
+        // so the (empty) mapping is complete rather than absent.
+        return Ok(MoveResult { expunged: true, mapping: Some(Vec::new()) });
     }
 
     let uid_set = uid_set(&uids);

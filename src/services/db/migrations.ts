@@ -800,6 +800,23 @@ const MIGRATIONS = [
       INSERT OR REPLACE INTO settings (key, value) VALUES ('imap_attachment_repair_v1', '1');
     `,
   },
+  {
+    version: 25,
+    description:
+      "Move-time row hygiene (F-5): tombstone column for rows moved without a COPYUID mapping",
+    // Expand step only. A moved IMAP message is normally re-keyed in place
+    // (`rekeyMovedMessages`) so the local row *is* the message; when the server
+    // gave no usable COPYUID — no UIDPLUS, the COPY fallback, or a dropped
+    // response — the stale row is instead marked with the folder it went to,
+    // hidden from thread views and provider actions, and reaped when the
+    // destination folder's sync inserts the fresh row.
+    //
+    // Contract step (not run here, per the pairing gate — app rollback never
+    // rolls back applied migrations): `ALTER TABLE messages DROP COLUMN moved_to;`
+    // Tombstoned rows revert to being stale rows, which is exactly what they
+    // were before this migration.
+    sql: `ALTER TABLE messages ADD COLUMN moved_to TEXT;`,
+  },
 ];
 
 /**
