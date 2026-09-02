@@ -56,7 +56,7 @@ export async function searchMessages(
         rank
       FROM messages_fts
       JOIN messages m ON m.rowid = messages_fts.rowid
-      WHERE messages_fts MATCH $1 AND m.account_id = $2
+      WHERE messages_fts MATCH $1 AND m.account_id = $2 AND m.moved_to IS NULL
       ORDER BY rank
       LIMIT $3`,
       [ftsQuery, accountId, limit],
@@ -76,7 +76,7 @@ export async function searchMessages(
       rank
     FROM messages_fts
     JOIN messages m ON m.rowid = messages_fts.rowid
-    WHERE messages_fts MATCH $1
+    WHERE messages_fts MATCH $1 AND m.moved_to IS NULL
     ORDER BY rank
     LIMIT $2`,
     [ftsQuery, limit],

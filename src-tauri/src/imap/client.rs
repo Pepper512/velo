@@ -11,6 +11,7 @@ use super::types::*;
 use super::net;
 use super::wire;
 use super::caps;
+use super::copyuid;
 use super::move_outcome::{self, MoveOutcome};
 
 /// Why a fetch failed, when the caller must be able to tell the cases apart.
@@ -537,12 +538,19 @@ async fn flag_and_expunge(
 /// Move messages between folders.
 ///
 /// Tries MOVE first; falls back to COPY + flag Deleted + targeted expunge.
+///
+/// On the MOVE path the server's `COPYUID` is drained from the session's
+/// unsolicited channel and returned as `mapping` (F-5). The drain happens here,
+/// inside the caller's checkout of the pooled session, on purpose: the channel
+/// belongs to the session, and a session evicted on error takes its undrained
+/// channel with it, so reading it after `release_ok` would be reading someone
+/// else's. Nothing about ownership changes — the mapping leaves as plain data.
 pub async fn move_messages(
     session: &mut ImapSession,
     source_folder: &str,
     uid_set: &str,
     dest_folder: &str,
-) -> Result<RemovalResult, String> {
+) -> Result<MoveResult, String> {
     net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {source_folder}"), session.select(source_folder))
         .await?
         .map_err(|e| format!("SELECT {source_folder} failed: {e}"))?;
@@ -553,6 +561,17 @@ pub async fn move_messages(
     let caps = caps::fetch(session, IMAP_CMD_TIMEOUT).await?;
 
     if caps.has_move {
+        // The channel is bounded and its sender is best-effort: whatever has
+        // accumulated on it since the session opened (nothing ever read it
+        // before F-5) would otherwise crowd out the COPYUID we are about to
+        // want. Make room first.
+        let discarded = copyuid::discard_pending(std::iter::from_fn(|| {
+            session.unsolicited_responses.try_recv().ok()
+        }));
+        if discarded > 0 {
+            log::debug!("discarded {discarded} stale unsolicited responses before UID MOVE");
+        }
+
         let outcome = move_outcome::classify_move(
             net::with_timeout(
                 IMAP_CMD_TIMEOUT,
@@ -565,7 +584,25 @@ pub async fn move_messages(
         match outcome {
             // A server-side MOVE removes the source copy itself, so there is
             // nothing left flagged and nothing for the caller to warn about.
-            MoveOutcome::Moved => return Ok(RemovalResult { expunged: true }),
+            // Whether the COPYUID arrived on the same command turn as the tagged
+            // OK is what the Dovecot harness run in the PR confirms; the code
+            // treats "it did not" as ordinary (brief F-5 rev 2, item 3).
+            MoveOutcome::Moved => {
+                let copyuid = copyuid::drain_copyuid(std::iter::from_fn(|| {
+                    session.unsolicited_responses.try_recv().ok()
+                }));
+                if copyuid.is_none() {
+                    log::info!(
+                        "UID MOVE {source_folder} -> {dest_folder} completed without a usable COPYUID; \
+                         rows will be hidden until the destination syncs"
+                    );
+                }
+                let (mapping, dest_uidvalidity) = match copyuid {
+                    Some(c) => (Some(c.mapping), Some(c.dest_uidvalidity)),
+                    None => (None, None),
+                };
+                return Ok(MoveResult { expunged: true, mapping, dest_uidvalidity });
+            }
             // The server advertised MOVE and still rejected the command. This
             // is the only outcome the COPY fallback was ever written for.
             MoveOutcome::FallBackToCopy(msg) => {
@@ -599,6 +636,14 @@ pub async fn move_messages(
     }
 
     // Fallback: COPY, then flag Deleted, then expunge only what we copied.
+    //
+    // No mapping on this path. RFC 4315 puts a COPY's `COPYUID` in the *tagged*
+    // OK, and `async-imap`'s `check_done_ok` consumes tagged responses without
+    // forwarding them (`client.rs:1403-1440`, verified at 0.10.4). Reaching it
+    // would mean bypassing `uid_copy` for a hand-run command, which is a wire
+    // change this brief did not approve. The frontend's hidden-row fallback
+    // covers it, and the path is rare: a server that advertises MOVE and then
+    // rejects it, or one without MOVE at all.
     net::with_timeout(IMAP_CMD_TIMEOUT, "UID COPY", session.uid_copy(uid_set, dest_folder))
         .await?
         .map_err(|e| format!("UID COPY failed: {e}"))?;
@@ -616,7 +661,7 @@ pub async fn move_messages(
         )
     })?;
 
-    Ok(RemovalResult { expunged })
+    Ok(MoveResult { expunged, mapping: None, dest_uidvalidity: None })
 }
 
 /// Flag messages as deleted and remove them from the server.

@@ -17,11 +17,13 @@ import {
   smtpSendEmail,
   smtpTestConnection,
   type ImapConfig,
+  type MoveResult,
   type SmtpConfig,
 } from "../imap/tauriCommands";
 import { withSession, invalidateAccountCredentials } from "../imap/sessionManager";
 import { getAccount, type DbAccount } from "../db/accounts";
-import { findSpecialFolder } from "../imap/messageHelper";
+import { findSpecialFolder, keepLiveMessageIds } from "../imap/messageHelper";
+import { settleMovedRows } from "../imap/moveHygiene";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
@@ -313,19 +315,24 @@ export class ImapSmtpProvider implements EmailProvider {
   }
 
   // ---- Actions ----
+  //
+  // Every action targets the folder/UID pair embedded in each message id, so
+  // each one first drops ids that no longer name a live local row (moved and
+  // re-keyed, or tombstoned) — see `keepLiveMessageIds`. The four that move
+  // mail then settle the local rows to wherever the server put them (F-5).
 
   async archive(
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
     const archiveFolder =
       (await findSpecialFolder(this.accountId, "\\Archive")) ?? "Archive";
 
     for (const [folder, uids] of grouped) {
       if (folder === archiveFolder) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, archiveFolder));
-      noticeIfNotExpunged(result, folder);
+      await this.settle(folder, archiveFolder, uids, result);
     }
   }
 
@@ -333,14 +340,14 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
     const trashFolder =
       (await findSpecialFolder(this.accountId, "\\Trash")) ?? "Trash";
 
     for (const [folder, uids] of grouped) {
       if (folder === trashFolder) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, trashFolder));
-      noticeIfNotExpunged(result, folder);
+      await this.settle(folder, trashFolder, uids, result);
     }
   }
 
@@ -348,7 +355,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       const result = await this.withImapSession((id) => imapDeleteMessages(id, folder, uids));
@@ -361,7 +368,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     read: boolean,
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       await this.withImapSession((id) => imapSetFlags(id, folder, uids, ["Seen"], read));
@@ -373,7 +380,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     starred: boolean,
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       await this.withImapSession((id) => imapSetFlags(id, folder, uids, ["Flagged"], starred));
@@ -385,7 +392,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     isSpam: boolean,
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
     const junkFolder =
       (await findSpecialFolder(this.accountId, "\\Junk")) ?? "Junk";
     const destination = isSpam ? junkFolder : "INBOX";
@@ -393,7 +400,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === destination) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, destination));
-      noticeIfNotExpunged(result, folder);
+      await this.settle(folder, destination, uids, result);
     }
   }
 
@@ -402,12 +409,12 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     folderPath: string,
   ): Promise<void> {
-    const grouped = this.groupByFolder(_messageIds);
+    const grouped = await this.groupLiveByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       if (folder === folderPath) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, folderPath));
-      noticeIfNotExpunged(result, folder);
+      await this.settle(folder, folderPath, uids, result);
     }
   }
 
@@ -646,6 +653,37 @@ export class ImapSmtpProvider implements EmailProvider {
   }
 
   // ---- Helpers ----
+
+  /** `groupByFolder` over only the ids that still name a live local row. */
+  private async groupLiveByFolder(messageIds: string[]): Promise<Map<string, number[]>> {
+    return this.groupByFolder(await keepLiveMessageIds(this.accountId, messageIds));
+  }
+
+  /**
+   * After the server completed a move: settle the local rows first, then
+   * raise the not-expunged notice. The rows are the part that must not be
+   * skipped — the notice is a toast, and the settle must not depend on it
+   * (Grok M7).
+   */
+  private async settle(
+    sourceFolder: string,
+    destFolder: string,
+    uids: number[],
+    result: MoveResult,
+  ): Promise<void> {
+    try {
+      await settleMovedRows(
+        this.accountId,
+        sourceFolder,
+        destFolder,
+        uids,
+        result.mapping,
+        result.dest_uidvalidity ?? null,
+      );
+    } finally {
+      noticeIfNotExpunged(result, sourceFolder);
+    }
+  }
 
   /**
    * Parse IMAP message IDs and group UIDs by folder.

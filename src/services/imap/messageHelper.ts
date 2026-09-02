@@ -121,19 +121,47 @@ export function securityToConfigType(
 }
 
 /**
- * Update the imap_folder column for messages after a move operation.
+ * Keep only the message ids that name a live local row (F-5).
+ *
+ * IMAP message ids embed `{folder}-{uid}`, and every provider action derives
+ * its target from the id. An id that no longer exists locally — the row was
+ * re-keyed after a move — or that is tombstoned (`moved_to` set) describes a
+ * folder/UID pair the server no longer has: acting on it is a no-op at best
+ * and, after expunge renumbering on a COPY-fallback server, whatever message
+ * now occupies that slot at worst. Such ids are dropped with a warning rather
+ * than sent.
+ *
+ * Order is preserved. Chunked to stay within SQLite's bound-parameter limit.
+ *
+ * (Replaces `updateMessageImapFolder`, which had no callers and could not have
+ * helped: updating a column changes nothing the id-derived paths read.)
  */
-export async function updateMessageImapFolder(
+export async function keepLiveMessageIds(
   accountId: string,
   messageIds: string[],
-  newFolder: string,
-): Promise<void> {
-  if (messageIds.length === 0) return;
+): Promise<string[]> {
+  if (messageIds.length === 0) return [];
 
   const db = await getDb();
-  const placeholders = messageIds.map((_, i) => `$${i + 3}`).join(", ");
-  await db.execute(
-    `UPDATE messages SET imap_folder = $1 WHERE account_id = $2 AND id IN (${placeholders})`,
-    [newFolder, accountId, ...messageIds],
-  );
+  const live = new Set<string>();
+  const CHUNK = 500;
+  for (let i = 0; i < messageIds.length; i += CHUNK) {
+    const chunk = messageIds.slice(i, i + CHUNK);
+    const placeholders = chunk.map((_, j) => `$${j + 2}`).join(", ");
+    const rows = await db.select<{ id: string }[]>(
+      `SELECT id FROM messages WHERE account_id = $1 AND id IN (${placeholders}) AND moved_to IS NULL`,
+      [accountId, ...chunk],
+    );
+    for (const row of rows) live.add(row.id);
+  }
+
+  const kept = messageIds.filter((id) => live.has(id));
+  if (kept.length !== messageIds.length) {
+    const dropped = messageIds.filter((id) => !live.has(id));
+    console.warn(
+      `[messageHelper] Skipping ${dropped.length} message id(s) that are moved or unknown locally:`,
+      dropped,
+    );
+  }
+  return kept;
 }

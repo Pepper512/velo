@@ -54,6 +54,14 @@ vi.mock("../imap/tauriCommands", () => ({
 
 vi.mock("../imap/messageHelper", () => ({
   findSpecialFolder: vi.fn(),
+  // F-5: every action filters to live rows first. Pass-through by default so
+  // the existing action tests keep asserting protocol behaviour; the F-5 block
+  // below overrides it where the filter is the thing under test.
+  keepLiveMessageIds: vi.fn(async (_accountId: string, ids: string[]) => ids),
+}));
+
+vi.mock("../imap/moveHygiene", () => ({
+  settleMovedRows: vi.fn(async () => {}),
 }));
 
 vi.mock("../db/messages", () => ({
@@ -80,7 +88,8 @@ import {
   smtpTestConnection,
 } from "../imap/tauriCommands";
 import { invalidateAccountCredentials } from "../imap/sessionManager";
-import { findSpecialFolder } from "../imap/messageHelper";
+import { findSpecialFolder, keepLiveMessageIds } from "../imap/messageHelper";
+import { settleMovedRows } from "../imap/moveHygiene";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
 
@@ -230,6 +239,137 @@ describe("ImapSmtpProvider", () => {
   });
 
   // ---------- Actions ----------
+
+  describe("move-time row hygiene (F-5)", () => {
+    beforeEach(() => {
+      vi.mocked(keepLiveMessageIds).mockImplementation(async (_a, ids) => ids);
+      vi.mocked(findSpecialFolder).mockResolvedValue("Archive");
+    });
+
+    it("settles the local rows with the server's COPYUID mapping after a move", async () => {
+      const mapping = [
+        { source_uid: 100, dest_uid: 7 },
+        { source_uid: 200, dest_uid: 8 },
+      ];
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100", "imap-acc-1-INBOX-200"]);
+
+      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Archive", [100, 200], mapping, null);
+    });
+
+    it("passes the destination UIDVALIDITY through with the mapping", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({
+        expunged: true,
+        mapping: [{ source_uid: 100, dest_uid: 7 }],
+        dest_uidvalidity: 4242,
+      });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100"]);
+
+      expect(settleMovedRows).toHaveBeenCalledWith(
+        "acc-1",
+        "INBOX",
+        "Archive",
+        [100],
+        [{ source_uid: 100, dest_uid: 7 }],
+        4242,
+      );
+    });
+
+    it("settles with a null mapping when the server gave none, so the rows are hidden rather than left stale", async () => {
+      vi.mocked(findSpecialFolder).mockResolvedValue("Trash");
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null, dest_uidvalidity: null });
+
+      await provider.trash("thread-1", ["imap-acc-1-INBOX-100"]);
+
+      expect(findSpecialFolder).toHaveBeenCalledWith("acc-1", "\\Trash");
+      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Trash", [100], null, null);
+    });
+
+    it("settles the rows even if raising the not-expunged notice throws, and still raises it after settling", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null, dest_uidvalidity: null });
+      const order: string[] = [];
+      vi.mocked(settleMovedRows).mockImplementation(async () => {
+        order.push("settle");
+      });
+      const addNotice = useUIStore.getState().addNotice;
+      useUIStore.setState({
+        addNotice: (n) => {
+          order.push("notice");
+          addNotice(n);
+        },
+      });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100"]);
+
+      expect(order).toEqual(["settle", "notice"]);
+      useUIStore.setState({ addNotice });
+    });
+
+    it.each([
+      ["spam", (ids: string[]) => provider.spam("t", ids, true), "Archive"],
+      ["moveToFolder", (ids: string[]) => provider.moveToFolder("t", ids, "Projects"), "Projects"],
+    ])("settles after %s", async (_name, run, destination) => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [], dest_uidvalidity: null });
+
+      await run(["imap-acc-1-INBOX-5"]);
+
+      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", destination, [5], [], null);
+    });
+
+    it("does not settle a folder it skipped because the mail was already there", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [] });
+
+      await provider.archive("thread-1", ["imap-acc-1-Archive-100"]);
+
+      expect(imapMoveMessages).not.toHaveBeenCalled();
+      expect(settleMovedRows).not.toHaveBeenCalled();
+    });
+
+    it("drops ids that no longer name a live local row before touching the server", async () => {
+      // The stale id points at INBOX/100 — a UID the server no longer has
+      // there. Sending it is the wrong-target bug F-5 exists to remove.
+      vi.mocked(keepLiveMessageIds).mockResolvedValue(["imap-acc-1-INBOX-200"]);
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [] });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100", "imap-acc-1-INBOX-200"]);
+
+      expect(keepLiveMessageIds).toHaveBeenCalledWith("acc-1", [
+        "imap-acc-1-INBOX-100",
+        "imap-acc-1-INBOX-200",
+      ]);
+      expect(imapMoveMessages).toHaveBeenCalledWith("test-session", "INBOX", [200], "Archive");
+    });
+
+    it("filters every action, not only the moves", async () => {
+      vi.mocked(keepLiveMessageIds).mockResolvedValue([]);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
+
+      await provider.markRead("t", ["imap-acc-1-INBOX-1"], true);
+      await provider.star("t", ["imap-acc-1-INBOX-1"], true);
+      await provider.permanentDelete("t", ["imap-acc-1-INBOX-1"]);
+
+      expect(imapSetFlags).not.toHaveBeenCalled();
+      expect(imapDeleteMessages).not.toHaveBeenCalled();
+    });
+
+    it("settles before moving on to the next folder, and still completes if settling is slow", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [] });
+      const order: string[] = [];
+      vi.mocked(settleMovedRows).mockImplementation(async (_a, folder) => {
+        order.push(`settle:${folder}`);
+      });
+      vi.mocked(imapMoveMessages).mockImplementation(async (_s, folder) => {
+        order.push(`move:${folder}`);
+        return { expunged: true, mapping: [] };
+      });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-1", "imap-acc-1-Sent-2"]);
+
+      expect(order).toEqual(["move:INBOX", "settle:INBOX", "move:Sent", "settle:Sent"]);
+    });
+  });
 
   describe("archive", () => {
     it("moves messages to Archive folder", async () => {

@@ -6,8 +6,12 @@
 - **Tier:** **2** — the correct fix needs Rust IMAP protocol work (`COPYUID` parsing in
   `src-tauri/src/imap/client.rs`), and every option touches a local-deletion or re-key path. Plan
   approved before code; threat pass and rollback below.
-- **Status:** rev 2 — **APPROVED by Jim (direct, 2026-09-02), not yet built.** Builds after E2
-  part 2 (#39) lands; see §Approval. Rev 1 was written under the
+- **Status:** rev 2 — **APPROVED by Jim (direct, 2026-09-02). BUILT 2026-09-02** under the second
+  delegation window (LOG.md, 06:12–08:12 UTC), branch `worktree-f5-move-hygiene`. Build decisions
+  that went beyond this text — the pre-command channel discard, the COPY-fallback-has-no-mapping
+  acceptance, the live-row filter on every action, the extra tables the re-key rewrites — are in
+  LOG.md under *F-5 built*; the citations below are as of the pin they were grepped at and were
+  re-derived before building (the design held). Rev 1 was written under the
   2026-09-02 delegation window (LOG.md, PR #33). Rev 2 adopts the opposite-line plan read (Opus seat,
   at `be6a50e`): the two items rev 1 marked *unverified* now have answers, **one of which changes
   option A's cost and the sequencing argument** — `COPYUID` is already parsed by a crate in the

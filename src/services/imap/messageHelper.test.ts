@@ -133,30 +133,49 @@ describe("messageHelper", () => {
     });
   });
 
-  describe("updateMessageImapFolder", () => {
-    it("does nothing for empty message list", async () => {
+  describe("keepLiveMessageIds (F-5)", () => {
+    it("does nothing for an empty list", async () => {
       const { getDb } = await import("../db/connection");
-      const mockDb = { execute: vi.fn() };
+      const mockDb = { select: vi.fn() };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
 
-      const { updateMessageImapFolder } = await import("./messageHelper");
-      await updateMessageImapFolder("acc1", [], "INBOX");
-      expect(mockDb.execute).not.toHaveBeenCalled();
+      const { keepLiveMessageIds } = await import("./messageHelper");
+      await expect(keepLiveMessageIds("acc1", [])).resolves.toEqual([]);
+      expect(mockDb.select).not.toHaveBeenCalled();
     });
 
-    it("updates folder for given messages", async () => {
+    it("keeps only ids the database still holds un-tombstoned, in the caller's order", async () => {
       const { getDb } = await import("../db/connection");
-      const mockDb = { execute: vi.fn().mockResolvedValue(undefined) };
+      const mockDb = {
+        select: vi.fn().mockResolvedValue([{ id: "msg3" }, { id: "msg1" }]),
+      };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-      const { updateMessageImapFolder } = await import("./messageHelper");
-      await updateMessageImapFolder("acc1", ["msg1", "msg2"], "Trash");
+      const { keepLiveMessageIds } = await import("./messageHelper");
+      const kept = await keepLiveMessageIds("acc1", ["msg1", "msg2", "msg3"]);
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(1);
-      expect(mockDb.execute).toHaveBeenCalledWith(
-        expect.stringContaining("UPDATE messages SET imap_folder"),
-        ["Trash", "acc1", "msg1", "msg2"],
+      expect(kept).toEqual(["msg1", "msg3"]);
+      expect(mockDb.select).toHaveBeenCalledWith(
+        expect.stringMatching(/WHERE account_id = \$1 AND id IN \(\$2, \$3, \$4\) AND moved_to IS NULL/),
+        ["acc1", "msg1", "msg2", "msg3"],
       );
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("Skipping 1"), ["msg2"]);
+      warn.mockRestore();
+    });
+
+    it("chunks large batches to stay within SQLite's bound-parameter limit", async () => {
+      const { getDb } = await import("../db/connection");
+      const mockDb = { select: vi.fn().mockResolvedValue([]) };
+      vi.mocked(getDb).mockResolvedValue(mockDb as never);
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const { keepLiveMessageIds } = await import("./messageHelper");
+      const ids = Array.from({ length: 1200 }, (_, i) => `msg-${i}`);
+      await keepLiveMessageIds("acc1", ids);
+
+      expect(mockDb.select).toHaveBeenCalledTimes(3);
+      expect(mockDb.select.mock.calls[2]![1]).toHaveLength(201); // account + 200 ids
     });
   });
 });
