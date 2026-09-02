@@ -33,7 +33,8 @@ function isLoopbackHost(hostname: string): boolean {
   const bare = host.startsWith("[") && host.endsWith("]") ? host.slice(1, -1) : host;
   if (bare === "::1") return true;
   const v4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(bare);
-  return v4 !== null && v4[1] === "127";
+  // Octets bounded so this is never looser than Rust's address parser (#65, Gemini 3.8 N2).
+  return v4 !== null && v4[1] === "127" && v4.slice(1).every((octet) => Number(octet) <= 255);
 }
 
 /**

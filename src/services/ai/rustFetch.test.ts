@@ -27,6 +27,8 @@ describe("isAllowedAiUrl", () => {
     "http://127.1/v1",
     "http://0177.0.0.1/v1",
     "http://2130706433/v1",
+    "http://0x7f.1/v1",
+    "http://0x7f000001/v1",
     // An `@` outside the authority is not user-info.
     "https://host.example/v1/a@b",
     "https://host.example/v1?next=a@b",

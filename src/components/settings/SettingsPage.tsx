@@ -1233,8 +1233,10 @@ export function SettingsPage() {
                               setAiTestResult(null);
                               setAiTestError(null);
                               try {
-                                const { testConnection } = await import("@/services/ai/aiService");
-                                const result = await testConnection();
+                                // The fields as typed, not the saved values — a test
+                                // before Save is the common case (#65, Gemini 3.8 N6).
+                                const { createCustomProvider } = await import("@/services/ai/providers/customProvider");
+                                const result = await createCustomProvider(customBaseUrl, customApiKey, customModel.trim()).testConnection();
                                 setAiTestResult(result.ok ? "success" : "fail");
                                 setAiTestError(result.ok ? null : result.error);
                               } catch (err) {
@@ -1262,7 +1264,7 @@ export function SettingsPage() {
                           )}
                         </div>
                         <p className="text-xs text-text-tertiary">
-                          Test Connection uses the saved values — save first.
+                          Test Connection uses the values above as typed; Save keeps them.
                         </p>
                       </div>
                     </Section>

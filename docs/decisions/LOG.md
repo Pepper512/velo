@@ -1052,3 +1052,23 @@
   over `http://127.0.0.1` (Gemini Q2, Grok Q2); 8 MiB of response text is far beyond any
   chat completion (Gemini 3.1 Pro Q1). Raw outputs in `docs/reviews/2026-09-03-pr65-{gemini,
   grok,gemini31pro}-raw.md`.
+- **2026-09-03 — PR #65: Gemini 3.8 Flash, two runs, and the comparison Jim asked for.**
+  Jim: *"see if gemini 3.8 flash is available"* — it is (`gemini-3.8-flash-high`), and it is
+  the standing second leg from now on when Grok is slow. Run A, on the tree after the
+  Gemini/Grok adoptions: APPROVE WITH NITS (1L 3N) — **adopted** hex IPv4 forms in the TS
+  table, octet bounds in the TS loopback check (never looser than Rust's parser), a
+  `retry-after` assertion in the socket echo test; the LOW (a trickle to the 120 s timeout
+  after the webview aborted) is the residual already recorded. Run B, on the **same diff
+  Grok and Gemini 3.1 Pro saw** (`fe67514..31574df`): APPROVE WITH NITS (1M 3L 2N) —
+  in-flight abort (its MEDIUM; the other legs' NIT), the chunk-loop cap test, `retry-after`,
+  `0.0.0.0`/`[::]` rows, client pooling, and one finding **nobody else made**: Test
+  Connection read the saved values, so a test before Save tested the old endpoint or failed
+  `NOT_CONFIGURED` — **adopted**: the custom card tests the fields as typed. **How it did
+  against Grok on the same diff:** it matched Grok on five items and was minutes rather than
+  twelve, but missed four code fixes Grok found — the 304 pass-through, the request body and
+  header caps, the unredacted `catch`, and the empty-user-info form — and the broader
+  parser-differential rows. It matched Gemini 3.7 Flash almost item for item. **Reading:**
+  Grok remains the deeper second leg when time allows; 3.8 Flash is the fast fallback Jim
+  asked for, not a replacement in depth — same-vendor evidence on top of that. Raw outputs
+  in `docs/reviews/2026-09-03-pr65-gemini38-raw.md` (run A) and `…-gemini38cmp-raw.md`
+  (run B).

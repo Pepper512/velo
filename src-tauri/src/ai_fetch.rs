@@ -399,6 +399,7 @@ mod tests {
             &[
                 ("content-type", "application/json"),
                 ("x-request-id", "req-1"),
+                ("retry-after", "120"),
                 ("set-cookie", "session=abc"),
                 ("x-internal", "leak"),
             ],
@@ -428,6 +429,7 @@ mod tests {
         assert_eq!(out.body, r#"{"choices":[]}"#);
         assert!(out.headers.contains(&("content-type".to_string(), "application/json".to_string())));
         assert!(out.headers.contains(&("x-request-id".to_string(), "req-1".to_string())));
+        assert!(out.headers.contains(&("retry-after".to_string(), "120".to_string())));
         assert!(!out.headers.iter().any(|(k, _)| k == "set-cookie" || k == "x-internal"));
     }
 
