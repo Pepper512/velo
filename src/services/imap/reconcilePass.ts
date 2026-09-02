@@ -167,10 +167,12 @@ export async function finishReconcilePass(
   const summary: ReconcileSummary = { deleted: [], stops: [], attested };
 
   for (const [folder, entry] of pass.listed) {
+    const live = await getLiveMessagesInFolder(accountId, folder);
+
     if (entry.fetchCompleted) {
       // REQ-2.2: the ghost population actually observed — server UIDs with no
-      // live local row — after this pass's new mail has been stored.
-      const live = await getLiveMessagesInFolder(accountId, folder);
+      // live local row — after this pass's new mail has been stored. Vanished
+      // local mail is not a ghost; the count is directional.
       const liveUids = new Set(live.map((m) => m.imap_uid));
       let ghosts = 0;
       for (const uid of entry.serverUids) if (!liveUids.has(uid)) ghosts += 1;
@@ -182,27 +184,31 @@ export async function finishReconcilePass(
     const confirmed = await confirmedOnPass(accountId, folder, entry.uidvalidity, passId);
     if (confirmed.length === 0) continue;
 
-    const eligible = await withoutPendingOps(accountId, confirmed);
-    const localRows = (await getLiveMessagesInFolder(accountId, folder)).length;
-    const plan = planDeletions(localRows, eligible.length);
+    // The stop is judged on the WHOLE confirmed population — a folder where
+    // most of the mail vanished is a human decision even if queued user work
+    // happens to shield most of those rows this pass (Gemini H2). The budget
+    // is then spent on the rows that are actually eligible.
+    const localRows = live.length;
+    const plan = planDeletions(localRows, confirmed.length);
 
     if (plan.stop) {
       // REQ-3.1: a catastrophic mismatch is a human decision. Nothing deleted;
       // suspects stay confirmed and the dialog asks.
-      summary.stops.push({ folder, confirmed: eligible.length, localRows });
+      summary.stops.push({ folder, confirmed: confirmed.length, localRows });
       console.warn(
-        `[reconcile] ${folder}: ${eligible.length} of ${localRows} local messages confirmed absent on the server — stopped, asking the user`,
+        `[reconcile] ${folder}: ${confirmed.length} of ${localRows} local messages confirmed absent on the server — stopped, asking the user`,
       );
       useUIStore.getState().pushReconcileStop({
         accountId,
         folder,
         uidvalidity: entry.uidvalidity,
-        confirmed: eligible.length,
+        confirmed: confirmed.length,
         localRows,
       });
       continue;
     }
 
+    const eligible = await withoutPendingOps(accountId, confirmed);
     const batch = eligible.slice(0, plan.budget);
     summary.deleted.push(...(await deleteConfirmed(accountId, folder, entry.uidvalidity, batch)));
   }
@@ -240,7 +246,10 @@ async function withoutPendingOps(accountId: string, rows: SuspectRow[]): Promise
     rows.map((r) => r.message_row_id),
   );
   const threadOf = new Map(refs.map((r) => [r.id, r.thread_id]));
-  const checkedThreads = new Map<string, boolean>();
+  // Thread-level ops are cached per thread; message-level ops are checked
+  // per row — caching the combined answer under the thread let a sibling's
+  // clean result hide a row's own queued work (Gemini H1).
+  const threadBlocked = new Map<string, boolean>();
   const out: SuspectRow[] = [];
   for (const row of rows) {
     const threadId = threadOf.get(row.message_row_id);
@@ -248,14 +257,14 @@ async function withoutPendingOps(accountId: string, rows: SuspectRow[]): Promise
       // The row is already gone locally; nothing to delete, nothing to block.
       continue;
     }
-    let blocked = checkedThreads.get(threadId);
-    if (blocked === undefined) {
-      const ops = await getPendingOpsForResource(accountId, threadId);
-      const msgOps = await getPendingOpsForResource(accountId, row.message_row_id);
-      blocked = ops.length > 0 || msgOps.length > 0;
-      checkedThreads.set(threadId, blocked);
+    let byThread = threadBlocked.get(threadId);
+    if (byThread === undefined) {
+      byThread = (await getPendingOpsForResource(accountId, threadId)).length > 0;
+      threadBlocked.set(threadId, byThread);
     }
-    if (!blocked) out.push(row);
+    if (byThread) continue;
+    const msgOps = await getPendingOpsForResource(accountId, row.message_row_id);
+    if (msgOps.length === 0) out.push(row);
   }
   return out;
 }

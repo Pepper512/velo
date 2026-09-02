@@ -33,12 +33,13 @@ export function ReconcileStopDialog() {
       const n = await deleteConfirmedAfterUserApproval(stop.accountId, stop.folder, stop.uidvalidity);
       addNotice({ text: `Removed ${n} message${n === 1 ? "" : "s"} from ${stop.folder} that no longer exist on the server` });
       window.dispatchEvent(new Event("velo-sync-done"));
+      dismiss();
     } catch (err) {
+      // Stay open so the user can retry; nothing was changed.
       console.error("[ReconcileStopDialog] deletion failed:", err);
-      addNotice({ text: `Could not remove messages from ${stop.folder} — nothing was changed` });
+      addNotice({ text: `Could not remove messages from ${stop.folder} — nothing was changed. You can try again.` });
     } finally {
       setBusy(false);
-      dismiss();
     }
   };
 

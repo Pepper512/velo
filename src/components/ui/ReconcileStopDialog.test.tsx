@@ -52,7 +52,7 @@ describe("ReconcileStopDialog", () => {
     expect(useUIStore.getState().reconcileStops).toEqual([other]);
   });
 
-  it("a failed deletion leaves nothing changed and says so", async () => {
+  it("a failed deletion leaves nothing changed, says so, and keeps the dialog open for a retry", async () => {
     vi.mocked(deleteConfirmedAfterUserApproval).mockRejectedValueOnce(new Error("DB busy"));
     vi.spyOn(console, "error").mockImplementation(() => {});
     useUIStore.setState({ reconcileStops: [stop] });
@@ -60,7 +60,8 @@ describe("ReconcileStopDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Delete them" }));
 
-    await waitFor(() => expect(useUIStore.getState().reconcileStops).toEqual([]));
-    expect(useUIStore.getState().notices[0]?.text).toContain("nothing was changed");
+    await waitFor(() => expect(useUIStore.getState().notices[0]?.text).toContain("nothing was changed"));
+    expect(useUIStore.getState().reconcileStops).toEqual([stop]);
+    expect(screen.getByRole("button", { name: "Delete them" })).toBeInTheDocument();
   });
 });

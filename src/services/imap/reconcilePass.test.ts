@@ -356,6 +356,45 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
     expect(liveUids()).toEqual([2, 3]);
   });
 
+  it("a row's own pending operation blocks it even when a sibling in the same thread was checked first (Gemini H1)", async () => {
+    seedThread("t1");
+    seedMessage(1, "t1");
+    seedMessage(2, "t1");
+    seedThread("t2");
+    seedMessage(3, "t2");
+    raw()
+      .prepare(
+        "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status) VALUES ('op2', ?, 'star', ?, '{}', 'pending')",
+      )
+      .run(ACC, `imap-${ACC}-INBOX-2`);
+
+    await passWith([3]);
+    const summary = await passWith([3]);
+
+    // UID 1 (no ops) deleted; UID 2 (message-level op) kept although its thread has no thread-level op.
+    expect(summary.deleted.map((d) => d.uid)).toEqual([1]);
+    expect(liveUids()).toEqual([2, 3]);
+  });
+
+  it("judges the >50% stop on the whole confirmed population, not the rows left after the pending-ops filter (Gemini H2)", async () => {
+    seedFolder(20);
+    const remaining = [16, 17, 18, 19, 20]; // 15 of 20 vanished
+    // 11 of the 15 vanished have queued user work.
+    for (let uid = 1; uid <= 11; uid++) {
+      raw()
+        .prepare(
+          "INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, status) VALUES (?, ?, 'markRead', ?, '{}', 'pending')",
+        )
+        .run(`op-${uid}`, ACC, `t${INBOX}${uid}`);
+    }
+    await passWith(remaining);
+    const summary = await passWith(remaining);
+
+    expect(summary.deleted).toEqual([]);
+    expect(summary.stops).toEqual([{ folder: INBOX, confirmed: 15, localRows: 20 }]);
+    expect(liveUids()).toHaveLength(20);
+  });
+
   // ---------- F-5 interaction ----------
 
   it("tombstones are neither suspects nor deleted by the pass (plan read H3)", async () => {

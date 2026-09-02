@@ -61,7 +61,7 @@ export async function incrementFlaggedNotExpunged(
   if (n <= 0) return;
   const db = await getDb();
   await db.execute(
-    `UPDATE folder_sync_state SET flagged_not_expunged = flagged_not_expunged + $1
+    `UPDATE folder_sync_state SET flagged_not_expunged = COALESCE(flagged_not_expunged, 0) + $1
      WHERE account_id = $2 AND folder_path = $3`,
     [n, accountId, folderPath],
   );
