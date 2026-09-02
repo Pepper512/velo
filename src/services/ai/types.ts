@@ -7,9 +7,15 @@ export interface AiCompletionRequest {
   maxTokens?: number;
 }
 
+/**
+ * What a connection test found (SPEC-280 REQ-2.1). The reason is display text
+ * for the settings page — never interpolated into a request, query or shell.
+ */
+export type ConnectionTestResult = { ok: true } | { ok: false; error: string };
+
 export interface AiProviderClient {
   complete(req: AiCompletionRequest): Promise<string>;
-  testConnection(): Promise<boolean>;
+  testConnection(): Promise<ConnectionTestResult>;
 }
 
 /**

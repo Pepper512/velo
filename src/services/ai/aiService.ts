@@ -1,6 +1,7 @@
 import { getActiveProvider } from "./providerManager";
 import { getAiCache, setAiCache } from "@/services/db/aiCache";
-import { AiError } from "./errors";
+import { AiError, describeError } from "./errors";
+import type { ConnectionTestResult } from "./types";
 import type { DbMessage } from "@/services/db/messages";
 import {
   SUMMARIZE_PROMPT,
@@ -243,11 +244,16 @@ export async function extractTaskFromThread(
   return callAi(EXTRACT_TASK_PROMPT, combined);
 }
 
-export async function testConnection(): Promise<boolean> {
+/**
+ * Test the active provider. Never throws: a provider that cannot even be
+ * built (no key, no server URL) is reported the same way as one that cannot
+ * be reached — with its reason (SPEC-280 REQ-2.1).
+ */
+export async function testConnection(): Promise<ConnectionTestResult> {
   try {
     const provider = await getActiveProvider();
     return await provider.testConnection();
-  } catch {
-    return false;
+  } catch (err) {
+    return { ok: false, error: describeError(err) };
   }
 }

@@ -816,3 +816,43 @@
   `async-imap` sends the query verbatim) and a full-attribute response-parser fixture (the
   parser is unchanged; belongs with the reporter's re-test). Raw outputs in
   `docs/reviews/2026-09-02-pr57-{gemini,grok}-raw.md`. Rust 132 tests.
+- **2026-09-02 ~22:30 UTC — #280 built (http scope for local AI; connection-test reason)** on
+  Jim's instruction. Verified first: the Ollama client uses `@tauri-apps/plugin-http`'s `fetch`
+  (`ollamaProvider.ts:2`), the plugin matches its scope with the `urlpattern` crate, and under
+  URLPattern `http://*` matches only the default port — reproduced with Node 26's `URLPattern`
+  (same algorithm) for the exact URLs. Plan committed first
+  (`docs/briefs/2026-09-02-280-http-scope-local-ai.md`, Tier 2 — capabilities file).
+  **Decisions:** four loopback entries (`127.0.0.1` and `localhost`, with and without a path,
+  any port); **no `*:*`** (Jim); `http://*` untouched. A committed test
+  (`src/config/capabilities.test.ts`) builds every allow entry with `URLPattern` and pins the
+  positive URLs, the untouched default-port case and two negatives (a remote host on an odd
+  port; the literal `*:*`). The connection test's reason now travels through every layer:
+  `ConnectionTestResult = { ok: true } | { ok: false; error }` on the provider interface (three
+  implementations, six providers), `aiService.testConnection` reports a provider that cannot even
+  be built the same way, `describeError` in `ai/errors.ts` turns the plugin's plain-string scope
+  refusal into text, and both settings cards render it after "Connection failed". Option (a)
+  of the brief — change the type at every layer — over a side channel or a throwing interface.
+  TDD: the scope test red first (positive case failing, negatives passing), the provider tests
+  rewritten to the new shape before the code. Gates: 161 files / 2,051 tests, tsc, docs, graph.
+- **2026-09-02 ~23:30 UTC — PR #56 (#280) cross-vendor review, both legs.** Gemini 3.7: APPROVE
+  WITH NITS (1M 3L 2N). Grok 4.6: APPROVE WITH NITS (1M 3L 3N). **Adopted:** `describeError`
+  reads `message`/`error` fields of plain-object rejections and **redacts credentials** (key
+  shapes, bearer tokens, key-bearing query parameters) before display; nine more negative
+  scope URLs plus an **exact snapshot of the allow list**; origin-only and query-carrying
+  positives; `claudeProvider.test.ts`; `isAutoDraftEnabled` false on a failed result; the
+  reason truncated and cleared per test; and, from Grok's redirect question, the Ollama
+  client's fetch passes `maxRedirections: 0` so a local service cannot redirect the request
+  off loopback (the plugin checks its scope on the given URL only). **Declined with reasons:**
+  IPv6 `[::1]` entries — the only pattern form that parses cannot be verified for the Rust
+  crate in CI and a bad entry breaks startup; `localhost` already covers a `::1` resolution
+  because the scope checks URL text. **Recorded for Jim:** Grok M1 — the scope test's oracle is
+  Node's `URLPattern`; testing with the plugin's own matcher needs `urlpattern` as a
+  dev-dependency (plugin's scope module is private) — a dependency decision (brief §Open for
+  Jim). Raw outputs in `docs/reviews/2026-09-02-pr56-{gemini,grok}-raw.md`. Gates after:
+  162 files / 2,060 tests.
+- **2026-09-02 — Disk-full incident during the #280/#241 builds.** The volume hit 100 % mid-edit
+  (four Rust `target/` caches totalled ~25 GB). Recovered by deleting the two **dead** worktrees'
+  build caches (`f1-decisions`, `f2-email-links-open`, 8 GB, compiler output only — the
+  worktrees themselves and their branches are untouched, still Jim's to remove). The main
+  checkout's and this worktree's caches were kept. No source was lost; two edits that failed
+  with ENOSPC were re-applied and verified.

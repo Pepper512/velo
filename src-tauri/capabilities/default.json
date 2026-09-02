@@ -67,6 +67,10 @@
       "allow": [
         { "url": "http://*" },
         { "url": "http://*/*" },
+        { "url": "http://127.0.0.1:*" },
+        { "url": "http://127.0.0.1:*/*" },
+        { "url": "http://localhost:*" },
+        { "url": "http://localhost:*/*" },
         { "url": "https://*" },
         { "url": "https://*/*" }
       ]

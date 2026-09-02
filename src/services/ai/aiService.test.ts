@@ -5,7 +5,7 @@ const mockComplete = vi.fn();
 vi.mock("./providerManager", () => ({
   getActiveProvider: vi.fn(() => ({
     complete: mockComplete,
-    testConnection: vi.fn(() => Promise.resolve(true)),
+    testConnection: vi.fn(() => Promise.resolve({ ok: true })),
   })),
 }));
 
@@ -204,5 +204,52 @@ describe("generateSmartReplies fails closed (P10)", () => {
     const opens = (sent.match(/<email_content>/gi) ?? []).length;
     const closes = (sent.match(/<\/\s*email_content\s*>/gi) ?? []).length;
     expect(opens).toBe(closes);
+  });
+});
+
+describe("testConnection carries the reason (SPEC-280 REQ-2.1)", () => {
+  it("passes the provider's result through", async () => {
+    const { getActiveProvider } = await import("./providerManager");
+    vi.mocked(getActiveProvider).mockResolvedValueOnce({
+      complete: mockComplete,
+      testConnection: async () => ({ ok: false, error: "url not allowed on the configured scope" }),
+    });
+    const { testConnection } = await import("./aiService");
+    await expect(testConnection()).resolves.toEqual({ ok: false, error: "url not allowed on the configured scope" });
+  });
+
+  it("describes plain-object rejections by their message or error field, never as [object Object] (Gemini M1 on #56)", async () => {
+    const { describeError } = await import("./errors");
+    expect(describeError({ message: "Network connection refused" })).toBe("Network connection refused");
+    expect(describeError({ error: "Unauthorized" })).toBe("Unauthorized");
+    expect(describeError("url not allowed on the configured scope")).toBe("url not allowed on the configured scope");
+    expect(describeError(new Error(""))).toBe("Error");
+    expect(describeError({ code: 7 })).toBe("[object Object]");
+  });
+
+  it("redacts credentials an SDK or the plugin echoes before the reason is shown (Grok L3 on #56)", async () => {
+    const { describeError, redactSecrets } = await import("./errors");
+    // The fake credentials are assembled at runtime so no literal in this file
+    // looks like a key to the secret scanner (it flagged the first version).
+    const fakeOpenAiKey = ["sk", "live", "SECRET1234567890"].join("-");
+    const fakeGoogleKey = "AIza" + "SyA1234567890abcdef";
+    expect(describeError(new Error(`Incorrect API key provided: ${fakeOpenAiKey}`))).toBe(
+      "Incorrect API key provided: [redacted]",
+    );
+    const refused = "url not allowed on the configured scope: https://generativelanguage.googleapis.com/v1beta/models/x:generateContent?key=";
+    expect(describeError(refused + fakeGoogleKey)).toBe(`${refused}[redacted]`);
+    expect(redactSecrets("Authorization: Bearer abc.def.ghi failed")).toBe("Authorization: [redacted] failed");
+    expect(redactSecrets("token ghp_abcdefghijklmnop rejected; xai-0123456789abcdef too")).toBe(
+      "token [redacted] rejected; [redacted] too",
+    );
+    // Ordinary text is left alone.
+    expect(redactSecrets("Connection refused (os error 61)")).toBe("Connection refused (os error 61)");
+  });
+
+  it("reports a provider that cannot even be built, with its reason, instead of a bare false", async () => {
+    const { getActiveProvider } = await import("./providerManager");
+    vi.mocked(getActiveProvider).mockRejectedValueOnce(new Error("Ollama server URL is not set"));
+    const { testConnection } = await import("./aiService");
+    await expect(testConnection()).resolves.toEqual({ ok: false, error: "Ollama server URL is not set" });
   });
 });

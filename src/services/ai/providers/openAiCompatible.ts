@@ -13,7 +13,8 @@
  * bypassed `createProviderFactory` entirely).
  */
 import OpenAI from "openai";
-import type { AiProviderClient, AiCompletionRequest } from "../types";
+import type { AiProviderClient, AiCompletionRequest, ConnectionTestResult } from "../types";
+import { describeError } from "../errors";
 
 /** Tokens requested when only a liveness check is needed. */
 const CONNECTION_TEST_MAX_TOKENS = 10;
@@ -45,16 +46,19 @@ export function createOpenAICompatibleProvider(
       return response.choices[0]?.message?.content ?? "";
     },
 
-    async testConnection(): Promise<boolean> {
+    async testConnection(): Promise<ConnectionTestResult> {
       try {
         await client.chat.completions.create({
           model,
           max_tokens: CONNECTION_TEST_MAX_TOKENS,
           messages: [{ role: "user", content: "Say hi" }],
         });
-        return true;
-      } catch {
-        return false;
+        return { ok: true };
+      } catch (err) {
+        // The reason travels to the settings page (SPEC-280 REQ-2.1): a
+        // scope refusal, a refused socket and a bad key all look identical
+        // as `false`.
+        return { ok: false, error: describeError(err) };
       }
     },
   };

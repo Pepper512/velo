@@ -187,18 +187,25 @@ describe("geminiProvider", () => {
     ).rejects.not.toThrow(/secret-key-123/);
   });
 
-  it("reports a failed connection as false rather than throwing", async () => {
+  it("reports a failed connection with its reason rather than throwing (SPEC-280 REQ-2.1)", async () => {
     mockFetch.mockResolvedValue(jsonResponse(401, { error: { message: "bad key" } }));
-    await expect(createGeminiProvider("bad-key", MODEL).testConnection()).resolves.toBe(false);
+    // The provider's own 401 wording, not the server's — it never echoes the key.
+    await expect(createGeminiProvider("bad-key", MODEL).testConnection()).resolves.toEqual({
+      ok: false,
+      error: "Invalid API key",
+    });
 
     mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
-    await expect(createGeminiProvider("bad-key", MODEL).testConnection()).resolves.toBe(false);
+    await expect(createGeminiProvider("bad-key", MODEL).testConnection()).resolves.toEqual({
+      ok: false,
+      error: "Failed to fetch",
+    });
   });
 
-  it("reports a working connection as true using a tiny token budget", async () => {
+  it("reports a working connection using a tiny token budget", async () => {
     mockFetch.mockResolvedValue(reply({ text: "hi" }));
 
-    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toBe(true);
+    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toEqual({ ok: true });
     expect(lastRequest().body).toMatchObject({ generationConfig: { maxOutputTokens: 10 } });
   });
 
@@ -208,11 +215,11 @@ describe("geminiProvider", () => {
     // legitimately return a 200 with no text part. That is a working key, not a
     // broken one — strictness about text belongs to complete(), not here.
     mockFetch.mockResolvedValue(reply({ text: "private reasoning", thought: true }));
-    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toBe(true);
+    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toEqual({ ok: true });
 
     mockFetch.mockResolvedValue(
       jsonResponse(200, { candidates: [{ content: { parts: [] }, finishReason: "MAX_TOKENS" }] }),
     );
-    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toBe(true);
+    await expect(createGeminiProvider("good-key", MODEL).testConnection()).resolves.toEqual({ ok: true });
   });
 });
