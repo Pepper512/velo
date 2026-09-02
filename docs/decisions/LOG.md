@@ -801,3 +801,18 @@
   and refuses to pass by finding fewer than the five known sites. TDD: the guard red on the
   first bare list (line 289), then green. No live Stalwart to run against; the reporter's
   re-test is recorded as open.
+- **2026-09-02 ~23:45 UTC — PR #57 (#241) cross-vendor review, both legs.** Gemini 3.7 and Grok
+  4.6 both APPROVE WITH NITS and both found the same real weakness: the guard was line-based
+  (a wrapped call was skipped, `.await` on the call line made it panic, `>= 5` let it pass by
+  omission, "contains a space" was not RFC `fetch-att`, `.fetch(` and raw command strings were
+  unchecked). **Adopted as a rewrite:** the guard moved to `imap/fetch_guard.rs` — a
+  bracket-and-string-aware scanner over the client's production source (its own test module
+  excluded), covering `.uid_fetch(`/`.fetch(` calls across lines and every tagged
+  `… FETCH <set> <attrs>\r\n` command string with `{FETCH_*}` placeholders resolved and any other
+  placeholder failing closed; "multi" is two or more top-level tokens; exact site counts (5
+  method, 2 raw — the scan found a second, already-correct raw command); nine scanner fixtures.
+  `FETCH_FULL` renamed `FETCH_UID_FLAGS_INTERNALDATE_BODY` (Grok N5: RFC 3501's `FULL` is a
+  different macro). **Recorded, not adopted:** a wire-bytes test (needs a recording session;
+  `async-imap` sends the query verbatim) and a full-attribute response-parser fixture (the
+  parser is unchanged; belongs with the reporter's re-test). Raw outputs in
+  `docs/reviews/2026-09-02-pr57-{gemini,grok}-raw.md`. Rust 132 tests.

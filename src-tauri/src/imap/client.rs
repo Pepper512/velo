@@ -56,11 +56,12 @@ impl From<String> for FetchError {
 // scans every `.uid_fetch(` site for the rule.
 
 /// Everything a sync needs for a message: identity, flags, arrival time, body.
-const FETCH_FULL: &str = "(UID FLAGS INTERNALDATE BODY.PEEK[])";
+/// (Not RFC 3501's `FULL` macro, which is a different attribute set.)
+pub(crate) const FETCH_UID_FLAGS_INTERNALDATE_BODY: &str = "(UID FLAGS INTERNALDATE BODY.PEEK[])";
 /// A single message by UID, body included, no INTERNALDATE.
-const FETCH_UID_FLAGS_BODY: &str = "(UID FLAGS BODY.PEEK[])";
+pub(crate) const FETCH_UID_FLAGS_BODY: &str = "(UID FLAGS BODY.PEEK[])";
 /// The body alone — one attribute, no parentheses needed.
-const FETCH_BODY: &str = "BODY.PEEK[]";
+pub(crate) const FETCH_BODY: &str = "BODY.PEEK[]";
 
 // ---------- Timeout constants ----------
 
@@ -286,7 +287,7 @@ pub async fn fetch_messages(
     // Some IMAP servers return empty streams for UID FETCH despite valid UIDs.
     let fetches = net::with_timeout(IMAP_FETCH_TIMEOUT, &format!("UID FETCH {folder}"), async {
         let stream = session
-            .uid_fetch(uid_range, FETCH_FULL)
+            .uid_fetch(uid_range, FETCH_UID_FLAGS_INTERNALDATE_BODY)
             .await
             .map_err(|e| format!("UID FETCH {folder} uids={uid_range} failed: {e}"))?;
         Ok::<_, String>(stream.collect::<Vec<_>>().await)
@@ -1113,7 +1114,7 @@ pub async fn sync_folder(
 
         let fetches = net::with_timeout(IMAP_FETCH_TIMEOUT, &format!("UID FETCH {folder}"), async {
             let stream = session
-                .uid_fetch(&uid_set, FETCH_FULL)
+                .uid_fetch(&uid_set, FETCH_UID_FLAGS_INTERNALDATE_BODY)
                 .await
                 .map_err(|e| format!("UID FETCH {folder} uids={uid_set} failed: {e}"))?;
             Ok::<_, String>(stream.collect::<Vec<_>>().await)
@@ -1258,7 +1259,7 @@ pub async fn raw_fetch_messages(
 
     // UID FETCH with full body
     let fetch_cmd = format!(
-        "a3 UID FETCH {} {FETCH_FULL}\r\n",
+        "a3 UID FETCH {} {FETCH_UID_FLAGS_INTERNALDATE_BODY}\r\n",
         wire::validate_uid_set(uid_range)?
     );
     reader.get_mut().write_all(fetch_cmd.as_bytes()).await
@@ -2125,57 +2126,8 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
 mod tests {
     use super::*;
 
-    // ---------- #241: FETCH attribute lists (RFC 3501 §6.4.5) ----------
-
-    /// The attribute argument of every `.uid_fetch(` call in this file: a
-    /// string literal on the same line, or the name of one of the `FETCH_*`
-    /// constants (resolved here). The scan is the guard: a future fetch site
-    /// that passes a bare multi-attribute list fails this test, and the test
-    /// also refuses to pass by finding nothing.
-    fn fetch_attribute_arguments() -> Vec<(usize, String)> {
-        let source = include_str!("client.rs");
-        let mut out = Vec::new();
-        for (i, line) in source.lines().enumerate() {
-            let Some(pos) = line.find(".uid_fetch(") else { continue };
-            let args = &line[pos + ".uid_fetch(".len()..];
-            let Some(comma) = args.find(',') else { continue };
-            let second = args[comma + 1..].trim().trim_end_matches(')').trim();
-            let resolved = if let Some(lit) = second.strip_prefix('"') {
-                lit.trim_end_matches('"').to_string()
-            } else {
-                match second {
-                    "FETCH_FULL" => FETCH_FULL.to_string(),
-                    "FETCH_UID_FLAGS_BODY" => FETCH_UID_FLAGS_BODY.to_string(),
-                    "FETCH_BODY" => FETCH_BODY.to_string(),
-                    other => panic!("line {}: unknown fetch attribute argument {other:?}", i + 1),
-                }
-            };
-            out.push((i + 1, resolved));
-        }
-        out
-    }
-
-    #[test]
-    fn every_multi_attribute_fetch_list_is_parenthesised() {
-        let sites = fetch_attribute_arguments();
-        assert!(sites.len() >= 5, "expected at least the five known uid_fetch sites, found {}", sites.len());
-        for (line, attrs) in &sites {
-            let multi = attrs.trim_matches(|c| c == '(' || c == ')').contains(' ');
-            if multi {
-                assert!(
-                    attrs.starts_with('(') && attrs.ends_with(')'),
-                    "line {line}: multi-attribute FETCH list must be parenthesised (RFC 3501): {attrs:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn the_fetch_constants_are_the_rfc_form_and_keep_their_attributes() {
-        assert_eq!(FETCH_FULL, "(UID FLAGS INTERNALDATE BODY.PEEK[])");
-        assert_eq!(FETCH_UID_FLAGS_BODY, "(UID FLAGS BODY.PEEK[])");
-        assert_eq!(FETCH_BODY, "BODY.PEEK[]");
-    }
+    // #241's FETCH attribute-list guard lives in `imap/fetch_guard.rs`, a
+    // separate module so its fixtures are not part of the source it scans.
 
     // ---------- extract_literal_size (audit P4) ----------
 

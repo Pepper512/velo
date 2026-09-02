@@ -75,8 +75,11 @@ tolerated the loose form.
   list) accepts it; the diagnostic path has used it since it was written.
 
 ## Tasks (risk-first)
-- [ ] 1. The guard test, red against the current tree (three sites fail). — REQ-1.3
-- [ ] 2. Constants and the three sites; the diagnostic uses the constant. — REQ-1.1, 1.2
+- [x] 1. The guard test, red against the current tree (three sites fail). — REQ-1.3. After
+  review it lives in `imap/fetch_guard.rs` as a bracket-aware scanner with nine fixtures;
+  exact counts: 5 method sites, 2 raw commands.
+- [x] 2. Constants (`FETCH_UID_FLAGS_INTERNALDATE_BODY`, `FETCH_UID_FLAGS_BODY`, `FETCH_BODY`) and
+  the three sites; the diagnostic uses the constant. — REQ-1.1, 1.2
 - [ ] 3. Live Dovecot check (optional, harness): the F-5 ignored live test already drives
   `move_messages`; a fetch through `fetch_messages` on the harness after this change confirms
   Dovecot still returns bodies with the parenthesised form. Recorded if run.
