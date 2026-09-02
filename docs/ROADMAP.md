@@ -1,6 +1,6 @@
 # Velo fork — roadmap
 
-> Pinned 2026-09-03 at `66a9355` (#69). Sources: the vault build queues
+> Pinned 2026-09-03 at `1b18160` (#71). Sources: the vault build queues
 > (`~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/`), the 2026-09-01 issue ledger, parity
 > report and effort model, `docs/decisions/LOG.md` and `EXCEPTIONS.md`, and `HANDOFF.md`. Days are
 > the effort model's build-days for one credentialed seat, tests and Tier-2 overhead included.
@@ -17,7 +17,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 | Line | State |
 |---|---|
 | Methodology, CI gates, exceptions | Landed (#1–#12). EX-003/005/006/007 open by design |
-| Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA) and **P19/F-3** (orphaned phishing dialog — Jim's product decision: wire or delete) |
+| Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA). **P19/F-3 landed** (#71, `1b18160`): the phishing interstitial and banner are wired |
 | Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
 | IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
 | Bug-fix queue (upstream triage) | **Done.** Every queued item landed (#297 … #281 as #69, `66a9355`); only #278 (macOS signing) remains, "not yet" by decision 6 |
@@ -60,7 +60,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
   halves of 2/10 (Dovecot harness). Per-window session binding stays undone (ADR-003).
 - **PR D** (toolchain majors) and **PR E** (Rust parsers) — plans to write, Jim approves.
 - **P11** capability split — brief exists; needs Jim's 5-step manual QA.
-- **P19/F-3** — Jim's product decision, then 1 day.
+- **P19/F-3** — **landed #71 (`1b18160`)**: `LinkConfirmDialog` and `PhishingBanner` wired on the email link path.
 
 ### 4. Enhancement queue — Superhuman parity (after the P0/P1 bugs)
 | Wave | Item | Pri | Tier | Days | Gate |
@@ -85,7 +85,7 @@ contact stats, Daily Brief, autocorrect, #208 SSO, #152/#153, #257 Graph/shared 
 2. **#209/#265** custom LLM URL → **validated Rust fetch command** (https/loopback only, no off-host redirects). CSP stays tight.
 3. **Speed budget** → **`@tanstack/react-virtual` approved** as the virtualization dependency.
 4. **MCP server** → **write the ADR now**, build in wave 3.
-5. **P19/F-3** → **wire** `LinkConfirmDialog` (~1 day, Tier 1). Now a queued item, not a decision.
+5. **P19/F-3** → **wire** `LinkConfirmDialog` (~1 day, Tier 1). **Landed #71 (`1b18160`).**
 6. **#278** macOS signing → **not yet**, tied to 8.
 7. **Grok 4.6** → **standing second cross-vendor leg on Tier 2** (ADR-004; roster row moved). The Tier-2 human-merge carve-out is not adopted.
 8. **EX-007** distribution → **not yet**; revisit with an ADR after #297 and #240 land.
@@ -107,6 +107,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-The bug-fix queue is done (only #278 stays "not yet"). Take the carried hardening items in order, one PR each. First P19/F-3 — wire LinkConfirmDialog on the email link path (my decision 5, 2026-09-02): read audit P19 and the F-2 brief's risk note, verify in the tree where email links open today (the link-click path in EmailRenderer/ThreadView and the phishing scan results in link_scan_results) and that the dialog is currently unreachable; Tier 1 (components + the phishing service); spec from the vault template into docs/briefs/, TDD, one review leg Gemini 3.7 via agy. Then E2 part 3 — the IMAP session-pool carry list from PR #39 (Arc/logout_arc try_unwrap skipping LOGOUT, evictions without LOGOUT, bump_credential_version by ident regardless of version, the cross-window invalidation race, the unvalidated session-id wrapper, Done-when 9 and the live halves of 2/10): Tier 2 (Rust IMAP pool) — plan with threat pass and rollback before code, TDD, Gemini 3.7 via agy AND a second leg (Grok 4.6 via the grok CLI when its ~12 minutes are affordable, otherwise gemini-3.8-flash-high) — diffs from committed SHAs, fake credentials never in literal form, rebase before expecting CI (a conflicting PR gets no run), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges.
+The bug-fix queue is done (only #278 stays "not yet") and F-3/P19 landed as #71. Take E2 part 3 — the IMAP session-pool carry list from PR #39 (a draft spec is started at docs/briefs/2026-09-03-e2-part3-pool-carry.md): the redundant Arc<Mutex> removed together with logout_arc's try_unwrap that silently skips LOGOUT (commands.rs:112), evictions that drop a connection without LOGOUT, bump_credential_version evicting by ident regardless of version (pool.rs:173), the cross-window invalidation race (finding 3 on #39), the unvalidated session-id wrapper (sessionManager.ts); Done-when 9 (folder isolation) and the live halves of 2/10 need the Dovecot harness and stay manual. Tier 2 (Rust IMAP pool): finish the spec from the vault template, plan with threat pass and rollback before code, TDD on the pool's generic session type (no network), Gemini 3.7 via agy AND a second leg (Grok 4.6 via the grok CLI when its ~12 minutes are affordable, otherwise gemini-3.8-flash-high) — diffs from committed SHAs, fake credentials never in literal form, rebase before expecting CI (a conflicting PR gets no run), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges. Then P11 (capability split, needs my 5-step manual QA) and the PR D / PR E plans.
 Do not run the manual checks (F-4 live Done-when, #240 Task 6) unless the app can be driven; they are recorded as open. The urlpattern dev-dependency for SPEC-280's test oracle is my decision — ask me before adding it.
 ```

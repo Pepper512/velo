@@ -4,12 +4,12 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `66a9355`** (#69, #281 paste inline images — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 66a9355..origin/main` —
+- **Code pin: `1b18160`** (#71, F-3 phishing interstitial — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 1b18160..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
-  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#69 all landed 2026-09-02/03.
+  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#71 all landed 2026-09-02/03.
 - **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
   were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
@@ -29,13 +29,13 @@
     tools. Grok gotcha: with a long prompt it "offloads" the text and reads it back with its own
     tools — takes 5–10 minutes, the output file stays near-empty until it finishes.
   - **Worktrees:** the session's own worktree `.claude/worktrees/f5-move-hygiene` (branch
-    `docs-post-69` checked out at the end) plus the **two dead ones from before** (their
+    `docs-post-71` checked out at the end) plus the **two dead ones from before** (their
     `src-tauri/target` build caches were deleted on 2026-09-02 when the disk hit 100 %; the
     worktrees and branches themselves are untouched)
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `66a9355`:** frontend **171** files / **2,227** tests · Rust **159** + 1 ignored
+- **State on `main` @ `1b18160`:** frontend **172** files / **2,249** tests · Rust **159** + 1 ignored
   (the live Dovecot test) · **28** migrations / 32 tables · npm audit 0 · 0 service import cycles.
   **One dependency added, approved by Jim:** `sqlx = "=0.8.6"` direct (already in the graph via
   `tauri-plugin-sql`; CI asserts one copy) — #54, LOG.md. **One dependency question open for
@@ -131,18 +131,27 @@ review legs, Grok and Gemini 3.8 each found MEDIUM defects Gemini 3.7 missed), #
 cap, shipped as the existing CID part). **Only #278 (macOS signing) remains, "not yet" by
 decision 6.** Every bug-fix item Jim queued from the 2026-09-01 triage is done except that one.
 
-**Next: the carried hardening items, then the enhancement queue.** In order: **P19/F-3 —
-wire `LinkConfirmDialog`** (Jim's decision 5, ~1 day, Tier 1: the phishing link
-confirmation never runs today; F-2's risk note assumed it would), then **E2 part 3** (#39's
-carry list — `Arc`/`logout_arc`, evictions without LOGOUT, `bump_credential_version` by ident,
-the cross-window invalidation race, the unvalidated session-id wrapper, Done-when 9 and the
-live halves of 2/10; Tier 2, Rust IMAP), then **P11** (capability split — brief exists, needs
-Jim's 5-step manual QA), then the **PR D / PR E** plans (toolchain and Rust parser majors —
-Tier 2, plans for Jim to approve). After that, enhancement wave 1 (ROADMAP §4). **Open for
-Jim:** the `urlpattern` dev-dependency; reporter re-tests for #280, #241, #252, #197, #276,
-#209 and now #233 (install the next release's bundle on a current distro) and #281 (paste a
-screenshot, send to yourself). **Manual, still open:** #240's Task 6 and F-4's live Done-when
-(the app can be started with `npm run tauri dev`; the Dovecot containers are down).
+**F-3 / P19 landed as #71 (`1b18160`):** the phishing interstitial and banner are wired — a
+click on a link the detector rates past the sensitivity line stops at `LinkConfirmDialog`
+before opening; the banner shows on a flagged message with "Trust this sender"; the gate
+fails closed, only web links are analysed, and a middle click is gated too. Gemini's review
+found and closed a real hole (the gate had no error path) and a stale-dialog bug across
+message switches. Two follow-up questions recorded — Jim's call whether to spec them.
+
+**Next: the carried hardening items, then the enhancement queue.** In order: **E2 part 3**
+(#39's carry list — the redundant `Arc<Mutex>` removed with `logout_arc`'s `try_unwrap`
+that silently skips LOGOUT; evictions without LOGOUT; `bump_credential_version` evicting by
+ident regardless of version; the cross-window invalidation race; the unvalidated session-id
+wrapper; Done-when 9 and the live halves of 2/10 stay manual — **draft spec started at
+`docs/briefs/2026-09-03-e2-part3-pool-carry.md`**; Tier 2, Rust IMAP), then **P11**
+(capability split — brief exists, needs Jim's 5-step manual QA), then the **PR D / PR E**
+plans (toolchain and Rust parser majors — Tier 2, plans for Jim to approve). After that,
+enhancement wave 1 (ROADMAP §4). **Open for Jim:** the `urlpattern` dev-dependency; the
+**rebrand inventory** (`docs/audits/2026-09-03-rebrand-inventory.md` — the `com.velomail.app`
+identifier decision is a one-way door needing an ADR); the F-3 follow-up questions; reporter
+re-tests for #280, #241, #252, #197, #276, #209, #233 (install the next release's bundle),
+#281. **Manual, still open:** #240's Task 6 and F-4's live Done-when (the app runs with
+`npm run tauri dev`; the Dovecot containers are down).
 
 **Still open on F-4:** the live Dovecot Done-when (scenarios 1–5 in
 `docs/testing/dovecot/README.md`; manual, needs the running app — never run) and, Jim's call, a
@@ -181,11 +190,11 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected on `main`: **171 test files, 2,227 tests; Rust 159 passed, 1 ignored.**
+Expected on `main`: **172 test files, 2,249 tests; Rust 159 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline 66a9355..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline 1b18160..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
@@ -285,17 +294,19 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `66a9355`** (#69,
-#281 paste inline images; the only SHA pinned — `git log --oneline 66a9355..origin/main`
-shows what is above it) · **no open PRs** · CI green · 171 files / 2,227 tests / Rust 159 + 1
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `1b18160`** (#71,
+F-3 phishing interstitial; the only SHA pinned — `git log --oneline 1b18160..origin/main`
+shows what is above it) · **no open PRs** · CI green · 172 files / 2,249 tests / Rust 159 + 1
 ignored · 28 migrations · npm audit 0 · `sqlx =0.8.6` is a direct dependency (approved).
 
-**Next action: P19/F-3 — wire `LinkConfirmDialog` on the email link path (Jim's decision 5,
-Tier 1, ~1 day), then E2 part 3 (Tier 2, Rust IMAP pool carry list).** The bug-fix queue is
-done except #278 (signing, "not yet"). Spec from the vault template, verify in the tree,
-TDD, review legs: Gemini 3.7 via `agy` first; second leg on Tier 2 = Grok 4.6 when its ~12
-minutes are affordable, else `gemini-3.8-flash-high` (Jim, 2026-09-02). Open for Jim:
-`urlpattern` dev-dependency (SPEC-280); P11's 5-step manual QA; PR D/E plan approvals.
+**Next action: E2 part 3 — the IMAP session-pool carry list from PR #39 (Tier 2, Rust IMAP
+pool: plan with threat pass and rollback before code, both review legs).** A draft spec is
+started at `docs/briefs/2026-09-03-e2-part3-pool-carry.md`; the item list is in §1. The
+bug-fix queue is done except #278 ("not yet"); F-3/P19 landed as #71. Then P11, PR D/E plans,
+enhancement wave 1. Review legs: Gemini 3.7 via `agy` first; second leg on Tier 2 = Grok 4.6
+when its ~12 minutes are affordable, else `gemini-3.8-flash-high` (Jim, 2026-09-02). Open for
+Jim: `urlpattern` dev-dependency (SPEC-280); the rebrand inventory / `com.velomail.app`
+identifier ADR; the F-3 follow-up questions; P11's 5-step manual QA; PR D/E plan approvals.
 Manual and open: #240 Task 6, F-4's live Done-when, the "Keep them" hold; reporter re-tests
 for #280, #241, #252, #197, #276, #209, #233, #281. Generate reviewer diffs from committed
 SHAs; keep fake credentials out of literal form; a PR that conflicts with `main` gets no CI
