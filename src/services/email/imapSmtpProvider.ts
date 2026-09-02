@@ -19,6 +19,7 @@ import {
   type ImapConfig,
   type SmtpConfig,
 } from "../imap/tauriCommands";
+import { withSession } from "../imap/sessionManager";
 import { getAccount, type DbAccount } from "../db/accounts";
 import { findSpecialFolder } from "../imap/messageHelper";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
@@ -180,8 +181,13 @@ export class ImapSmtpProvider implements EmailProvider {
   // ---- Folder/Label operations ----
 
   async listFolders(): Promise<EmailFolder[]> {
-    const config = await this.getImapConfig();
-    const imapFolders = await imapListFolders(config);
+    // Folder listing is a pure read: safe to retry on a lost session.
+    const imapFolders = await withSession(
+      this.accountId,
+      "interactive",
+      { idempotent: true },
+      (id) => imapListFolders(id),
+    );
     const syncable = getSyncableFolders(imapFolders);
 
     return syncable.map((f) => {

@@ -10,6 +10,19 @@ vi.mock("./tauriCommands", () => ({
   imapSearchFolder: vi.fn(),
   imapDeltaCheck: vi.fn(),
 }));
+vi.mock("./sessionManager", () => ({
+  // The pool is exercised in Rust (imap::pool) and in sessionManager.test.ts.
+  // Here it stands aside: run the operation against a fixed session id so these
+  // tests keep asserting sync behaviour rather than session plumbing.
+  withSession: vi.fn(
+    async (
+      _accountId: string,
+      _kind: string,
+      _opts: { idempotent: boolean },
+      fn: (id: string) => Promise<unknown>,
+    ) => fn("test-session"),
+  ),
+}));
 vi.mock("./imapConfigBuilder", () => ({
   buildImapConfig: vi.fn(() => ({
     host: "imap.example.com",
@@ -89,6 +102,7 @@ import {
   createMockImapFetchResult,
 } from "@/test/mocks";
 import { imapListFolders, imapSearchFolder, imapFetchMessages } from "./tauriCommands";
+import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
 import { getAccount } from "../db/accounts";
 import { withTransaction } from "../db/connection";
 import { upsertMessage, updateMessageThreadIds } from "../db/messages";
@@ -780,6 +794,7 @@ describe("imapInitialSync — placeholder cleanup", () => {
 describe("sync credential wiring for OAuth accounts", () => {
   const mockGetAccount = vi.mocked(getAccount);
   const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockBuildImapConfigWithFreshToken = vi.mocked(buildImapConfigWithFreshToken);
   const mockGetAllFolderSyncStates = vi.mocked(getAllFolderSyncStates);
 
   beforeEach(() => {
@@ -792,26 +807,34 @@ describe("sync credential wiring for OAuth accounts", () => {
     mockImapListFolders.mockReset();
   });
 
-  it("imapInitialSync sends the fresh OAuth token, not an empty password", async () => {
+  // E2/P15 moved the *destination* of these configs: folder listing now takes a
+  // pooled session id, and the credential reaches Rust through
+  // `imap_session_open` instead. The guard is split rather than dropped — the
+  // half imapSync still owns is "always the token-aware builder", asserted
+  // here; the half about the fresh token actually reaching the wire is asserted
+  // end-to-end in sessionManager.test.ts, where that code now lives.
+  it("imapInitialSync builds its config with the token-aware builder", async () => {
     mockGetAccount.mockResolvedValue(
       createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
     );
 
     await imapInitialSync("acc-1");
 
-    const config = mockImapListFolders.mock.calls[0]![0];
+    expect(mockBuildImapConfigWithFreshToken).toHaveBeenCalled();
+    const config = await mockBuildImapConfigWithFreshToken.mock.results[0]!.value;
     expect(config.password).toBe("fresh-oauth-token");
     expect(config.password).not.toBe("");
   });
 
-  it("imapDeltaSync sends the fresh OAuth token, not an empty password", async () => {
+  it("imapDeltaSync builds its config with the token-aware builder", async () => {
     mockGetAccount.mockResolvedValue(
       createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
     );
 
     await imapDeltaSync("acc-1");
 
-    const config = mockImapListFolders.mock.calls[0]![0];
+    expect(mockBuildImapConfigWithFreshToken).toHaveBeenCalled();
+    const config = await mockBuildImapConfigWithFreshToken.mock.results[0]!.value;
     expect(config.password).toBe("fresh-oauth-token");
     expect(config.password).not.toBe("");
   });
@@ -823,7 +846,8 @@ describe("sync credential wiring for OAuth accounts", () => {
 
     await imapInitialSync("acc-1");
 
-    expect(mockImapListFolders.mock.calls[0]![0].password).toBe("secret");
+    const config = await mockBuildImapConfigWithFreshToken.mock.results[0]!.value;
+    expect(config.password).toBe("secret");
   });
 });
 

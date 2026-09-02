@@ -56,6 +56,14 @@ fn open_devtools(app: tauri::AppHandle) {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// Per-session budget for the best-effort LOGOUT at exit.
+///
+/// Short on purpose: quitting must not wait on an unresponsive server.
+const EXIT_LOGOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// How often the reaper looks for idle sessions.
+const REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
+
 pub fn run() {
     // Set explicit AUMID on Windows so toast notifications show "Velo"
     // instead of "Windows PowerShell"
@@ -83,6 +91,9 @@ pub fn run() {
         close_splashscreen,
         open_devtools,
         commands::imap_test_connection,
+        commands::imap_session_open,
+        commands::imap_session_close,
+        commands::imap_sessions_invalidate,
         commands::imap_list_folders,
         commands::imap_fetch_messages,
         commands::imap_fetch_new_uids,
@@ -111,6 +122,9 @@ pub fn run() {
         set_tray_tooltip,
         close_splashscreen,
         commands::imap_test_connection,
+        commands::imap_session_open,
+        commands::imap_session_close,
+        commands::imap_sessions_invalidate,
         commands::imap_list_folders,
         commands::imap_fetch_messages,
         commands::imap_fetch_new_uids,
@@ -156,8 +170,35 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
+        .manage(commands::ImapPool::new())
         .invoke_handler(invoke_handler)
         .setup(|app| {
+            {
+                // Reaper (brief E2/P15). Snapshots expired entries under the map
+                // lock, drops the lock, then LOGOUTs — never awaits a session
+                // while holding the map, or a 120 s fetch would stall every
+                // lookup in the app. In-flight sessions are skipped by the pool
+                // itself, so a long operation is never reaped mid-command.
+                use tauri::Manager;
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let mut ticker = tokio::time::interval(REAPER_INTERVAL);
+                    loop {
+                        ticker.tick().await;
+                        let expired = handle
+                            .state::<commands::ImapPool>()
+                            .reap(crate::imap::pool::IDLE_TIMEOUT);
+                        for session in expired {
+                            let _ = tokio::time::timeout(
+                                EXIT_LOGOUT_TIMEOUT,
+                                commands::logout_arc(session),
+                            )
+                            .await;
+                        }
+                    }
+                });
+            }
+
             {
                 let level = if cfg!(debug_assertions) {
                     log::LevelFilter::Debug
@@ -299,8 +340,31 @@ pub fn run() {
                 }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app, event| {
+            // Exit hook (brief E2/P15). `.run()` alone had no `RunEvent` arm, so
+            // pooled sessions would have died with the process and left the
+            // server to time them out. Best-effort: a server that will not
+            // answer LOGOUT must not stall the quit, so each one is bounded.
+            if let tauri::RunEvent::ExitRequested { .. } = event {
+                use tauri::Manager;
+                let sessions = app.state::<commands::ImapPool>().drain();
+                if sessions.is_empty() {
+                    return;
+                }
+                log::info!("Logging out {} pooled IMAP session(s)", sessions.len());
+                tauri::async_runtime::block_on(async {
+                    for session in sessions {
+                        let _ = tokio::time::timeout(
+                            EXIT_LOGOUT_TIMEOUT,
+                            commands::logout_arc(session),
+                        )
+                        .await;
+                    }
+                });
+            }
+        });
 
     log::info!("Tauri application exited normally");
 }

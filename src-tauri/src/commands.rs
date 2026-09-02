@@ -1,5 +1,7 @@
 use crate::imap;
 use crate::imap::client as imap_client;
+use crate::imap::client::ImapSession;
+use crate::imap::pool::{AccountIdent, AccountKey, SessionPool};
 use crate::imap::types::{
     DeltaCheckRequest, DeltaCheckResult, ImapConfig, ImapFetchResult, ImapFolder,
     ImapFolderSearchResult, ImapFolderStatus, ImapFolderSyncResult, ImapMessage,
@@ -15,12 +17,125 @@ pub async fn imap_test_connection(config: ImapConfig) -> Result<String, String> 
     imap_client::test_connection(&config).await
 }
 
+// ---------- Pooled session lifecycle (brief E2/P15) ----------
+
+/// The pool's alias for the concrete session type.
+pub type ImapPool = SessionPool<ImapSession>;
+
+/// 128 unguessable bits (Decision 2), hex-encoded.
+///
+/// Defense in depth, explicitly **not** the mitigation: the id is a plain
+/// `invoke` argument and lives in the module map of any window doing mail work,
+/// so a same-realm sanitizer bypass can steal it however long it is. What
+/// actually helps is the per-window binding; see the brief's threat model.
+fn new_session_id() -> Result<String, String> {
+    let mut bytes = [0u8; 16];
+    getrandom::fill(&mut bytes).map_err(|e| format!("Failed to generate session id: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+fn account_key(config: &ImapConfig, credential_version: u64) -> AccountKey {
+    AccountKey {
+        ident: AccountIdent {
+            username: config.username.clone(),
+            host: config.host.clone(),
+        },
+        port: config.port,
+        security: config.security.clone(),
+        auth_mechanism: config.auth_method.clone(),
+        credential_version,
+    }
+}
+
+/// Open an authenticated session and keep it.
+///
+/// **The only command that receives a password**, together with Decision 4(a)'s
+/// raw-fetch fallback. Every other operation takes a `session_id`.
 #[tauri::command]
-pub async fn imap_list_folders(config: ImapConfig) -> Result<Vec<ImapFolder>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let folders = imap_client::list_folders(&mut session).await?;
-    let _ = session.logout().await;
-    Ok(folders)
+pub async fn imap_session_open(
+    pool: tauri::State<'_, ImapPool>,
+    config: ImapConfig,
+) -> Result<String, String> {
+    let ident = AccountIdent {
+        username: config.username.clone(),
+        host: config.host.clone(),
+    };
+    let version = pool.credential_version(&ident);
+
+    let session = imap_client::connect(&config).await?;
+    let id = new_session_id()?;
+
+    pool.insert(id.clone(), account_key(&config, version), session)
+        .map_err(|e| e.to_string())?;
+    Ok(id)
+}
+
+/// Close a session. Idempotent: an unknown id is not an error.
+#[tauri::command]
+pub async fn imap_session_close(
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
+) -> Result<(), String> {
+    if let Some(session) = pool.remove(&session_id) {
+        logout_arc(session).await;
+    }
+    Ok(())
+}
+
+/// Invalidate every session for an account after a credential change.
+///
+/// Called on password change (`clearConfigCache`) and on OAuth refresh failure,
+/// so a rotated credential is never served from the pool.
+#[tauri::command]
+pub async fn imap_sessions_invalidate(
+    pool: tauri::State<'_, ImapPool>,
+    username: String,
+    host: String,
+) -> Result<(), String> {
+    for session in pool.bump_credential_version(&AccountIdent { username, host }) {
+        logout_arc(session).await;
+    }
+    Ok(())
+}
+
+/// Best-effort LOGOUT of a session nothing else holds.
+///
+/// Never fails the caller: the connection is being discarded either way, and a
+/// server that will not answer LOGOUT must not stall app exit.
+pub async fn logout_arc(session: std::sync::Arc<tokio::sync::Mutex<ImapSession>>) {
+    if let Ok(mutex) = std::sync::Arc::try_unwrap(session) {
+        let mut session = mutex.into_inner();
+        let _ = session.logout().await;
+    }
+}
+
+#[tauri::command]
+pub async fn imap_list_folders(
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
+) -> Result<Vec<ImapFolder>, String> {
+    let guard = pool.acquire(&session_id).map_err(|e| e.to_string())?;
+
+    // Checkout has already removed the entry from the map. If this future is
+    // dropped, or the operation panics, the guard's `Drop` leaves it removed and
+    // the connection closes — no `Err` has to reach anyone for that to happen.
+    let result = {
+        let session = guard.session().clone();
+        let mut session = session.lock().await;
+        imap_client::list_folders(&mut session).await
+    };
+
+    match result {
+        Ok(folders) => {
+            guard.release_ok();
+            Ok(folders)
+        }
+        Err(e) => {
+            // Eviction-on-error (Blocker 1): any Err leaves the session out.
+            guard.release_err();
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]

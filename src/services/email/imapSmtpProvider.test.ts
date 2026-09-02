@@ -23,6 +23,19 @@ vi.mock("../imap/folderMapper", () => ({
   getSyncableFolders: vi.fn(),
 }));
 
+vi.mock("../imap/sessionManager", () => ({
+  // The pool is exercised in Rust (imap::pool) and in sessionManager.test.ts.
+  // Here it stands aside: run the operation against a fixed session id so these
+  // tests keep asserting sync behaviour rather than session plumbing.
+  withSession: vi.fn(
+    async (
+      _accountId: string,
+      _kind: string,
+      _opts: { idempotent: boolean },
+      fn: (id: string) => Promise<unknown>,
+    ) => fn("test-session"),
+  ),
+}));
 vi.mock("../imap/tauriCommands", () => ({
   imapListFolders: vi.fn(),
   imapSetFlags: vi.fn(),
@@ -153,7 +166,8 @@ describe("ImapSmtpProvider", () => {
 
       const folders = await provider.listFolders();
 
-      expect(imapListFolders).toHaveBeenCalledWith(mockImapConfig);
+      // E2/P15: the provider hands a pooled session id, not a config.
+      expect(imapListFolders).toHaveBeenCalledWith("test-session");
       expect(folders).toHaveLength(2);
       expect(folders[0]).toEqual({
         id: "INBOX",

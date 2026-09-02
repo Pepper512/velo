@@ -45,6 +45,11 @@ tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "
 futures = "0.3"
 async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
 tokio-native-tls = "0.3"
+# Session ids for the IMAP pool (brief E2/P15, Decision 2 — approved by Jim,
+# 2026-09-01). 128 unguessable bits from the OS CSPRNG. Chosen over `rand`
+# because that is all this needs: no distributions, no generators, no PRNG
+# state — `getrandom` is the thin shim over the platform call and nothing more.
+getrandom = "0.3"
 native-tls = "0.2"
 mail-parser = "0.9"
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
