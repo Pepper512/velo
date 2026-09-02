@@ -188,7 +188,11 @@ so explicitly rather than silently dropping the task.
   reap → `VELO_TX_EXPIRED`, binding and decoding parity, a failing statement leaves the
   transaction open for the caller's rollback. — REQ-1.1–1.5, NFR-1
 - [x] 2. Commands registered in both handler lists in `lib.rs`; `TxManager` managed; the watchdog
-  spawned in `setup`. (No capability entries — see the audit's plan correction.)
+  spawned in `setup`. (No capability entries — see the audit's plan correction.) Deviations from
+  this text found in review: ids are `tx-{epoch}-{counter}`, not UUIDs (equality-checked only;
+  Grok NIT 12); the lockfile format moved from `version = 3` to `4` when the dependency was
+  added — the local toolchain's default, accepted by the 1.89 MSRV job (Grok L7); `sqlx` is
+  pinned `=0.8.6` and CI checks there is exactly one copy in the graph.
 - [x] 3. `withTransaction` on the handle (`DbExecutor`); `invoke` results validated at the
   boundary; nine tests with a mocked `invoke`: sequence, id threading, rollback on throw, commit
   failure, expired-rollback silence, serialisation, unblock after failure, refused begin,

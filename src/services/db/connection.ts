@@ -97,11 +97,13 @@ export async function withTransaction<T = void>(fn: (db: DbExecutor) => Promise<
       result = await fn(handle);
     } catch (err) {
       // Roll back on the same connection. A rollback that fails because the
-      // watchdog already reaped the transaction is not the error to report.
+      // transaction is already gone — reaped by the watchdog, or reaped and
+      // then superseded — is not the error to report (Grok L6 on #54).
       try {
         await invoke("db_tx_rollback", { id });
       } catch (rollbackErr) {
-        if (!String(rollbackErr).includes(TX_EXPIRED)) {
+        const text = String(rollbackErr);
+        if (!text.includes(TX_EXPIRED) && !text.includes(TX_UNKNOWN)) {
           console.warn("[db] ROLLBACK failed after a transaction error:", rollbackErr);
         }
       }
@@ -124,7 +126,10 @@ export async function withTransaction<T = void>(fn: (db: DbExecutor) => Promise<
  * bounded backoff before giving up (Gemini M4 on #54).
  */
 const BUSY_RETRY_DELAY_MS = 100;
-const BUSY_RETRY_LIMIT = 50; // ≈ 5 s, well under the 30 s idle watchdog
+// A sync batch or an F-5 re-key can hold the writer for longer than a few
+// seconds; the wait tracks the 30 s idle watchdog, after which the holder is
+// reaped anyway (Grok M3 on #54).
+const BUSY_RETRY_LIMIT = 300;
 
 async function beginWithRetry(): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {

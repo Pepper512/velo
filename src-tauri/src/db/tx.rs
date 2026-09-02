@@ -41,13 +41,37 @@ pub const TX_NO_DB: &str = "VELO_TX_NO_DB";
 
 struct OpenTx {
     id: String,
-    conn: PoolConnection<Sqlite>,
+    /// `None` only once `release` has taken the connection to finish it.
+    conn: Option<PoolConnection<Sqlite>>,
     last_used: Instant,
+}
+
+impl OpenTx {
+    fn conn(&mut self) -> &mut PoolConnection<Sqlite> {
+        self.conn.as_mut().expect("an open transaction holds its connection")
+    }
+}
+
+/// A transaction dropped without `release` — a panic between statements, or
+/// the manager going away at shutdown — must not hand its connection back to
+/// the pool: sqlx does not know about the hand-issued `BEGIN`, so the next
+/// plugin query on it would run inside a leftover transaction (Grok L5 on
+/// #54). `Drop` cannot await a ROLLBACK, so the connection is detached and
+/// dropped, which closes it instead of recycling it.
+impl Drop for OpenTx {
+    fn drop(&mut self) {
+        if let Some(conn) = self.conn.take() {
+            drop(conn.detach());
+        }
+    }
 }
 
 #[derive(Default)]
 struct Inner {
     current: Option<OpenTx>,
+    /// Set while `begin` is acquiring a connection outside the lock, so a
+    /// second `begin` is refused at once instead of queueing on the mutex.
+    starting: bool,
     /// The id of the last transaction the watchdog reaped, so its owner gets
     /// `VELO_TX_EXPIRED` rather than a generic unknown-id error.
     expired: Option<String>,
@@ -92,22 +116,25 @@ impl TxManager {
     /// Take a connection from the pool and open the transaction on it
     /// (REQ-1.1, REQ-1.5). Refuses if one is already open (REQ-1.4).
     pub async fn begin(&self, pool: &Pool<Sqlite>) -> Result<String, String> {
-        let mut inner = self.inner.lock().await;
-        if inner.current.is_some() {
-            return Err(format!("{TX_BUSY}: a transaction is already open"));
+        // Claim the slot under the lock, then do the slow part — the pool
+        // acquire and `BEGIN IMMEDIATE`, which can wait out the busy timeout —
+        // outside it, so a competing `begin` hears `VELO_TX_BUSY` at once and
+        // the watchdog is never queued behind lock acquisition (Grok M2 on #54).
+        {
+            let mut inner = self.inner.lock().await;
+            if inner.current.is_some() || inner.starting {
+                return Err(format!("{TX_BUSY}: a transaction is already open"));
+            }
+            inner.starting = true;
         }
-        let mut conn = pool
-            .acquire()
-            .await
-            .map_err(|e| format!("Could not take a connection for the transaction: {e}"))?;
-        sqlx::query("BEGIN IMMEDIATE")
-            .execute(&mut *conn)
-            .await
-            .map_err(|e| format!("BEGIN IMMEDIATE failed: {e}"))?;
+        let opened = open_transaction(pool).await;
+        let mut inner = self.inner.lock().await;
+        inner.starting = false;
+        let conn = opened?;
         let id = self.fresh_id();
         inner.current = Some(OpenTx {
             id: id.clone(),
-            conn,
+            conn: Some(conn),
             last_used: Instant::now(),
         });
         // A new transaction supersedes the memory of the reaped one (Gemini NIT 5).
@@ -138,7 +165,7 @@ impl TxManager {
         let mut inner = self.inner.lock().await;
         let tx = Self::check(&mut inner, id)?;
         let result = bind_all(sqlx::query(sql), values)
-            .execute(&mut *tx.conn)
+            .execute(&mut **tx.conn())
             .await
             .map_err(|e| e.to_string());
         // Idle means "since the last statement *finished*": a slow statement
@@ -152,7 +179,7 @@ impl TxManager {
         let mut inner = self.inner.lock().await;
         let tx = Self::check(&mut inner, id)?;
         let rows = bind_all(sqlx::query(sql), values)
-            .fetch_all(&mut *tx.conn)
+            .fetch_all(&mut **tx.conn())
             .await
             .map_err(|e| e.to_string());
         tx.last_used = Instant::now();
@@ -190,15 +217,33 @@ impl TxManager {
     }
 }
 
+/// Take a connection from the pool and open the transaction on it. Runs
+/// outside the manager lock; see `begin`.
+async fn open_transaction(pool: &Pool<Sqlite>) -> Result<PoolConnection<Sqlite>, String> {
+    let mut conn = pool
+        .acquire()
+        .await
+        .map_err(|e| format!("Could not take a connection for the transaction: {e}"))?;
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut *conn)
+        .await
+        .map_err(|e| format!("BEGIN IMMEDIATE failed: {e}"))?;
+    Ok(conn)
+}
+
 /// End the transaction with `statement` and hand the connection back. A
 /// connection whose COMMIT or ROLLBACK failed is **closed, not returned**: sqlx
 /// does not know about a transaction we opened by hand, so returning it would
 /// put a connection still inside a transaction back into the pool.
 async fn release(mut tx: OpenTx, statement: &str) -> Result<(), String> {
-    match sqlx::query(statement).execute(&mut *tx.conn).await {
-        Ok(_) => Ok(()),
+    let mut conn = tx.conn.take().expect("an open transaction holds its connection");
+    match sqlx::query(statement).execute(&mut *conn).await {
+        Ok(_) => {
+            drop(conn); // clean: back to the pool
+            Ok(())
+        }
         Err(e) => {
-            let raw = tx.conn.detach();
+            let raw = conn.detach();
             let _ = raw.close().await;
             Err(format!("{statement} failed: {e}"))
         }

@@ -79,6 +79,80 @@ async fn a_committed_transaction_is_visible_from_another_pool_connection() {
 }
 
 #[tokio::test]
+async fn a_concurrent_reader_on_the_pool_neither_blocks_nor_sees_the_open_transaction() {
+    // The #240 failure mode (Grok M4 on #54): UI reads on the plugin's pool
+    // while a sync transaction is open. With the transaction pinned to one
+    // connection the reads keep flowing, see nothing uncommitted, and the
+    // COMMIT still lands on the pinned connection.
+    let db = temp_db(Duration::from_secs(1)).await;
+    let tx = TxManager::new();
+    let pool = db.pool.clone();
+
+    let id = tx.begin(&db.pool).await.unwrap();
+    tx.execute(&id, "INSERT INTO t (v) VALUES ($1)", vec![json!("a")])
+        .await
+        .unwrap();
+
+    let reader = tokio::spawn(async move {
+        let mut seen = Vec::new();
+        for _ in 0..20 {
+            seen.push(count_via_pool(&pool).await);
+            tokio::time::sleep(Duration::from_millis(2)).await;
+        }
+        seen
+    });
+
+    tx.execute(&id, "INSERT INTO t (v) VALUES ($1)", vec![json!("b")])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    tx.execute(&id, "INSERT INTO t (v) VALUES ($1)", vec![json!("c")])
+        .await
+        .unwrap();
+    tx.commit(&id).await.unwrap();
+
+    let seen = tokio::time::timeout(Duration::from_secs(5), reader)
+        .await
+        .expect("the reader must not be blocked by the open transaction")
+        .unwrap();
+    assert!(seen.iter().all(|&n| n == 0 || n == 3), "a reader saw a partial transaction: {seen:?}");
+    assert_eq!(count_via_pool(&db.pool).await, 3);
+}
+
+#[tokio::test]
+async fn a_second_begin_is_refused_at_once_while_the_first_is_still_acquiring() {
+    // Grok M2 on #54: the slow part of `begin` runs outside the manager lock,
+    // so a competing `begin` is refused immediately rather than queued.
+    let db = temp_db(Duration::from_millis(300)).await;
+    let tx = std::sync::Arc::new(TxManager::new());
+
+    // Hold the write lock from outside so `BEGIN IMMEDIATE` inside `begin` waits.
+    let mut blocker = db.pool.acquire().await.unwrap();
+    sqlx::query("BEGIN IMMEDIATE").execute(&mut *blocker).await.unwrap();
+
+    let first = {
+        let tx = tx.clone();
+        let pool = db.pool.clone();
+        tokio::spawn(async move { tx.begin(&pool).await })
+    };
+    tokio::time::sleep(Duration::from_millis(30)).await;
+
+    let started = std::time::Instant::now();
+    let second = tx.begin(&db.pool).await.unwrap_err();
+    assert!(second.starts_with(TX_BUSY), "{second}");
+    assert!(started.elapsed() < Duration::from_millis(150), "the refusal waited on the first begin's IO");
+
+    sqlx::query("ROLLBACK").execute(&mut *blocker).await.unwrap();
+    drop(blocker);
+    let first = first.await.unwrap();
+    match first {
+        Ok(id) => tx.rollback(&id).await.unwrap(),
+        Err(e) => assert!(e.contains("BEGIN IMMEDIATE failed"), "{e}"), // busy timeout won the race
+    }
+    assert!(!tx.is_open().await);
+}
+
+#[tokio::test]
 async fn a_rolled_back_transaction_leaves_nothing() {
     let db = temp_db(Duration::from_secs(1)).await;
     let tx = TxManager::new();

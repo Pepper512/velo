@@ -11,7 +11,7 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
   const db = () => harnessRef.current!.db;
   return {
     ...actual,
-    getDb: () => Promise.resolve(db()),
+    getDb: vi.fn(() => Promise.resolve(db())),
     withTransaction: async (fn: (db: unknown) => Promise<void>) => fn(db()),
     selectFirstBy: async <T,>(q: string, p: unknown[] = []) => (await db().select<T[]>(q, p))[0] ?? null,
     existsBy: async (q: string, p: unknown[] = []) =>
@@ -24,6 +24,7 @@ import { runMigrations } from "@/services/db/migrations";
 import { getThreadLabelIds } from "@/services/db/threads";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 import { getOwnAddresses, clearSnoozeForNewExternalMessages } from "./snoozeSync";
+import { getDb } from "@/services/db/connection";
 
 const ACC = "acc-1";
 const THREAD = "t1";
@@ -121,6 +122,23 @@ describe("snoozeSync (SPEC-F-1 REQ-1.3)", () => {
 
     expect(cleared).toBe(false);
     expect((await snoozeState()).is_snoozed).toBe(1);
+  });
+
+  it("runs entirely on a given handle — the snooze read, the existing-id lookup and both writes — never on getDb() (SPEC-240, Grok L8 on #54)", async () => {
+    await seedSnoozedThread();
+    const own = await getOwnAddresses(ACC);
+    vi.mocked(getDb).mockClear();
+
+    const cleared = await clearSnoozeForNewExternalMessages(
+      ACC,
+      THREAD,
+      [{ id: "new-1", fromAddress: "them@corp.test" }],
+      own,
+      harnessRef.current!.db,
+    );
+
+    expect(cleared).toBe(true);
+    expect(getDb).not.toHaveBeenCalled();
   });
 
   it("keeps the snooze when every incoming message is already stored", async () => {

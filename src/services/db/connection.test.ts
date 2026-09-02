@@ -120,9 +120,9 @@ describe("withTransaction (pinned, SPEC-240)", () => {
         () => "resolved",
         (e: unknown) => String(e),
       );
-      await vi.advanceTimersByTimeAsync(100 * 60);
+      await vi.advanceTimersByTimeAsync(100 * 310);
       expect(await outcome).toContain("VELO_TX_BUSY");
-      expect(mockInvoke).toHaveBeenCalledTimes(51);
+      expect(mockInvoke).toHaveBeenCalledTimes(301);
     } finally {
       vi.useRealTimers();
     }
@@ -131,6 +131,21 @@ describe("withTransaction (pinned, SPEC-240)", () => {
   it("stays quiet when the rollback fails only because the watchdog already reaped the transaction", async () => {
     const log: string[] = [];
     fakeRust(log, { failRollback: `${TX_EXPIRED}: idle` });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      withTransaction(async () => {
+        throw new Error("original error");
+      }),
+    ).rejects.toThrow("original error");
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("stays quiet too when the rollback finds the transaction already gone (Grok L6 on #54)", async () => {
+    const log: string[] = [];
+    fakeRust(log, { failRollback: "VELO_TX_UNKNOWN: no open transaction with this id" });
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(

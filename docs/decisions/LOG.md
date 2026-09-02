@@ -762,3 +762,30 @@
   ROLLBACK-failure logging in `migrations.ts` moved into `withTransaction`, which stays silent
   only when the failure is the watchdog having already reaped the transaction. Gates: Rust
   119 (+7), frontend 2,034 (+5), clippy/tsc/docs/graph clean.
+- **2026-09-02 ~21:00 UTC — PR #54 (#240) cross-vendor review, both legs, three rounds.**
+  **Process defect on the author's side, recorded:** the first diff sent to both reviewers was
+  taken before the new Rust files were staged, so Gemini's round 1 (CHANGES REQUESTED, HIGH
+  "Rust files missing") reviewed an incomplete change; Grok's first run on it was stopped. Both
+  legs re-ran on the committed diff. From Gemini round 1 the still-valid items were adopted
+  (cross-window `VELO_TX_BUSY` retry, `withTransaction<T>` return value, helper routing tests);
+  re-entrancy was declined with reasons (no async context in the webview; no nested caller in
+  the tree; the watchdog turns a nested call into a loud error after 30 s). **Gemini round 2**
+  (CHANGES REQUESTED, 1H 2M 1L 1N): H1 booleans bound as JSON text — parity with the plugin, but
+  adopted as INTEGER 1/0 in the safe direction; M2 idle clock stamped before the statement —
+  adopted (after); M3 rollback after a failed commit warned spuriously — adopted (no rollback,
+  Rust already closed the connection); L4 type aliases — declined (sqlx canonicalises them, the
+  plugin matches the same list); N5 reaped id never cleared — adopted. **Grok** (CHANGES
+  REQUESTED, 4M 5L 3N, on the pre-round-2 diff): M1 = Gemini M2; **M2 the manager mutex was held
+  across `pool.acquire()` and `BEGIN IMMEDIATE`** — adopted: the slot is claimed under the lock
+  and the slow part runs outside it, a competing `begin` is refused at once (test: refused in
+  < 150 ms while the first waits on an outside writer); M3 5 s retry shorter than a batch —
+  adopted (tracks the 30 s watchdog); **M4 no test of the actual failure mode** — adopted (a
+  concurrent reader on the pool is never blocked and never sees a partial transaction); L5
+  `OpenTx` dropped without `release` recycles a mid-transaction connection — adopted (`Drop`
+  detaches, closing it); L6 `TX_UNKNOWN` on a late rollback warned — adopted (silent); L7
+  unpinned `sqlx` and no duplicate check — adopted (`=0.8.6`, CI step asserts one copy); L8
+  handle assertions on one call site — adopted across both stores and the snooze helper; L9,
+  N10–N12 recorded (ids are not UUIDs as the plan said; lockfile format 3 → 4 is the local
+  toolchain's default, accepted by the MSRV job). Raw outputs in
+  `docs/reviews/2026-09-02-pr54-{gemini-round1,gemini,grok}-raw.md`. Gates after all three
+  rounds: Rust 123, frontend 2,045, clippy/tsc/docs/graph clean.
