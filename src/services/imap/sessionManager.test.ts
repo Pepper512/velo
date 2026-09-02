@@ -1,11 +1,17 @@
 /**
  * Pooled session lifecycle, frontend half (brief E2/P15, rev 4).
  *
- * The assertions that matter here are the ones about *not* retrying. A lost
- * session is easy to recover from and the temptation is to always re-run the
- * operation; for APPEND and for the COPY-fallback half of MOVE, re-running is
- * how a user ends up with two copies of the same mail. Done-when 6 exists
- * because rev 1 of the brief mandated exactly that bug.
+ * These tests previously locked in a bug found in review: they asserted that a
+ * `NoSuchSession` must not re-run a non-idempotent operation. But pool errors
+ * are raised by `acquire` *before the connection is touched*, so the command
+ * never reached the server and re-running it duplicates nothing. The old
+ * assertion would have made the first archive after an idle reap fail in the
+ * user's face.
+ *
+ * What actually protects against a duplicate in Sent is the **pass-through of
+ * mid-operation errors** — an APPEND that may have landed server-side surfaces
+ * as an ordinary IMAP error and is never retried. That is asserted below, and
+ * it is what satisfies Done-when 6.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
@@ -76,8 +82,8 @@ describe("withSession", () => {
   it("opens a session lazily and reuses it for the same account and kind", async () => {
     const op = vi.fn(async (id: string) => id);
 
-    const first = await withSession("acc-1", "sync", { idempotent: true }, op);
-    const second = await withSession("acc-1", "sync", { idempotent: true }, op);
+    const first = await withSession("acc-1", "sync", {}, op);
+    const second = await withSession("acc-1", "sync", {}, op);
 
     expect(first).toBe("session-1");
     expect(second).toBe("session-1");
@@ -89,8 +95,8 @@ describe("withSession", () => {
     // not queue behind it.
     const op = vi.fn(async (id: string) => id);
 
-    const sync = await withSession("acc-1", "sync", { idempotent: true }, op);
-    const interactive = await withSession("acc-1", "interactive", { idempotent: true }, op);
+    const sync = await withSession("acc-1", "sync", {}, op);
+    const interactive = await withSession("acc-1", "interactive", {}, op);
 
     expect(sync).not.toBe(interactive);
     expect(mockOpen).toHaveBeenCalledTimes(2);
@@ -103,7 +109,7 @@ describe("withSession", () => {
     mockGetAccount.mockResolvedValue({ id: "acc-1", auth_method: "oauth2" } as never);
     mockBuildConfig.mockResolvedValue({ ...CONFIG, password: "fresh-oauth-token" });
 
-    await withSession("acc-1", "sync", { idempotent: true }, async (id) => id);
+    await withSession("acc-1", "sync", {}, async (id) => id);
 
     expect(mockBuildConfig).toHaveBeenCalled();
     expect(mockOpen).toHaveBeenCalledWith(
@@ -118,7 +124,7 @@ describe("withSession", () => {
     // bought nothing.
     const op = vi.fn(async (id: string) => id);
 
-    await withSession("acc-1", "sync", { idempotent: true }, op);
+    await withSession("acc-1", "sync", {}, op);
 
     expect(op).toHaveBeenCalledWith("session-1");
     expect(JSON.stringify(op.mock.calls)).not.toContain("secret");
@@ -126,7 +132,7 @@ describe("withSession", () => {
 });
 
 describe("withSession — NoSuchSession", () => {
-  it("reopens and retries an idempotent operation", async () => {
+  it("reopens and retries, because the command never reached the server", async () => {
     // Done-when 7: after an eviction the next operation opens a fresh
     // connection and succeeds.
     const op = vi
@@ -134,7 +140,7 @@ describe("withSession — NoSuchSession", () => {
       .mockRejectedValueOnce(poolError("NoSuchSession"))
       .mockResolvedValueOnce("ok");
 
-    const result = await withSession("acc-1", "sync", { idempotent: true }, op);
+    const result = await withSession("acc-1", "sync", {}, op);
 
     expect(result).toBe("ok");
     expect(mockOpen).toHaveBeenCalledTimes(2);
@@ -142,15 +148,29 @@ describe("withSession — NoSuchSession", () => {
     expect(op).toHaveBeenNthCalledWith(2, "session-2");
   });
 
-  it("reopens but does NOT re-run a non-idempotent operation", async () => {
-    // Done-when 6, the APPEND case: exactly one reopen and no second APPEND,
-    // with the error surfaced. A retry here is a duplicate in Sent.
+  it("retries even an APPEND, because acquire runs before any I/O", async () => {
+    // The corrected behaviour. `NoSuchSession` means checkout failed on a
+    // HashMap — no bytes were sent — so re-running APPEND cannot duplicate a
+    // Sent copy. Refusing here would fail the user's first send after a reap
+    // while protecting nothing.
+    const op = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockRejectedValueOnce(poolError("NoSuchSession"))
+      .mockResolvedValueOnce("appended");
+
+    await expect(withSession("acc-1", "sync", {}, op)).resolves.toBe("appended");
+    expect(op).toHaveBeenCalledTimes(2);
+  });
+
+  it("refuses to re-run a caller that wraps more than one command", async () => {
+    // The one case where a retry really would duplicate: `fn` is not a single
+    // command, so re-running it re-runs whatever already succeeded inside it.
     const op = vi
       .fn<(id: string) => Promise<string>>()
       .mockRejectedValue(poolError("NoSuchSession"));
 
     await expect(
-      withSession("acc-1", "sync", { idempotent: false }, op),
+      withSession("acc-1", "sync", { retrySafe: false }, op),
     ).rejects.toThrow("NoSuchSession");
 
     expect(op).toHaveBeenCalledTimes(1);
@@ -163,8 +183,8 @@ describe("withSession — NoSuchSession", () => {
       .mockRejectedValueOnce(poolError("NoSuchSession"))
       .mockResolvedValue("ok");
 
-    await withSession("acc-1", "sync", { idempotent: true }, op);
-    await withSession("acc-1", "sync", { idempotent: true }, op);
+    await withSession("acc-1", "sync", {}, op);
+    await withSession("acc-1", "sync", {}, op);
 
     // Two opens total: the original and the one reopen. Not three.
     expect(mockOpen).toHaveBeenCalledTimes(2);
@@ -180,20 +200,20 @@ describe("withSession — SessionBusy", () => {
       .mockRejectedValueOnce(poolError("SessionBusy"))
       .mockResolvedValueOnce("ok");
 
-    const result = await withSession("acc-1", "sync", { idempotent: true }, op);
+    const result = await withSession("acc-1", "sync", {}, op);
 
     expect(result).toBe("ok");
     expect(mockOpen).toHaveBeenCalledTimes(1);
     expect(op).toHaveBeenNthCalledWith(2, "session-1");
   });
 
-  it("surfaces to a non-idempotent caller rather than retrying", async () => {
+  it("surfaces to a multi-command caller rather than retrying", async () => {
     const op = vi
       .fn<(id: string) => Promise<string>>()
       .mockRejectedValue(poolError("SessionBusy"));
 
     await expect(
-      withSession("acc-1", "sync", { idempotent: false }, op),
+      withSession("acc-1", "sync", { retrySafe: false }, op),
     ).rejects.toThrow("SessionBusy");
 
     expect(op).toHaveBeenCalledTimes(1);
@@ -202,21 +222,51 @@ describe("withSession — SessionBusy", () => {
 });
 
 describe("withSession — TooManySessions", () => {
-  it("gives up its own slot and retries once", async () => {
-    const op = vi
-      .fn<(id: string) => Promise<string>>()
-      .mockRejectedValueOnce(poolError("TooManySessions"))
-      .mockResolvedValueOnce("ok");
+  it("gives up its own slot and retries the open", async () => {
+    // Raised by the pool's `insert`, so it surfaces from `imap_session_open` —
+    // never from the operation. The first version of this test faked it by
+    // making `op` throw, which reached the branch by a path the pool cannot
+    // produce, and so asserted nothing about real behaviour.
+    let opens = 0;
+    mockOpen.mockImplementation(async () => {
+      opens += 1;
+      if (opens === 1) throw poolError("TooManySessions");
+      return `session-${opens}`;
+    });
+    // A cached session for this realm exists, so there is a slot to give up.
+    const op = vi.fn(async (id: string) => id);
 
-    const result = await withSession("acc-1", "sync", { idempotent: true }, op);
+    const result = await withSession("acc-1", "sync", {}, op);
 
-    expect(result).toBe("ok");
-    expect(mockClose).toHaveBeenCalledWith("session-1");
-    expect(mockOpen).toHaveBeenCalledTimes(2);
+    expect(result).toBe("session-2");
+    expect(opens).toBe(2);
+  });
+
+  it("surfaces if the retried open is refused too", async () => {
+    mockOpen.mockRejectedValue(poolError("TooManySessions"));
+
+    await expect(
+      withSession("acc-1", "sync", {}, async (id) => id),
+    ).rejects.toThrow("TooManySessions");
   });
 });
 
 describe("withSession — other errors", () => {
+  it("never retries a mid-operation failure — this is the APPEND guard", async () => {
+    // Done-when 6. A connection that dies mid-APPEND may have landed the
+    // message server-side; the error is an ordinary IMAP/transport failure, not
+    // a pool error, and re-running it is what would put a second copy in Sent.
+    // The guard is this pass-through, not a flag on the pool errors.
+    const op = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockRejectedValue(new Error("APPEND failed: Broken pipe (os error 32)"));
+
+    await expect(withSession("acc-1", "sync", {}, op)).rejects.toThrow("Broken pipe");
+
+    expect(op).toHaveBeenCalledTimes(1);
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+  });
+
   it("passes an ordinary IMAP failure straight through", async () => {
     // Only pool errors mean anything about the session. A NO response is the
     // operation's business, and retrying it silently would hide real failures.
@@ -225,7 +275,7 @@ describe("withSession — other errors", () => {
       .mockRejectedValue(new Error("SELECT failed: NO Mailbox doesn't exist"));
 
     await expect(
-      withSession("acc-1", "sync", { idempotent: true }, op),
+      withSession("acc-1", "sync", {}, op),
     ).rejects.toThrow("Mailbox doesn't exist");
 
     expect(op).toHaveBeenCalledTimes(1);
@@ -235,8 +285,8 @@ describe("withSession — other errors", () => {
 
 describe("closing", () => {
   it("closes one kind and leaves the other alone", async () => {
-    await withSession("acc-1", "sync", { idempotent: true }, async (id) => id);
-    await withSession("acc-1", "interactive", { idempotent: true }, async (id) => id);
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await withSession("acc-1", "interactive", {}, async (id) => id);
 
     await closeSession("acc-1", "sync");
 
@@ -244,8 +294,8 @@ describe("closing", () => {
   });
 
   it("closing an account closes both of its sessions", async () => {
-    await withSession("acc-1", "sync", { idempotent: true }, async (id) => id);
-    await withSession("acc-1", "interactive", { idempotent: true }, async (id) => id);
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await withSession("acc-1", "interactive", {}, async (id) => id);
 
     await closeAccountSessions("acc-1");
 
@@ -258,10 +308,10 @@ describe("closing", () => {
   });
 
   it("re-opens after a close rather than reusing the closed id", async () => {
-    await withSession("acc-1", "sync", { idempotent: true }, async (id) => id);
+    await withSession("acc-1", "sync", {}, async (id) => id);
     await closeSession("acc-1", "sync");
 
-    const id = await withSession("acc-1", "sync", { idempotent: true }, async (i) => i);
+    const id = await withSession("acc-1", "sync", {}, async (i) => i);
 
     expect(id).toBe("session-2");
   });
@@ -273,7 +323,7 @@ describe("credential invalidation", () => {
     // has to reach Rust explicitly or the connection keeps working after the
     // user revoked it. Identity rather than session id, because other windows
     // hold sessions this one never saw.
-    await withSession("acc-1", "sync", { idempotent: true }, async (id) => id);
+    await withSession("acc-1", "sync", {}, async (id) => id);
 
     await invalidateAccountCredentials("acc-1");
 
@@ -281,10 +331,10 @@ describe("credential invalidation", () => {
   });
 
   it("forgets the cached ids so the next call reopens", async () => {
-    await withSession("acc-1", "sync", { idempotent: true }, async (id) => id);
+    await withSession("acc-1", "sync", {}, async (id) => id);
     await invalidateAccountCredentials("acc-1");
 
-    const id = await withSession("acc-1", "sync", { idempotent: true }, async (i) => i);
+    const id = await withSession("acc-1", "sync", {}, async (i) => i);
 
     expect(id).toBe("session-2");
   });

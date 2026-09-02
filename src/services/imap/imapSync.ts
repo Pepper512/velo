@@ -413,10 +413,8 @@ export async function imapInitialSync(
 
   // Phase 1: List and sync folders
   onProgress?.({ phase: "folders", current: 0, total: 1 });
-  // Folder listing is a pure read: safe to retry on a lost session.
-  const allFolders = await withSession(accountId, "sync", { idempotent: true }, (id) =>
-    imapListFolders(id),
-  );
+  // One command per `withSession`, so a pool error is always safe to retry.
+  const allFolders = await withSession(accountId, "sync", {}, (id) => imapListFolders(id));
   const syncableFolders = getSyncableFolders(allFolders);
   await syncFoldersToLabels(accountId, syncableFolders);
   console.log(`[imapSync] Initial sync for account ${accountId}: ${syncableFolders.length} syncable folders`);
@@ -861,10 +859,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   const syncStates = await getAllFolderSyncStates(accountId);
 
   // Also check for any new folders
-  // Folder listing is a pure read: safe to retry on a lost session.
-  const allFolders = await withSession(accountId, "sync", { idempotent: true }, (id) =>
-    imapListFolders(id),
-  );
+  // One command per `withSession`, so a pool error is always safe to retry.
+  const allFolders = await withSession(accountId, "sync", {}, (id) => imapListFolders(id));
   const syncableFolders = getSyncableFolders(allFolders);
   await syncFoldersToLabels(accountId, syncableFolders);
 

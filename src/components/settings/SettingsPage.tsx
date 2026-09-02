@@ -6,6 +6,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
 import { PROVIDER_MODELS } from "@/services/ai/types";
 import { deleteAccount } from "@/services/db/accounts";
+import { closeAccountSessions } from "@/services/imap/sessionManager";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
 import { triggerSync, forceFullSync, resyncAccount } from "@/services/gmail/syncManager";
 import {
@@ -313,6 +314,11 @@ export function SettingsPage() {
   const handleRemoveAccount = useCallback(
     async (accountId: string) => {
       removeClient(accountId);
+      // Close pooled IMAP sessions before the row goes (E2/P15). Done here
+      // rather than inside `deleteAccount` because the session manager reads
+      // accounts from the DB layer, so the DB layer must not depend on it —
+      // `graph:check` would fail on the cycle.
+      await closeAccountSessions(accountId);
       await deleteAccount(accountId);
       removeAccountFromStore(accountId);
     },

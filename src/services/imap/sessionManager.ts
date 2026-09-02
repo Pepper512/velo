@@ -8,23 +8,36 @@
  * Two sessions per account, by kind. A 200-message fetch holds its session for
  * seconds, so an archive click must not queue behind it.
  *
- * # Retry policy is about idempotency, not about errors
+ * # Where the duplicate-mail guard actually lives
  *
- * `NoSuchSession` means the session is gone: evicted after an error,
- * cancelled, reaped, or lost to a restart. Reopening is always safe. **Re-running
- * the operation is not**, and the two exclusions are not stylistic:
+ * Rev 1 of the brief specified retry-by-idempotency, and the first cut of this
+ * module put that gate on the pool errors. **That was the wrong error class.**
  *
- * - `imap_append_message` — if APPEND landed server-side but the connection
- *   died before the tagged response, a retry writes a *second* copy to Sent.
- *   A missing Sent copy is already tolerated by the caller; a silent duplicate
+ * `NoSuchSession` and `SessionBusy` are raised by the pool's `acquire`, which
+ * runs *before the connection is touched* — checkout is a `HashMap` operation.
+ * So when either surfaces, **the command never reached the server**, and
+ * re-running it cannot duplicate anything. Gating them on idempotency does not
+ * make APPEND safer; it just makes the first archive after a 300 s idle reap
+ * fail in the user's face for no reason.
+ *
+ * The duplicate risk lives in **mid-operation** failure — APPEND lands
+ * server-side, the connection dies before the tagged response. That surfaces as
+ * an ordinary IMAP error, not a pool error, and this module passes those
+ * straight through **without any retry**. That pass-through, not a flag, is what
+ * satisfies Done-when 6:
+ *
+ * - `imap_append_message` — a retry would write a second copy to Sent. A
+ *   *missing* Sent copy is already tolerated by the caller; a silent duplicate
  *   is worse.
- * - `imap_move_messages` — the MOVE-extension path is retry-safe, but the COPY
- *   fallback is not: COPY succeeds, the session dies before the EXPUNGE, and
- *   the retry copies every message a second time. The frontend cannot tell
- *   which path the server took, so the whole command is non-retryable.
+ * - `imap_move_messages` — the MOVE-extension path is retry-safe, the COPY
+ *   fallback is not, and the frontend cannot tell which the server took.
  *
- * `imap_set_flags` and `imap_delete_messages` are safe: UID STORE on
- * nonexistent UIDs is a no-op (RFC 3501 §6.4.8) and EXPUNGE is idempotent.
+ * # The precondition that makes retry sound
+ *
+ * All of the above holds **only because `fn` wraps exactly one command.** If a
+ * caller puts two server-visible commands in one `fn`, a retry re-runs the
+ * first — which is the duplicate bug arriving by a different road. Such a caller
+ * must pass `retrySafe: false`.
  */
 import type { DbAccount } from "../db/accounts";
 import { getAccount } from "../db/accounts";
@@ -44,6 +57,18 @@ export type SessionId = string;
 const NO_SUCH_SESSION = "NoSuchSession";
 const SESSION_BUSY = "SessionBusy";
 const TOO_MANY_SESSIONS = "TooManySessions";
+
+/**
+ * Pause before retrying a busy session.
+ *
+ * The holder is doing network I/O; retrying in the same tick just loses the
+ * race again. Short enough that a user waiting on an archive does not notice.
+ */
+const SESSION_BUSY_BACKOFF_MS = 50;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function isPoolError(err: unknown, name: string): boolean {
   const message = err instanceof Error ? err.message : String(err);
@@ -89,11 +114,15 @@ function forget(accountId: string, kind: SessionKind): void {
 
 export interface WithSessionOptions {
   /**
-   * Whether re-running `fn` after a lost session can duplicate a server-side
-   * effect. `false` surfaces the error instead of retrying — see the module
-   * comment for the two commands this exists for.
+   * Whether re-running `fn` from the start is safe.
+   *
+   * Defaults to `true`, which is correct for the ordinary case of `fn` wrapping
+   * a single command: pool errors are raised before the connection is touched,
+   * so nothing reached the server. Pass `false` only when `fn` performs **more
+   * than one** server-visible command, where a retry would re-run the earlier
+   * ones.
    */
-  idempotent: boolean;
+  retrySafe?: boolean;
 }
 
 /**
@@ -108,39 +137,46 @@ export async function withSession<T>(
   opts: WithSessionOptions,
   fn: (id: SessionId) => Promise<T>,
 ): Promise<T> {
-  const id = await sessionFor(accountId, kind);
+  const retrySafe = opts.retrySafe ?? true;
+
+  let id: SessionId;
+  try {
+    id = await sessionFor(accountId, kind);
+  } catch (err) {
+    // `TooManySessions` comes from `insert` during the *open*, so it surfaces
+    // here rather than from the operation. Give up this realm's slot and try
+    // once more rather than showing an error the user cannot act on.
+    if (!isPoolError(err, TOO_MANY_SESSIONS)) throw err;
+    await closeSession(accountId, kind);
+    id = await openSession(accountId, kind);
+  }
 
   try {
     return await fn(id);
   } catch (err) {
+    // Pool errors are raised before the connection is touched, so the command
+    // never reached the server and re-running it duplicates nothing. The only
+    // reason to refuse is a caller that wrapped several commands in one `fn`.
     if (isPoolError(err, NO_SUCH_SESSION)) {
-      // The session is gone. Reopening is always safe; re-running is not.
       forget(accountId, kind);
       const fresh = await openSession(accountId, kind);
-      if (!opts.idempotent) {
-        throw err;
-      }
+      if (!retrySafe) throw err;
       return await fn(fresh);
     }
 
     if (isPoolError(err, SESSION_BUSY)) {
-      // Rev 4: checkout removes the entry, so a concurrent operation is refused
-      // rather than queued. The session is alive — retry it, never reopen, and
-      // only when re-running is safe.
-      if (!opts.idempotent) {
-        throw err;
-      }
+      // Checkout removes the entry, so a concurrent operation is refused rather
+      // than queued. The session is alive — retry it, never reopen. Back off
+      // first: an immediate retry races the same in-flight network operation
+      // and loses again.
+      if (!retrySafe) throw err;
+      await delay(SESSION_BUSY_BACKOFF_MS);
       return await fn(id);
     }
 
-    if (isPoolError(err, TOO_MANY_SESSIONS)) {
-      // Every session for this account is in flight. Give up our own slot and
-      // try once more rather than surfacing an error the user cannot act on.
-      await closeSession(accountId, kind);
-      const fresh = await openSession(accountId, kind);
-      return await fn(fresh);
-    }
-
+    // Anything else is the operation's own failure, mid-protocol. It may have
+    // landed server-side, so it is surfaced and never retried — this is the
+    // line that keeps APPEND from duplicating into Sent.
     throw err;
   }
 }

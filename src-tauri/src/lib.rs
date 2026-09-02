@@ -55,15 +55,22 @@ fn open_devtools(app: tauri::AppHandle) {
     }
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
-/// Per-session budget for the best-effort LOGOUT at exit.
+/// Total budget for the best-effort LOGOUT sweep at exit.
 ///
-/// Short on purpose: quitting must not wait on an unresponsive server.
-const EXIT_LOGOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+/// Short on purpose, and a *total* rather than a per-session budget: this runs
+/// on the main thread while the app is trying to quit.
+const EXIT_LOGOUT_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// How often the reaper looks for idle sessions.
 const REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// Per-session budget for the reaper's LOGOUT.
+///
+/// Per-session here, unlike at exit: this runs on a background task with
+/// nothing waiting on it, so a slow server delays only its own cleanup.
+const REAPER_LOGOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Set explicit AUMID on Windows so toast notifications show "Velo"
     // instead of "Windows PowerShell"
@@ -190,7 +197,7 @@ pub fn run() {
                             .reap(crate::imap::pool::IDLE_TIMEOUT);
                         for session in expired {
                             let _ = tokio::time::timeout(
-                                EXIT_LOGOUT_TIMEOUT,
+                                REAPER_LOGOUT_TIMEOUT,
                                 commands::logout_arc(session),
                             )
                             .await;
@@ -354,14 +361,17 @@ pub fn run() {
                     return;
                 }
                 log::info!("Logging out {} pooled IMAP session(s)", sessions.len());
+                // One budget for the whole sweep, not one per session: this runs
+                // inside `block_on` on the main thread, so N unresponsive
+                // servers must not cost N timeouts before the app can quit.
+                // The LOGOUTs run concurrently for the same reason.
                 tauri::async_runtime::block_on(async {
-                    for session in sessions {
-                        let _ = tokio::time::timeout(
-                            EXIT_LOGOUT_TIMEOUT,
-                            commands::logout_arc(session),
-                        )
-                        .await;
-                    }
+                    let logouts = sessions.into_iter().map(commands::logout_arc);
+                    let _ = tokio::time::timeout(
+                        EXIT_LOGOUT_TOTAL_TIMEOUT,
+                        futures::future::join_all(logouts),
+                    )
+                    .await;
                 });
             }
         });

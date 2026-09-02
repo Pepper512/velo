@@ -367,9 +367,16 @@ the derive with a manual `Debug` rendering `password: "[redacted]"`.
 ### TypeScript — `src/services/imap/sessionManager.ts` (new)
 
 ```ts
-withSession(accountId, kind: 'sync' | 'interactive', opts: { idempotent: boolean },
+withSession(accountId, kind: 'sync' | 'interactive', opts: { retrySafe?: boolean },
             fn: (id: SessionId) => Promise<T>): Promise<T>
 ```
+
+**Rev 4 correction to Blocker 2's retry policy.** Rev 2 specified the retry gate as *idempotency of
+the command*. Review established that the gate was on the wrong error class: pool errors are raised
+before any I/O, so retrying after one is always safe. The gate that matters is the one on
+mid-operation errors, and that is "never retry", unconditionally. `retrySafe: false` remains for the
+one real residual: a caller that wraps more than one server-visible command in a single
+`withSession`, where a retry re-runs the earlier ones.
 
 - Opens lazily; caches `sessionId` per `(accountId, kind)`; builds configs **only** via
   `buildImapConfigWithFreshToken` (Decision 3).
@@ -435,7 +442,16 @@ helpers such as `fetchMessagesInBatches` (`:365`), all of which change signature
     a deliberately panicking operation.
 7c. **Concurrent use of one id is refused, not queued (rev 4):** a second operation on a checked-out
     session id returns `SessionBusy` and opens no connection. Paired with a frontend test that
-    `SessionBusy` retries once rather than reopening.
+    `SessionBusy` retries once — after a short backoff, and without reopening.
+7e. **Pool errors are pre-I/O, and retry policy must say so (rev 4, review):** `NoSuchSession` and
+    `SessionBusy` are raised by `acquire`, which is a `HashMap` operation — the command never
+    reached the server, so re-running it duplicates nothing, *including* APPEND and MOVE. Asserted
+    directly: an APPEND that gets `NoSuchSession` is retried and succeeds. **Done-when 6's guard is
+    the pass-through of mid-operation errors**, which may have landed server-side and are never
+    retried — not a flag on the pool errors. Gating pool errors on idempotency protects nothing and
+    fails the user's first action after an idle reap; that was the shape of the first
+    implementation and the review caught it. The residual case — a caller wrapping *several*
+    commands in one `withSession` — is what `retrySafe: false` is for.
 7d. **Key separation (finding 3, rev 4):** two configs differing **only** in port, in TLS mode, or in
     auth mechanism never share a pooled session — asserted per field, three cases. And bumping
     `credential_version` makes the prior session unreachable: the next lookup misses and reopens

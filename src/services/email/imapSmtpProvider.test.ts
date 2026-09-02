@@ -31,10 +31,12 @@ vi.mock("../imap/sessionManager", () => ({
     async (
       _accountId: string,
       _kind: string,
-      _opts: { idempotent: boolean },
+      _opts: { retrySafe?: boolean },
       fn: (id: string) => Promise<unknown>,
     ) => fn("test-session"),
   ),
+  invalidateAccountCredentials: vi.fn(async () => {}),
+  closeAccountSessions: vi.fn(async () => {}),
 }));
 vi.mock("../imap/tauriCommands", () => ({
   imapListFolders: vi.fn(),
