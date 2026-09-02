@@ -59,9 +59,9 @@ const CONFIG = {
   auth_method: "password" as const,
 };
 
-/** The pool's errors arrive as plain `invoke` rejections carrying the name. */
+/** The pool's errors arrive as plain `invoke` rejections carrying the sentinel. */
 function poolError(name: string): Error {
-  return new Error(`${name}`);
+  return new Error(`velo:pool:${name}`);
 }
 
 beforeEach(async () => {
@@ -187,6 +187,49 @@ describe("withSession — NoSuchSession", () => {
     await withSession("acc-1", "sync", {}, op);
 
     // Two opens total: the original and the one reopen. Not three.
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("a server cannot spell a sentinel and steer the retry", () => {
+  // Cross-vendor review finding 2 on PR #39, and the one that undercut the
+  // pre-I/O retry argument rather than nitpicking it. Pool errors and operation
+  // errors share one Result<T, String> channel, and the operation half carries
+  // server-supplied text. If membership in that channel were decided by
+  // substring, a mailbox named after a sentinel — or a server echoing one in a
+  // NO response — would let the remote end decide whether Velo retries. For
+  // APPEND, that is a duplicate in Sent.
+  it("does not treat an IMAP error mentioning a sentinel as a pool error", async () => {
+    const op = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockRejectedValue(
+        new Error('APPEND failed: NO [CANNOT] mailbox "velo:pool:NoSuchSession" is read-only'),
+      );
+
+    await expect(withSession("acc-1", "sync", {}, op)).rejects.toThrow("APPEND failed");
+
+    // Surfaced, not retried, and no reopen.
+    expect(op).toHaveBeenCalledTimes(1);
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not treat a trailing-sentinel error as a pool error either", async () => {
+    const op = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockRejectedValue(new Error("SELECT failed: velo:pool:SessionBusy"));
+
+    await expect(withSession("acc-1", "sync", {}, op)).rejects.toThrow("SELECT failed");
+    expect(op).toHaveBeenCalledTimes(1);
+  });
+
+  it("still recognises the sentinel when it is the whole message", async () => {
+    // The fix must not break detection — exact, but tolerant of whitespace.
+    const op = vi
+      .fn<(id: string) => Promise<string>>()
+      .mockRejectedValueOnce(new Error("  velo:pool:NoSuchSession  "))
+      .mockResolvedValueOnce("ok");
+
+    await expect(withSession("acc-1", "sync", {}, op)).resolves.toBe("ok");
     expect(mockOpen).toHaveBeenCalledTimes(2);
   });
 });

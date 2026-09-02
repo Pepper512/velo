@@ -171,7 +171,19 @@ export class ImapSmtpProvider implements EmailProvider {
   }
 
   /**
-   * Invalidate cached configs (e.g., after password change).
+   * Run one IMAP command against this account's pooled `interactive` session.
+   *
+   * One command per call, deliberately: that is the precondition that makes a
+   * pool error safe to retry (they are raised before any I/O). A caller that
+   * needs two server-visible commands in one session must pass
+   * `retrySafe: false` and think about what a re-run would repeat.
+   */
+  private withImapSession<T>(fn: (sessionId: string) => Promise<T>): Promise<T> {
+    return withSession(this.accountId, "interactive", {}, fn);
+  }
+
+  /**
+   * Invalidate cached configs and pooled sessions (e.g. after a password change).
    */
   clearConfigCache(): void {
     this._imapConfig = null;
@@ -264,8 +276,7 @@ export class ImapSmtpProvider implements EmailProvider {
       throw new Error(`Invalid IMAP message ID format: ${messageId}`);
     }
 
-    const config = await this.getImapConfig();
-    const imapMsg = await imapFetchMessageBody(config, folder, uid);
+    const imapMsg = await this.withImapSession((id) => imapFetchMessageBody(id, folder, uid));
 
     const { parsed } = imapMessageToParsedMessage(
       imapMsg,
@@ -287,8 +298,7 @@ export class ImapSmtpProvider implements EmailProvider {
       throw new Error(`Invalid IMAP message ID format: ${messageId}`);
     }
 
-    const config = await this.getImapConfig();
-    const data = await imapFetchAttachment(config, folder, uid, attachmentId);
+    const data = await this.withImapSession((id) => imapFetchAttachment(id, folder, uid, attachmentId));
     return { data, size: data.length };
   }
 
@@ -299,8 +309,7 @@ export class ImapSmtpProvider implements EmailProvider {
       throw new Error(`Invalid IMAP message ID format: ${messageId}`);
     }
 
-    const config = await this.getImapConfig();
-    return imapFetchRawMessage(config, folder, uid);
+    return this.withImapSession((id) => imapFetchRawMessage(id, folder, uid));
   }
 
   // ---- Actions ----
@@ -309,14 +318,13 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
     const archiveFolder =
       (await findSpecialFolder(this.accountId, "\\Archive")) ?? "Archive";
 
     for (const [folder, uids] of grouped) {
       if (folder === archiveFolder) continue;
-      const result = await imapMoveMessages(config, folder, uids, archiveFolder);
+      const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, archiveFolder));
       noticeIfNotExpunged(result, folder);
     }
   }
@@ -325,14 +333,13 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
     const trashFolder =
       (await findSpecialFolder(this.accountId, "\\Trash")) ?? "Trash";
 
     for (const [folder, uids] of grouped) {
       if (folder === trashFolder) continue;
-      const result = await imapMoveMessages(config, folder, uids, trashFolder);
+      const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, trashFolder));
       noticeIfNotExpunged(result, folder);
     }
   }
@@ -341,11 +348,10 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
-      const result = await imapDeleteMessages(config, folder, uids);
+      const result = await this.withImapSession((id) => imapDeleteMessages(id, folder, uids));
       noticeIfNotExpunged(result, folder);
     }
   }
@@ -355,11 +361,10 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     read: boolean,
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
-      await imapSetFlags(config, folder, uids, ["Seen"], read);
+      await this.withImapSession((id) => imapSetFlags(id, folder, uids, ["Seen"], read));
     }
   }
 
@@ -368,11 +373,10 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     starred: boolean,
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
-      await imapSetFlags(config, folder, uids, ["Flagged"], starred);
+      await this.withImapSession((id) => imapSetFlags(id, folder, uids, ["Flagged"], starred));
     }
   }
 
@@ -381,7 +385,6 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     isSpam: boolean,
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
     const junkFolder =
       (await findSpecialFolder(this.accountId, "\\Junk")) ?? "Junk";
@@ -389,7 +392,7 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       if (folder === destination) continue;
-      const result = await imapMoveMessages(config, folder, uids, destination);
+      const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, destination));
       noticeIfNotExpunged(result, folder);
     }
   }
@@ -399,12 +402,11 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     folderPath: string,
   ): Promise<void> {
-    const config = await this.getImapConfig();
     const grouped = this.groupByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       if (folder === folderPath) continue;
-      const result = await imapMoveMessages(config, folder, uids, folderPath);
+      const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, folderPath));
       noticeIfNotExpunged(result, folder);
     }
   }
@@ -456,10 +458,11 @@ export class ImapSmtpProvider implements EmailProvider {
 
     // Copy sent message to Sent folder on IMAP server
     try {
-      const imapConfig = await this.getImapConfig();
       const sentFolder =
         (await findSpecialFolder(this.accountId, "\\Sent")) ?? "Sent";
-      await imapAppendMessage(imapConfig, sentFolder, rawBase64Url, ["Seen"]);
+      await this.withImapSession((id) =>
+        imapAppendMessage(id, sentFolder, rawBase64Url, ["Seen"]),
+      );
     } catch (err) {
       // Non-fatal: message was sent successfully, just not copied to server Sent folder
       console.error(
@@ -559,11 +562,10 @@ export class ImapSmtpProvider implements EmailProvider {
     rawBase64Url: string,
     _threadId?: string,
   ): Promise<{ draftId: string }> {
-    const config = await this.getImapConfig();
     const draftsFolder =
       (await findSpecialFolder(this.accountId, "\\Drafts")) ?? "Drafts";
 
-    await imapAppendMessage(config, draftsFolder, rawBase64Url, ["Draft"]);
+    await this.withImapSession((id) => imapAppendMessage(id, draftsFolder, rawBase64Url, ["Draft"]));
 
     // IMAP APPEND does not return the new UID, so generate a pseudo draft ID
     const draftId = `imap-draft-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -591,8 +593,7 @@ export class ImapSmtpProvider implements EmailProvider {
     const { folder, uid } = this.parseImapMessageId(draftId);
 
     if (uid !== null && folder) {
-      const config = await this.getImapConfig();
-      const result = await imapDeleteMessages(config, folder, [uid]);
+      const result = await this.withImapSession((id) => imapDeleteMessages(id, folder, [uid]));
       noticeIfNotExpunged(result, folder);
     } else {
       // Generated draft IDs (imap-draft-...) can't be mapped back to a server UID

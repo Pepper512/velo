@@ -79,6 +79,7 @@ import {
   smtpSendEmail,
   smtpTestConnection,
 } from "../imap/tauriCommands";
+import { invalidateAccountCredentials } from "../imap/sessionManager";
 import { findSpecialFolder } from "../imap/messageHelper";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
@@ -217,7 +218,7 @@ describe("ImapSmtpProvider", () => {
 
       const result = await provider.fetchRawMessage("imap-acc-1-INBOX-42");
 
-      expect(imapFetchRawMessage).toHaveBeenCalledWith(mockImapConfig, "INBOX", 42);
+      expect(imapFetchRawMessage).toHaveBeenCalledWith("test-session", "INBOX", 42);
       expect(result).toBe("From: test@example.com\r\nSubject: Hello\r\n\r\nBody");
     });
 
@@ -242,7 +243,7 @@ describe("ImapSmtpProvider", () => {
 
       expect(findSpecialFolder).toHaveBeenCalledWith("acc-1", "\\Archive");
       expect(imapMoveMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100, 200],
         "Archive",
@@ -265,7 +266,7 @@ describe("ImapSmtpProvider", () => {
       await provider.archive("thread-1", ["imap-acc-1-INBOX-100"]);
 
       expect(imapMoveMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         "Archive",
@@ -282,7 +283,7 @@ describe("ImapSmtpProvider", () => {
 
       expect(findSpecialFolder).toHaveBeenCalledWith("acc-1", "\\Trash");
       expect(imapMoveMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         "Deleted Items",
@@ -301,12 +302,12 @@ describe("ImapSmtpProvider", () => {
 
       expect(imapDeleteMessages).toHaveBeenCalledTimes(2);
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
       );
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Sent",
         [200],
       );
@@ -320,7 +321,7 @@ describe("ImapSmtpProvider", () => {
       await provider.markRead("thread-1", ["imap-acc-1-INBOX-100"], true);
 
       expect(imapSetFlags).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         ["Seen"],
@@ -334,7 +335,7 @@ describe("ImapSmtpProvider", () => {
       await provider.markRead("thread-1", ["imap-acc-1-INBOX-100"], false);
 
       expect(imapSetFlags).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         ["Seen"],
@@ -350,7 +351,7 @@ describe("ImapSmtpProvider", () => {
       await provider.star("thread-1", ["imap-acc-1-INBOX-100"], true);
 
       expect(imapSetFlags).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         ["Flagged"],
@@ -367,7 +368,7 @@ describe("ImapSmtpProvider", () => {
       await provider.spam("thread-1", ["imap-acc-1-INBOX-100"], true);
 
       expect(imapMoveMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         "Junk E-Mail",
@@ -381,7 +382,7 @@ describe("ImapSmtpProvider", () => {
       await provider.spam("thread-1", ["imap-acc-1-Junk-100"], false);
 
       expect(imapMoveMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Junk",
         [100],
         "INBOX",
@@ -396,7 +397,7 @@ describe("ImapSmtpProvider", () => {
       await provider.moveToFolder("thread-1", ["imap-acc-1-INBOX-100"], "Work");
 
       expect(imapMoveMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100],
         "Work",
@@ -468,7 +469,7 @@ describe("ImapSmtpProvider", () => {
       );
       // Should copy to server Sent folder
       expect(imapAppendMessage).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Sent Items",
         rawBase64Url,
         ["Seen"],
@@ -542,7 +543,7 @@ describe("ImapSmtpProvider", () => {
       const result = await provider.createDraft("base64data");
 
       expect(imapAppendMessage).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX.Drafts",
         "base64data",
         ["Draft"],
@@ -557,7 +558,7 @@ describe("ImapSmtpProvider", () => {
       await provider.createDraft("base64data");
 
       expect(imapAppendMessage).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Drafts",
         "base64data",
         ["Draft"],
@@ -578,13 +579,13 @@ describe("ImapSmtpProvider", () => {
 
       // Should delete old draft
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Drafts",
         [500],
       );
       // Should create new draft
       expect(imapAppendMessage).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Drafts",
         "newBase64data",
         ["Draft"],
@@ -600,7 +601,7 @@ describe("ImapSmtpProvider", () => {
       await provider.deleteDraft("imap-acc-1-Drafts-500");
 
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Drafts",
         [500],
       );
@@ -678,24 +679,47 @@ describe("ImapSmtpProvider", () => {
   // ---------- Config caching ----------
 
   describe("config caching", () => {
-    it("caches IMAP config after first call", async () => {
-      vi.mocked(imapSetFlags).mockResolvedValue(undefined);
+    // These used to drive the cache through markRead. Under E2/P15 no message
+    // operation builds a config any more — they take a pooled session id — so
+    // `testConnection` is the only path left that does, and it is the right one:
+    // it runs during account setup, before a session can exist.
+    beforeEach(() => {
+      vi.mocked(imapTestConnection).mockResolvedValue("ok");
+      vi.mocked(smtpTestConnection).mockResolvedValue({ success: true, message: "ok" });
+    });
 
-      await provider.markRead("t1", ["imap-acc-1-INBOX-100"], true);
-      await provider.markRead("t1", ["imap-acc-1-INBOX-200"], true);
+    it("caches the IMAP config after the first build", async () => {
+      await provider.testConnection();
+      await provider.testConnection();
 
-      // buildImapConfig should be called once (cached after first call)
       expect(buildImapConfig).toHaveBeenCalledTimes(1);
     });
 
-    it("clearConfigCache forces re-fetch", async () => {
+    it("clearConfigCache forces a rebuild", async () => {
+      await provider.testConnection();
+      provider.clearConfigCache();
+      await provider.testConnection();
+
+      expect(buildImapConfig).toHaveBeenCalledTimes(2);
+    });
+
+    it("clearConfigCache also drops the account's pooled sessions", async () => {
+      // The credential changed; a session authenticated with the old one must
+      // not keep being served. Fire-and-forget, so this asserts the call rather
+      // than awaiting it.
+      provider.clearConfigCache();
+
+      expect(invalidateAccountCredentials).toHaveBeenCalledWith("acc-1");
+    });
+
+    it("no message operation builds a config any more", async () => {
+      // The point of the pool: credentials cross the boundary once, at session
+      // open, not on every archive.
       vi.mocked(imapSetFlags).mockResolvedValue(undefined);
 
       await provider.markRead("t1", ["imap-acc-1-INBOX-100"], true);
-      provider.clearConfigCache();
-      await provider.markRead("t1", ["imap-acc-1-INBOX-200"], true);
 
-      expect(buildImapConfig).toHaveBeenCalledTimes(2);
+      expect(buildImapConfig).not.toHaveBeenCalled();
     });
   });
 
@@ -713,12 +737,12 @@ describe("ImapSmtpProvider", () => {
 
       expect(imapDeleteMessages).toHaveBeenCalledTimes(2);
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX",
         [100, 200],
       );
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "Sent",
         [300],
       );
@@ -732,7 +756,7 @@ describe("ImapSmtpProvider", () => {
       ]);
 
       expect(imapDeleteMessages).toHaveBeenCalledWith(
-        mockImapConfig,
+        "test-session",
         "INBOX.Sub-Folder",
         [100],
       );

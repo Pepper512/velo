@@ -212,22 +212,58 @@ export async function imapListFolders(sessionId: string): Promise<ImapFolder[]> 
  * Returns parsed messages along with folder status metadata.
  */
 export async function imapFetchMessages(
+  sessionId: string,
+  folder: string,
+  uids: number[]
+): Promise<ImapFetchResult> {
+  return invoke<ImapFetchResult>('imap_fetch_messages', { sessionId, folder, uids });
+}
+
+/**
+ * Sentinel `imap_fetch_messages` returns when `async-imap` yielded nothing for a
+ * folder the server did have data in.
+ *
+ * Decision 4(a): the raw-TCP fallback needs a credential and the pool holds
+ * none, so the frontend re-issues the fetch through `imapRawFetchMessages`
+ * rather than the command keeping a password for the rare case.
+ */
+export const NEED_RAW_FALLBACK = 'velo:fetch:NeedRawFallback';
+
+/**
+ * Exact match, deliberately. This sentinel shares its channel with
+ * server-supplied IMAP error text, so a substring test would let a server with
+ * a mailbox named after it push Velo down the credential-carrying fallback
+ * path. Cross-vendor review finding 1 on PR #39.
+ */
+export function isNeedRawFallback(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err);
+  return message.trim() === NEED_RAW_FALLBACK;
+}
+
+/**
+ * Decision 4(a)'s escape hatch: a raw-TCP fetch carrying its own credential.
+ *
+ * One of only two commands that receives a password, and named explicitly in
+ * the Done-when 5 exemption so the "no credential crosses this boundary" test
+ * stays honest instead of quietly widening.
+ */
+export async function imapRawFetchMessages(
   config: ImapConfig,
   folder: string,
   uids: number[]
 ): Promise<ImapFetchResult> {
-  return invoke<ImapFetchResult>('imap_fetch_messages', { config, folder, uids });
+  return invoke<ImapFetchResult>('imap_raw_fetch_messages', { config, folder, uids });
 }
 
 /**
  * Get UIDs of messages newer than `sinceUid` in the given folder.
  */
 export async function imapFetchNewUids(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   sinceUid: number
 ): Promise<number[]> {
-  return invoke<number[]>('imap_fetch_new_uids', { config, folder, sinceUid });
+  return invoke<number[]>('imap_fetch_new_uids', { sessionId, folder, sinceUid });
 }
 
 /**
@@ -235,21 +271,21 @@ export async function imapFetchNewUids(
  * Returns real UIDs — avoids the sparse UID gap problem with generateUidRange.
  */
 export async function imapSearchAllUids(
-  config: ImapConfig,
+  sessionId: string,
   folder: string
 ): Promise<number[]> {
-  return invoke<number[]>('imap_search_all_uids', { config, folder });
+  return invoke<number[]>('imap_search_all_uids', { sessionId, folder });
 }
 
 /**
  * Fetch a single message with full body by UID.
  */
 export async function imapFetchMessageBody(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   uid: number
 ): Promise<ImapMessage> {
-  return invoke<ImapMessage>('imap_fetch_message_body', { config, folder, uid });
+  return invoke<ImapMessage>('imap_fetch_message_body', { sessionId, folder, uid });
 }
 
 /**
@@ -258,13 +294,13 @@ export async function imapFetchMessageBody(
  * @param add - true to add flags, false to remove them.
  */
 export async function imapSetFlags(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   uids: number[],
   flags: string[],
   add: boolean
 ): Promise<void> {
-  return invoke<void>('imap_set_flags', { config, folder, uids, flags, add });
+  return invoke<void>('imap_set_flags', { sessionId, folder, uids, flags, add });
 }
 
 /**
@@ -272,13 +308,13 @@ export async function imapSetFlags(
  * Uses MOVE extension if available, falls back to COPY+DELETE.
  */
 export async function imapMoveMessages(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   uids: number[],
   destination: string
 ): Promise<RemovalResult> {
   return parseRemovalResult(
-    await invoke('imap_move_messages', { config, folder, uids, destination })
+    await invoke('imap_move_messages', { sessionId, folder, uids, destination })
   );
 }
 
@@ -286,12 +322,12 @@ export async function imapMoveMessages(
  * Permanently delete messages (flag as Deleted + EXPUNGE).
  */
 export async function imapDeleteMessages(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   uids: number[]
 ): Promise<RemovalResult> {
   return parseRemovalResult(
-    await invoke('imap_delete_messages', { config, folder, uids })
+    await invoke('imap_delete_messages', { sessionId, folder, uids })
   );
 }
 
@@ -304,22 +340,22 @@ export async function imapDeleteMessages(
  *   IMAP session (audit P1).
  */
 export async function imapAppendMessage(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   rawMessage: string,
   flags?: string[]
 ): Promise<void> {
-  return invoke<void>('imap_append_message', { config, folder, flags: flags ?? null, rawMessage });
+  return invoke<void>('imap_append_message', { sessionId, folder, flags: flags ?? null, rawMessage });
 }
 
 /**
  * Get folder status (UIDVALIDITY, UIDNEXT, message count, unseen count).
  */
 export async function imapGetFolderStatus(
-  config: ImapConfig,
+  sessionId: string,
   folder: string
 ): Promise<ImapFolderStatus> {
-  return invoke<ImapFolderStatus>('imap_get_folder_status', { config, folder });
+  return invoke<ImapFolderStatus>('imap_get_folder_status', { sessionId, folder });
 }
 
 /**
@@ -327,12 +363,12 @@ export async function imapGetFolderStatus(
  * Returns the attachment data as a base64-encoded string.
  */
 export async function imapFetchAttachment(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   uid: number,
   partId: string
 ): Promise<string> {
-  return invoke<string>('imap_fetch_attachment', { config, folder, uid, partId });
+  return invoke<string>('imap_fetch_attachment', { sessionId, folder, uid, partId });
 }
 
 /**
@@ -340,11 +376,11 @@ export async function imapFetchAttachment(
  * Returns the full message as a UTF-8 string.
  */
 export async function imapFetchRawMessage(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   uid: number
 ): Promise<string> {
-  return invoke<string>('imap_fetch_raw_message', { config, folder, uid });
+  return invoke<string>('imap_fetch_raw_message', { sessionId, folder, uid });
 }
 
 /**
@@ -352,10 +388,10 @@ export async function imapFetchRawMessage(
  * Replaces N separate imapGetFolderStatus + imapFetchNewUids calls with one round-trip.
  */
 export async function imapDeltaCheck(
-  config: ImapConfig,
+  sessionId: string,
   folders: DeltaCheckRequest[]
 ): Promise<DeltaCheckResult[]> {
-  return invoke<DeltaCheckResult[]>('imap_delta_check', { config, folders });
+  return invoke<DeltaCheckResult[]>('imap_delta_check', { sessionId, folders });
 }
 
 /**
@@ -364,12 +400,12 @@ export async function imapDeltaCheck(
  * to only fetch messages from that date onward, avoiding timeouts on large folders.
  */
 export async function imapSyncFolder(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   batchSize: number,
   sinceDate?: string | null,
 ): Promise<ImapFolderSyncResult> {
-  return invoke<ImapFolderSyncResult>('imap_sync_folder', { config, folder, batchSize, sinceDate: sinceDate ?? null });
+  return invoke<ImapFolderSyncResult>('imap_sync_folder', { sessionId, folder, batchSize, sinceDate: sinceDate ?? null });
 }
 
 /**
@@ -378,11 +414,11 @@ export async function imapSyncFolder(
  * for callers that fetch messages in smaller IPC-friendly chunks.
  */
 export async function imapSearchFolder(
-  config: ImapConfig,
+  sessionId: string,
   folder: string,
   sinceDate?: string | null,
 ): Promise<ImapFolderSearchResult> {
-  return invoke<ImapFolderSearchResult>('imap_search_folder', { config, folder, sinceDate: sinceDate ?? null });
+  return invoke<ImapFolderSearchResult>('imap_search_folder', { sessionId, folder, sinceDate: sinceDate ?? null });
 }
 
 /**

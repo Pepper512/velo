@@ -53,10 +53,22 @@ export type SessionKind = "sync" | "interactive";
 
 export type SessionId = string;
 
-/** Errors the Rust pool returns by name. */
-const NO_SUCH_SESSION = "NoSuchSession";
-const SESSION_BUSY = "SessionBusy";
-const TOO_MANY_SESSIONS = "TooManySessions";
+/**
+ * Pool sentinels, namespaced by Rust and matched here **exactly**.
+ *
+ * Pool errors and operation errors share one `Result<T, String>` channel, and
+ * the operation half carries server-supplied text — mailbox names, `NO`
+ * responses. Retry safety depends on telling the two apart, so a loose
+ * `includes()` would let a server spell a sentinel and decide whether Velo
+ * retries. For APPEND that is a duplicate in Sent. An IMAP failure is always
+ * `"<operation> failed: <detail>"` and can never equal one of these.
+ *
+ * Cross-vendor review finding 2 on PR #39, which is the finding that undercut
+ * the pre-I/O retry argument rather than merely nitpicking it.
+ */
+const NO_SUCH_SESSION = "velo:pool:NoSuchSession";
+const SESSION_BUSY = "velo:pool:SessionBusy";
+const TOO_MANY_SESSIONS = "velo:pool:TooManySessions";
 
 /**
  * Pause before retrying a busy session.
@@ -72,7 +84,8 @@ function delay(ms: number): Promise<void> {
 
 function isPoolError(err: unknown, name: string): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes(name);
+  // Exact, not `includes`: see the comment on the sentinels above.
+  return message.trim() === name;
 }
 
 /** `accountId::kind` — one cache slot per session the pool may hold for us. */

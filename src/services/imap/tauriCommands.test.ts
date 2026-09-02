@@ -53,6 +53,7 @@ describe('IMAP Tauri commands', () => {
 
     const result = await imapTestConnection(testImapConfig);
 
+    // Still a config, deliberately: account setup runs before a session exists.
     expect(mockInvoke).toHaveBeenCalledWith('imap_test_connection', {
       config: testImapConfig,
     });
@@ -95,10 +96,10 @@ describe('IMAP Tauri commands', () => {
     };
     mockInvoke.mockResolvedValue(fetchResult);
 
-    const result = await imapFetchMessages(testImapConfig, 'INBOX', [1, 2, 3]);
+    const result = await imapFetchMessages('session-abc', 'INBOX', [1, 2, 3]);
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_fetch_messages', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       uids: [1, 2, 3],
     });
@@ -108,10 +109,10 @@ describe('IMAP Tauri commands', () => {
   it('imapFetchNewUids invokes with correct command and params', async () => {
     mockInvoke.mockResolvedValue([101, 102, 103]);
 
-    const result = await imapFetchNewUids(testImapConfig, 'INBOX', 100);
+    const result = await imapFetchNewUids('session-abc', 'INBOX', 100);
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_fetch_new_uids', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       sinceUid: 100,
     });
@@ -147,10 +148,10 @@ describe('IMAP Tauri commands', () => {
     };
     mockInvoke.mockResolvedValue(message);
 
-    const result = await imapFetchMessageBody(testImapConfig, 'INBOX', 42);
+    const result = await imapFetchMessageBody('session-abc', 'INBOX', 42);
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_fetch_message_body', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       uid: 42,
     });
@@ -160,10 +161,10 @@ describe('IMAP Tauri commands', () => {
   it('imapSetFlags invokes with correct command and params', async () => {
     mockInvoke.mockResolvedValue(undefined);
 
-    await imapSetFlags(testImapConfig, 'INBOX', [1, 2], ['Seen'], true);
+    await imapSetFlags('session-abc', 'INBOX', [1, 2], ['Seen'], true);
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_set_flags', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       uids: [1, 2],
       flags: ['Seen'],
@@ -174,10 +175,10 @@ describe('IMAP Tauri commands', () => {
   it('imapMoveMessages invokes with correct command and params', async () => {
     mockInvoke.mockResolvedValue(undefined);
 
-    await imapMoveMessages(testImapConfig, 'INBOX', [1, 2], 'Trash');
+    await imapMoveMessages('session-abc', 'INBOX', [1, 2], 'Trash');
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_move_messages', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       uids: [1, 2],
       destination: 'Trash',
@@ -187,10 +188,10 @@ describe('IMAP Tauri commands', () => {
   it('imapDeleteMessages invokes with correct command and params', async () => {
     mockInvoke.mockResolvedValue(undefined);
 
-    await imapDeleteMessages(testImapConfig, 'INBOX', [1, 2]);
+    await imapDeleteMessages('session-abc', 'INBOX', [1, 2]);
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_delete_messages', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       uids: [1, 2],
     });
@@ -206,10 +207,10 @@ describe('IMAP Tauri commands', () => {
     };
     mockInvoke.mockResolvedValue(status);
 
-    const result = await imapGetFolderStatus(testImapConfig, 'INBOX');
+    const result = await imapGetFolderStatus('session-abc', 'INBOX');
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_get_folder_status', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
     });
     expect(result).toEqual(status);
@@ -218,10 +219,10 @@ describe('IMAP Tauri commands', () => {
   it('imapFetchAttachment invokes with correct command and params', async () => {
     mockInvoke.mockResolvedValue('base64encodeddata==');
 
-    const result = await imapFetchAttachment(testImapConfig, 'INBOX', 42, '1.2');
+    const result = await imapFetchAttachment('session-abc', 'INBOX', 42, '1.2');
 
     expect(mockInvoke).toHaveBeenCalledWith('imap_fetch_attachment', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
       folder: 'INBOX',
       uid: 42,
       partId: '1.2',
@@ -284,7 +285,7 @@ describe("RemovalResult boundary validation", () => {
   it("passes a well-formed result through", async () => {
     vi.mocked(invoke).mockResolvedValue({ expunged: true });
     await expect(
-      imapDeleteMessages(testImapConfig, "INBOX", [1]),
+      imapDeleteMessages('session-abc', "INBOX", [1]),
     ).resolves.toEqual({ expunged: true });
   });
 
@@ -297,7 +298,7 @@ describe("RemovalResult boundary validation", () => {
   ])("degrades to not-expunged for %s", async (_label, value) => {
     vi.mocked(invoke).mockResolvedValue(value);
     await expect(
-      imapDeleteMessages(testImapConfig, "INBOX", [1]),
+      imapDeleteMessages('session-abc', "INBOX", [1]),
     ).resolves.toEqual({ expunged: false });
   });
 
@@ -306,7 +307,7 @@ describe("RemovalResult boundary validation", () => {
     // error the caller might classify and retry.
     vi.mocked(invoke).mockResolvedValue(null);
     await expect(
-      imapMoveMessages(testImapConfig, "INBOX", [1], "Archive"),
+      imapMoveMessages('session-abc', "INBOX", [1], "Archive"),
     ).resolves.toBeDefined();
   });
 });
