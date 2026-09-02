@@ -133,34 +133,48 @@ describe("messageHelper", () => {
     });
   });
 
-  describe("keepLiveMessageIds (F-5)", () => {
+  describe("dropTombstonedMessageIds (F-5)", () => {
     it("does nothing for an empty list", async () => {
       const { getDb } = await import("../db/connection");
       const mockDb = { select: vi.fn() };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
 
-      const { keepLiveMessageIds } = await import("./messageHelper");
-      await expect(keepLiveMessageIds("acc1", [])).resolves.toEqual([]);
+      const { dropTombstonedMessageIds } = await import("./messageHelper");
+      await expect(dropTombstonedMessageIds("acc1", [])).resolves.toEqual([]);
       expect(mockDb.select).not.toHaveBeenCalled();
     });
 
-    it("keeps only ids the database still holds un-tombstoned, in the caller's order", async () => {
+    it("drops only the ids whose rows are tombstoned; unknown ids pass through in order", async () => {
       const { getDb } = await import("../db/connection");
       const mockDb = {
-        select: vi.fn().mockResolvedValue([{ id: "msg3" }, { id: "msg1" }]),
+        select: vi.fn().mockResolvedValue([{ id: "msg2" }]),
       };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
-      const { keepLiveMessageIds } = await import("./messageHelper");
-      const kept = await keepLiveMessageIds("acc1", ["msg1", "msg2", "msg3"]);
+      const { dropTombstonedMessageIds } = await import("./messageHelper");
+      const kept = await dropTombstonedMessageIds("acc1", ["msg1", "msg2", "msg3"]);
 
+      // msg1 and msg3 are not in the database at all (deleted locally before
+      // the provider call, or re-keyed away) — they must still be sent.
       expect(kept).toEqual(["msg1", "msg3"]);
       expect(mockDb.select).toHaveBeenCalledWith(
-        expect.stringMatching(/WHERE account_id = \$1 AND id IN \(\$2, \$3, \$4\) AND moved_to IS NULL/),
+        expect.stringMatching(/WHERE account_id = \$1 AND id IN \(\$2, \$3, \$4\) AND moved_to IS NOT NULL/),
         ["acc1", "msg1", "msg2", "msg3"],
       );
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("Skipping 1"), ["msg2"]);
+      warn.mockRestore();
+    });
+
+    it("returns the input untouched when nothing is tombstoned", async () => {
+      const { getDb } = await import("../db/connection");
+      const mockDb = { select: vi.fn().mockResolvedValue([]) };
+      vi.mocked(getDb).mockResolvedValue(mockDb as never);
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const { dropTombstonedMessageIds } = await import("./messageHelper");
+      await expect(dropTombstonedMessageIds("acc1", ["a", "b"])).resolves.toEqual(["a", "b"]);
+      expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
     });
 
@@ -168,11 +182,10 @@ describe("messageHelper", () => {
       const { getDb } = await import("../db/connection");
       const mockDb = { select: vi.fn().mockResolvedValue([]) };
       vi.mocked(getDb).mockResolvedValue(mockDb as never);
-      vi.spyOn(console, "warn").mockImplementation(() => {});
 
-      const { keepLiveMessageIds } = await import("./messageHelper");
+      const { dropTombstonedMessageIds } = await import("./messageHelper");
       const ids = Array.from({ length: 1200 }, (_, i) => `msg-${i}`);
-      await keepLiveMessageIds("acc1", ids);
+      await dropTombstonedMessageIds("acc1", ids);
 
       expect(mockDb.select).toHaveBeenCalledTimes(3);
       expect(mockDb.select.mock.calls[2]![1]).toHaveLength(201); // account + 200 ids

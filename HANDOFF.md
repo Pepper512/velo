@@ -4,16 +4,14 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `2792251`** (#43, F-5 — the last commit on `main` that changed `src/` or `src-tauri/`
-  at writing; **#44 (F-4 part 1) is the next one and may have landed since** — run
-  `git log --oneline 2792251..origin/main`; anything that is not `docs:` means the pin is stale
-  and every line number in the briefs must be re-grepped before citing).
-- **Open PRs: see `gh pr list --repo Pepper512/velo`.** At writing: **#44** (F-4 part 1) open with
-  both cross-vendor reviews posted and their findings adopted; merge state depends on CI on
-  `1f8fcf0` or later. Nothing else open.
-- **Branches:** `main` · `f4-vanished-uid-part1` (= #44) · plus the two dead worktree branches
-  below. `worktree-f5-move-hygiene` was deleted with #43's merge on the remote; the local copy is
-  pinned by the working worktree.
+- **Code pin: `5a5fe59`** (#44, F-4 part 1 — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 5a5fe59..origin/main` —
+  anything there that is not `docs:` means the pin is stale and every line number in the briefs
+  must be re-grepped before citing.
+- **Open PRs: none at writing** (the wrap-up docs PR this file ships in is the exception). Never
+  trust this line — run `gh pr list --repo Pepper512/velo`. #43 and #44 both landed 2026-09-02.
+- **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
+  were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 - **Seats, as of 2026-09-02 08:00 UTC.** One build seat (this session ran as **Fable 5.1** under
@@ -34,22 +32,29 @@
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `2792251`:** frontend **156** files / **1,923** tests · Rust **94** + 1 ignored
-  (the live Dovecot test) · 25 migrations · npm audit 0 · 0 service import cycles. **On #44:** 157 /
-  1,948 · Rust 95 + 1 · 26 migrations / 32 tables. No dependency added or removed this session.
+- **State on `main` @ `5a5fe59`:** frontend **157** files / **1,954** tests · Rust **95** + 1 ignored
+  (the live Dovecot test) · 26 migrations / 32 tables · npm audit 0 · 0 service import cycles. No
+  dependency added or removed this session.
 
 ---
 
 ## 1. Exact next step
 
-**Land #44 if it is green, then build F-4 part 2 from `docs/briefs/2026-09-02-f4-part2-plan.md`
-— after an opposite-line plan read.** Part 2 is the deleting half of F-4 (the gate, the
-attestation, end-of-pass deletion under the budget, the reconcile op, the ConfirmDialog stop).
-The plan was written at the end of the delegation window without a plan read; get one before
-code. Everything it depends on is in #44.
+**Build F-4 part 2 from `docs/briefs/2026-09-02-f4-part2-plan.md` — after an opposite-line plan
+read.** Part 2 is the deleting half of F-4 (the gate, the attestation, end-of-pass deletion under
+the budget, the reconcile op, the ConfirmDialog stop). The plan was written at the end of the
+delegation window without a plan read; get one before code. Everything it depends on landed in #44.
 
-**Before that, read the Opus 5 full review** commissioned at the window's close (LOG.md records
-where it landed) and act on anything it marks HIGH.
+**Before that, read the Opus 5 full review** (`docs/reviews/2026-09-02-opus5-window-review.md`;
+verdicts and dispositions in LOG.md). Its HIGH 1 — permanent delete had become a server-side
+no-op after F-5 — is **fixed in the wrap-up PR**. Its HIGH 2 — the re-key transaction depends on
+per-connection SQLite state over a pooled, unpinned `tauri-plugin-sql` connection — is **open and
+Jim's to scope**: it is pre-existing for every `withTransaction` in Velo, but F-5 made it
+load-bearing for a destructive identity rewrite. Own brief; candidate fix is a Rust command owning
+one connection. The five MEDIUMs (per-message reap cost, UIDVALIDITY guard off for never-synced
+folders, regex constraint detection, per-row inserts in `recordMissing`, and the **>50% stop
+eroding across passes** — part 2 must evaluate it against the row count at first confirmation)
+are recorded in LOG.md and belong to the next F-5/F-4 follow-up.
 
 **Carried, no PR:** E2 part 3 carry list (unchanged from the previous handoff — the `Arc`/
 `logout_arc` item, evictions without LOGOUT, `bump_credential_version` by ident, the cross-window
@@ -72,12 +77,12 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected on `main` after #44: **157 test files, 1,948 tests; Rust 95 passed, 1 ignored.**
+Expected on `main`: **157 test files, 1,954 tests; Rust 95 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline 2792251..origin/main` — a non-`docs:` commit there means the pin is stale.
-- `gh pr list --repo Pepper512/velo` — #44 open at writing; this line ages fastest.
+- `git log --oneline 5a5fe59..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
 - **`ListAgents`** before assuming a peer seat exists.
@@ -87,15 +92,15 @@ Expected on `main` after #44: **157 test files, 1,948 tests; Rust 95 passed, 1 i
 ## 2. Immediate / time-sensitive
 
 **No credentials to rotate.** The Dovecot harness's throwaway credentials were used against
-`127.0.0.1` only; the containers were left running (`docker compose -f docs/testing/dovecot/compose-arm64.yml down -v`
-to remove).
+`127.0.0.1` only; the containers were torn down (`down -v`) at the end of the window.
 
 **Jim only:**
 1. **Make `rust MSRV` a required check** — unchanged since 2026-09-01:
    `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`.
 2. **Remove the two dead worktrees** (unchanged; `f1-decisions` is locked, unlock first) — and now
-   also this session's `.claude/worktrees/f5-move-hygiene` once #44 has landed and its branch is
-   deleted.
+   also this session's `.claude/worktrees/f5-move-hygiene` (everything in it landed via #43, #44
+   and the wrap-up docs PR; its local branches `worktree-f5-move-hygiene`, `f4-vanished-uid-part1`
+   and `docs/window-wrapup` can go with it).
 3. ~~Mark the F-4 approval in the vault spec~~ — **done this session.** The vault
    (`~/Vaults/Pepper Knowledge/10 Projects/Velo/…`) **is reachable from this machine**; the earlier
    "not reachable from the checkout" note was wrong. The spec's approval line, Task 13 and the
@@ -126,7 +131,7 @@ commissioned at the close as Jim asked.
 | PR | Merged | What |
 |---|---|---|
 | #43 `2792251` | build seat | **F-5, option A rev 2.** Rust drains `COPYUID` from `async-imap`'s unsolicited channel inside the pooled checkout (no parser owned; backlog discarded before `UID MOVE` — a defect the brief did not know about); TS re-keys the row + attachments + soft refs in one transaction (deferred FKs, per-pair savepoints), tombstones the rest (`messages.moved_to`, migration 25), hides tombstones from thread view/search/actions, reaps on destination sync (folder-scoped), refuses a mapping from the wrong UIDVALIDITY generation; every provider action filters to live rows first. Live Dovecot: `:11143` mapping on the same turn, `:11144` COPY path with none. Gemini CHANGES REQUESTED (1H 2M 2L 1N) + Grok CHANGES REQUESTED (15) → 9 adopted, rest answered/recorded/declined with reasons on the PR |
-| #44 (open) | — | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/`exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + suspect state machine) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N), all adopted; Grok pending at writing. Nothing in it deletes |
+| #44 `5a5fe59` | build seat | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/nullable `exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + generation-scoped suspect state machine + atomic `applySearchAll`) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N) and Grok CHANGES REQUESTED (11): everything adopted or already fixed, nothing declined. Nothing in it deletes; the part 2 plan is in `docs/briefs/` |
 
 **Findings worth remembering.** *Both cross-vendor legs found defects the author missed, and
 different ones* (#43: Gemini the reap scoping and the zombie race, Grok the whole-batch rollback
@@ -176,14 +181,15 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `2792251`** (#43 F-5;
-#44 F-4 part 1 is the next code commit — `git log --oneline 2792251..origin/main` says whether it
-landed) · CI green on `main` · 156 files / 1,923 tests / Rust 94 + 1 ignored on `main`; 157 /
-1,948 / 95 + 1 on #44 · npm audit 0.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `5a5fe59`** (#44 F-4
+part 1; the only SHA pinned — `git log --oneline 5a5fe59..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 157 files / 1,954 tests / Rust 95 + 1 ignored · 26 migrations ·
+npm audit 0.
 
-**Next action: land #44 if green, read the Opus 5 review (LOG.md says where), then build F-4
-part 2 from `docs/briefs/2026-09-02-f4-part2-plan.md` — after an opposite-line plan read.** Part 2
-is the half that deletes local rows. Everything it needs is in #44.
+**Next action: read the Opus 5 review (`docs/reviews/`, dispositions in LOG.md) — its HIGH 1 is
+fixed, its HIGH 2 (pooled-connection transaction state under the re-key) is Jim's to scope — then
+build F-4 part 2 from `docs/briefs/2026-09-02-f4-part2-plan.md` after an opposite-line plan
+read.** Part 2 is the half that deletes local rows. Everything it needs landed in #44.
 
 **Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
 (Grok is a named deviation from the roster, valid for the 2026-09-02 window only — ask Jim before

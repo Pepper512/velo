@@ -22,7 +22,7 @@ import {
 } from "../imap/tauriCommands";
 import { withSession, invalidateAccountCredentials } from "../imap/sessionManager";
 import { getAccount, type DbAccount } from "../db/accounts";
-import { findSpecialFolder, keepLiveMessageIds } from "../imap/messageHelper";
+import { findSpecialFolder, dropTombstonedMessageIds } from "../imap/messageHelper";
 import { settleMovedRows } from "../imap/moveHygiene";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { upsertMessage } from "../db/messages";
@@ -317,8 +317,9 @@ export class ImapSmtpProvider implements EmailProvider {
   // ---- Actions ----
   //
   // Every action targets the folder/UID pair embedded in each message id, so
-  // each one first drops ids that no longer name a live local row (moved and
-  // re-keyed, or tombstoned) — see `keepLiveMessageIds`. The four that move
+  // each one first drops ids whose local row is a tombstone — see
+  // `dropTombstonedMessageIds` (ids with no local row pass through: permanent
+  // delete removes its rows locally before calling here). The four that move
   // mail then settle the local rows to wherever the server put them (F-5).
 
   async archive(
@@ -654,9 +655,9 @@ export class ImapSmtpProvider implements EmailProvider {
 
   // ---- Helpers ----
 
-  /** `groupByFolder` over only the ids that still name a live local row. */
+  /** `groupByFolder` over the ids that are not tombstoned locally. */
   private async groupLiveByFolder(messageIds: string[]): Promise<Map<string, number[]>> {
-    return this.groupByFolder(await keepLiveMessageIds(this.accountId, messageIds));
+    return this.groupByFolder(await dropTombstonedMessageIds(this.accountId, messageIds));
   }
 
   /**
