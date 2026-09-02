@@ -25,6 +25,19 @@ export interface Notice {
 
 export const NOTICE_TTL_MS = 6000;
 
+/**
+ * F-4 REQ-3.1's hard stop: more than half of a folder's local messages have
+ * been confirmed absent on the server twice over. Sync deletes nothing there
+ * until a person decides; `ReconcileStopDialog` renders this.
+ */
+export interface ReconcileStop {
+  accountId: string;
+  folder: string;
+  uidvalidity: number;
+  confirmed: number;
+  localRows: number;
+}
+
 let noticeCounter = 0;
 function nextNoticeId(): string {
   noticeCounter += 1;
@@ -81,6 +94,10 @@ interface UIState {
   /** Queue a notice; returns its id. Dismisses itself after `NOTICE_TTL_MS`. */
   addNotice: (input: Omit<Notice, "id">) => string;
   dismissNotice: (id: string) => void;
+  /** One entry per `account:folder`; a repeat for the same folder replaces its entry. */
+  reconcileStops: ReconcileStop[];
+  pushReconcileStop: (stop: ReconcileStop) => void;
+  clearReconcileStop: (accountId: string, folder: string) => void;
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -191,4 +208,20 @@ export const useUIStore = create<UIState>((set) => ({
   },
   dismissNotice: (id) =>
     set((state) => ({ notices: state.notices.filter((n) => n.id !== id) })),
+  reconcileStops: [],
+  pushReconcileStop: (stop) =>
+    set((state) => ({
+      reconcileStops: [
+        ...state.reconcileStops.filter(
+          (s) => !(s.accountId === stop.accountId && s.folder === stop.folder),
+        ),
+        stop,
+      ],
+    })),
+  clearReconcileStop: (accountId, folder) =>
+    set((state) => ({
+      reconcileStops: state.reconcileStops.filter(
+        (s) => !(s.accountId === accountId && s.folder === folder),
+      ),
+    })),
 }));

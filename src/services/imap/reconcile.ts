@@ -282,6 +282,25 @@ export async function applySearchAll(obs: SearchAllObservation): Promise<void> {
   });
 }
 
+/**
+ * Every `confirmed_absent` row in a folder's current generation, regardless of
+ * pass — the set the REQ-3.1 stop asked the user about. Only the explicit
+ * user confirmation reads this; unattended passes use `confirmedOnPass`.
+ */
+export async function confirmedInFolder(
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+): Promise<SuspectRow[]> {
+  const db = await getDb();
+  return db.select<SuspectRow[]>(
+    `SELECT * FROM reconcile_suspects
+     WHERE account_id = $1 AND folder = $2 AND uidvalidity = $3 AND status = 'confirmed_absent'
+     ORDER BY first_seen_at ASC, uid ASC`,
+    [accountId, folder, uidvalidity],
+  );
+}
+
 /** Remove suspect records once their rows have been deleted (or on resync). */
 export async function forgetSuspects(
   accountId: string,

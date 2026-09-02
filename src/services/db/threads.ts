@@ -227,6 +227,23 @@ export async function getUnreadInboxCount(): Promise<number> {
   return rows[0]?.count ?? 0;
 }
 
+/**
+ * How many message rows a thread still holds (F-4 REQ-1.3: a thread and its
+ * labels go only when its last message does). Counts tombstones too — a
+ * tombstone is a message the destination folder is about to sync in.
+ */
+export async function getThreadMessageCount(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "select">,
+  accountId: string,
+  threadId: string,
+): Promise<number> {
+  const rows = await db.select<{ n: number }[]>(
+    "SELECT COUNT(*) AS n FROM messages WHERE account_id = $1 AND thread_id = $2",
+    [accountId, threadId],
+  );
+  return rows[0]?.n ?? 0;
+}
+
 export async function deleteThread(
   accountId: string,
   threadId: string,

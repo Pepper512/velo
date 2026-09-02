@@ -614,3 +614,31 @@
     should default to leaving alone.
   - **Praised:** cutting F-4 to a non-deleting substrate; the harness and live-Dovecot evidence;
     the LOG entries; finding the timeout bug before the reviewers did.
+- **2026-09-02 ~13:00 UTC — F-4 part 2 started on Jim's word (*"start F-4 part 2"*), outside any
+  delegation window.** Normal authority: Tier 2, plan approved by Jim's go on the written plan
+  (`docs/briefs/2026-09-02-f4-part2-plan.md`), the opposite-line plan read run **in parallel** with
+  the non-deleting steps rather than blocking, and its findings adopted before the deleting step
+  was written. The merge of this PR is left to Jim (Opus 5's recommendation on Tier-2 data paths,
+  not yet decided as a rule).
+  - **Built (first PR):** the REQ-2.1 gate (counting the delta check's own new UIDs — the plan
+    read's HIGH 1), the full list via `imapSearchAllUids` → `reconcileFolderList` → `applySearchAll`,
+    the REQ-2.2 counter (incremented on every `expunged: false` result in the provider, recomputed
+    directionally after the store), the REQ-1.2b attestation (`attestPass`: every syncable folder
+    checked, every opened gate listed, zero folder errors), end-of-pass deletion under the budget
+    with the pending-ops guard and thread/label cleanup (`finishReconcilePass`), and the REQ-3.1
+    stop as `ReconcileStopDialog` over `uiStore.reconcileStops` (keyed per folder). Nothing deletes
+    unless the pass attested.
+  - **Decisions:** tombstones are excluded from the diff and **never deleted by the pass** (plan
+    read HIGH 3 — the F-5 reap owns them); the user's "Delete them" removes *every* confirmed row in
+    the folder, not one cap's worth (the cap rate-limits unattended passes; a person just approved
+    a mass removal — and it closes the re-prompt loop the read raised as M6); the stop freezes
+    deletions only, new mail keeps syncing; pass ids cannot overlap because `syncManager.runSync`
+    serialises syncs process-wide (verified). **Deferred to a follow-up PR:** REQ-2.3's
+    `NOT DELETED` belt (one Rust command) and REQ-4's reconcile queue op.
+  - Evidence: 17 harness scenarios in `reconcilePass.test.ts` covering spec Tasks 1–4, 9–11 (first
+    sight never deletes; second attested pass deletes; unattested pass keeps; 15-over-cap-10
+    batches 10 then 5; >50% stops behind the dialog; ≤10-row folder clears; reappearance clears;
+    unlisted folders age nothing; counter recompute incl. G2's re-convergence; generation purge;
+    pending-ops defer; tombstones untouched; one pass id across folders), 4 wiring tests in
+    `imapSync.test.ts`, 5 dialog tests, 3 provider counter tests. Not yet run: the live Dovecot
+    scenarios in the plan's Done-when — flagged in the PR as the remaining manual step.

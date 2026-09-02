@@ -13,6 +13,7 @@ import {
   imapFetchNewUids,
   imapSearchFolder,
   imapDeltaCheck,
+  imapSearchAllUids,
 } from "./tauriCommands";
 import { withSession } from "./sessionManager";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
@@ -24,8 +25,16 @@ import {
 } from "./folderMapper";
 import type { ParsedMessage, ParsedAttachment } from "../gmail/messageParser";
 import type { SyncResult } from "../email/types";
-import { upsertMessage, updateMessageThreadIds } from "../db/messages";
+import { upsertMessage, updateMessageThreadIds, getLiveMessagesInFolder } from "../db/messages";
 import { upsertThread, setThreadLabels, deleteThread } from "../db/threads";
+import {
+  attestPass,
+  beginReconcilePass,
+  finishReconcilePass,
+  markFetchCompleted,
+  reconcileFolderList,
+  shouldListFolder,
+} from "./reconcilePass";
 import { upsertAttachment } from "../db/attachments";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
 import { withTransaction } from "../db/connection";
@@ -934,6 +943,10 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   const allThreadable: ThreadableMessage[] = [];
   const allImapMsgs = new Map<string, ImapMessage>();
 
+  // F-4: one reconciliation pass per delta sync, one pass id for every folder.
+  const pass = beginReconcilePass(accountId);
+  const checkedFolders = new Set<string>();
+
   // Separate folders into new (no saved state) vs existing (have saved state)
   const newFolders = syncableFolders.filter((f) => !syncStateMap.has(f.raw_path));
   const existingFolders = syncableFolders.filter((f) => syncStateMap.has(f.raw_path));
@@ -988,6 +1001,9 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         modseq: null,
         last_sync_at: Math.floor(Date.now() / 1000),
       });
+      // A freshly synced folder has no suspects to age; it counts as checked
+      // for the attestation only because it completed (a throw lands below).
+      checkedFolders.add(folder.raw_path);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err ?? "Unknown error");
       console.error(`Delta sync failed for new folder ${folder.path}:`, err);
@@ -1084,6 +1100,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
       // An unchecked folder carries no observation to act on (F-4 REQ-1.2b).
       if (!deltaResult || !deltaResult.checked) continue;
+      checkedFolders.add(folder.raw_path);
 
       try {
         if (deltaResult.uidvalidity_changed) {
@@ -1127,14 +1144,38 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           continue;
         }
 
+        // F-4 REQ-2.1: does the server hold what we think it holds? If not,
+        // fetch the full UID list and record what vanished (REQ-1.1). A throw
+        // here is a folder error: the folder's gate opened but it was not
+        // listed, so the pass cannot attest and nothing is deleted.
+        const liveCount = (await getLiveMessagesInFolder(accountId, folder.raw_path)).length;
+        if (
+          shouldListFolder(
+            deltaResult.exists,
+            liveCount,
+            deltaResult.new_uids.length,
+            savedState.flagged_not_expunged ?? 0,
+          )
+        ) {
+          pass.gateOpened.add(folder.raw_path);
+          const serverUids = await withSession(accountId, "sync", {}, (id) =>
+            imapSearchAllUids(id, folder.raw_path),
+          );
+          await reconcileFolderList(pass, folder.raw_path, deltaResult.uidvalidity, serverUids);
+        }
+
         // Normal delta: fetch the new UIDs returned by delta check
-        if (deltaResult.new_uids.length === 0) continue;
+        if (deltaResult.new_uids.length === 0) {
+          markFetchCompleted(pass, folder.raw_path);
+          continue;
+        }
 
         const { messages, lastUid, uidvalidity } = await fetchMessagesInBatches(
           accountId,
           folder.raw_path,
           deltaResult.new_uids,
         );
+        markFetchCompleted(pass, folder.raw_path);
 
         for (const msg of messages) {
           const { parsed, threadable } = imapMessageToParsedMessage(
@@ -1163,12 +1204,37 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     }
   }
 
+  // F-4 end of pass. Attestation (REQ-1.2b): every syncable folder produced an
+  // observation, every opened gate was listed, and no folder failed anywhere
+  // in the pass. Counters are recomputed either way; deletion needs the
+  // attestation. Runs on every exit path below, and never fails the sync.
+  const attested = attestPass(
+    pass,
+    syncableFolders.map((f) => f.raw_path),
+    checkedFolders,
+    deltaFolderErrors.length,
+  );
+  const settleReconcile = async () => {
+    try {
+      const summary = await finishReconcilePass(pass, attested);
+      if (summary.deleted.length > 0 || summary.stops.length > 0) {
+        console.info(
+          `[imapSync] Reconciliation: ${summary.deleted.length} vanished message(s) removed, ${summary.stops.length} folder(s) stopped for confirmation`,
+        );
+      }
+    } catch (err) {
+      console.error("[imapSync] Reconciliation pass failed; nothing was deleted:", err);
+    }
+  };
+
   // If no new messages found and every folder errored, propagate the error
   if (allThreadable.length === 0 && deltaFolderErrors.length > 0) {
+    await settleReconcile();
     throw new Error(`All folders failed to sync: ${deltaFolderErrors[0]}`);
   }
 
   if (allThreadable.length === 0) {
+    await settleReconcile();
     return { messages: [] };
   }
 
@@ -1201,6 +1267,9 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
   // Update sync state timestamp
   await updateAccountSyncState(accountId, `imap-synced-${Date.now()}`);
+
+  // After the store, so REQ-2.2's counter sees this pass's new mail as live.
+  await settleReconcile();
 
   return { messages: storedMessages };
 }

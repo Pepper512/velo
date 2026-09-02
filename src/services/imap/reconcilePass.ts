@@ -1,0 +1,320 @@
+/**
+ * Vanished-UID reconciliation — the pass (SPEC-F-4 rev 5, part 2).
+ *
+ * `imapDeltaSync` drives one of these per account pass:
+ *
+ * 1. `beginReconcilePass` mints the pass id — **one** per pass, used for every
+ *    folder (a fresh id per folder would let one search reported twice promote
+ *    on the second report).
+ * 2. Per existing folder, after the delta check: `shouldListFolder` is the
+ *    REQ-2.1 gate. When it opens, the caller fetches the folder's full UID list
+ *    and hands it to `reconcileFolderList`, which diffs it against the live
+ *    rows and applies the observation to the suspect table (REQ-1.1, REQ-1.4,
+ *    REQ-1.5). When the folder's new-message fetch later completes,
+ *    `markFetchCompleted` — REQ-2.2's counter is recomputed only for those.
+ * 3. `finishReconcilePass` runs once, after the pass has stored its messages,
+ *    with the attestation the caller computed (REQ-1.2b). Counters are
+ *    recomputed; then, **only if attested**, confirmed suspects are deleted
+ *    under the budget (REQ-1.2, REQ-1.3, REQ-3.1–3.4).
+ *
+ * Nothing here talks to the server. Every failure mode falls toward "keep":
+ * a thrown list is a folder error, an unattested pass deletes nothing, a
+ * stop deletes nothing until a person answers.
+ */
+import { withTransaction } from "../db/connection";
+import {
+  deleteMessagesByIds,
+  getLiveMessagesInFolder,
+  getMessageRefsByIds,
+  getTombstonesInFolder,
+  type FolderMessageRef,
+} from "../db/messages";
+import { getThreadMessageCount } from "../db/threads";
+import { getPendingOpsForResource } from "../db/pendingOperations";
+import { setFlaggedNotExpunged } from "../db/folderSyncState";
+import { useUIStore } from "@/stores/uiStore";
+import {
+  applySearchAll,
+  confirmedInFolder,
+  confirmedOnPass,
+  diffVanished,
+  forgetSuspects,
+  planDeletions,
+  type SuspectRow,
+} from "./reconcile";
+
+interface ListedFolder {
+  uidvalidity: number;
+  serverUids: Set<number>;
+  fetchCompleted: boolean;
+}
+
+export interface ReconcilePass {
+  accountId: string;
+  passId: string;
+  /** Folders whose gate opened this pass, whether or not the list succeeded. */
+  gateOpened: Set<string>;
+  /** Folders whose full list was fetched and applied this pass. */
+  listed: Map<string, ListedFolder>;
+}
+
+export interface ReconcileSummary {
+  deleted: { folder: string; uid: number; messageId: string | null }[];
+  stops: { folder: string; confirmed: number; localRows: number }[];
+  attested: boolean;
+}
+
+export function beginReconcilePass(accountId: string): ReconcilePass {
+  return {
+    accountId,
+    passId: crypto.randomUUID(),
+    gateOpened: new Set(),
+    listed: new Map(),
+  };
+}
+
+/**
+ * REQ-2.1: fetch the full list only when the server's EXISTS disagrees with
+ * what Velo believes is there — its live rows, plus the new UIDs this very
+ * delta check just reported and is about to fetch (they are already in
+ * EXISTS), plus the mail it flagged but could not expunge. An unchecked
+ * folder (`exists` null) never lists. (Gemini plan read, H1: without the
+ * new-UID term every incoming message tripped the gate.)
+ */
+export function shouldListFolder(
+  exists: number | null,
+  localLiveCount: number,
+  incomingNewUids: number,
+  flaggedNotExpunged: number,
+): boolean {
+  if (exists === null) return false;
+  return exists !== localLiveCount + incomingNewUids + Math.max(0, flaggedNotExpunged);
+}
+
+/**
+ * Apply a folder's full server list. `serverUids` must be the validated
+ * answer of `imapSearchAllUids` — a throw there is a folder error and this is
+ * never reached (REQ-3.3).
+ */
+export async function reconcileFolderList(
+  pass: ReconcilePass,
+  folder: string,
+  uidvalidity: number,
+  serverUids: number[],
+): Promise<void> {
+  const { accountId, passId } = pass;
+  const server = new Set(serverUids);
+
+  // Tombstones — rows F-5 already knows left this folder — are not part of
+  // the diff: `getLiveMessagesInFolder` excludes them, so they are never
+  // suspects. They are also **not** deleted here, even when the server no
+  // longer lists their UID: the tombstone holds the only cached copy until
+  // the destination folder syncs the message in and the F-5 reap removes it
+  // (Gemini plan read, H3). A tombstone whose destination never syncs is a
+  // F-5 follow-up, not a reconciliation deletion.
+  const tombstones = await getTombstonesInFolder(accountId, folder);
+  if (tombstones.length > 0) {
+    console.debug(`[reconcile] ${folder}: ${tombstones.length} tombstone(s) excluded from the diff`);
+  }
+
+  const live = await getLiveMessagesInFolder(accountId, folder);
+  const byUid = new Map(live.map((m) => [m.imap_uid, m]));
+  const missing = diffVanished(byUid.keys(), server).map((uid) => ({
+    uid,
+    messageRowId: byUid.get(uid)!.id,
+  }));
+
+  await applySearchAll({ accountId, folder, uidvalidity, passId, presentUids: server, missing });
+
+  pass.listed.set(folder, { uidvalidity, serverUids: server, fetchCompleted: false });
+}
+
+/** The folder's new-message fetch completed this pass (REQ-2.2's both-steps clause). */
+export function markFetchCompleted(pass: ReconcilePass, folder: string): void {
+  const entry = pass.listed.get(folder);
+  if (entry) entry.fetchCompleted = true;
+}
+
+/**
+ * Attestation (REQ-1.2b): every syncable folder produced an observation and
+ * every folder whose gate opened was actually listed; and no folder failed
+ * anywhere in the pass. A folder missing from `checkedFolders` counts as
+ * unchecked, never as "not requested".
+ */
+export function attestPass(
+  pass: ReconcilePass,
+  syncableFolders: string[],
+  checkedFolders: Set<string>,
+  folderErrorCount: number,
+): boolean {
+  if (folderErrorCount > 0) return false;
+  for (const folder of syncableFolders) {
+    if (!checkedFolders.has(folder)) return false;
+    if (pass.gateOpened.has(folder) && !pass.listed.has(folder)) return false;
+  }
+  return true;
+}
+
+/**
+ * End of pass. Recompute counters for folders that completed both steps, then
+ * — only if attested — delete what this pass confirmed, under the budget.
+ */
+export async function finishReconcilePass(
+  pass: ReconcilePass,
+  attested: boolean,
+): Promise<ReconcileSummary> {
+  const { accountId, passId } = pass;
+  const summary: ReconcileSummary = { deleted: [], stops: [], attested };
+
+  for (const [folder, entry] of pass.listed) {
+    if (entry.fetchCompleted) {
+      // REQ-2.2: the ghost population actually observed — server UIDs with no
+      // live local row — after this pass's new mail has been stored.
+      const live = await getLiveMessagesInFolder(accountId, folder);
+      const liveUids = new Set(live.map((m) => m.imap_uid));
+      let ghosts = 0;
+      for (const uid of entry.serverUids) if (!liveUids.has(uid)) ghosts += 1;
+      await setFlaggedNotExpunged(accountId, folder, ghosts);
+    }
+
+    if (!attested) continue;
+
+    const confirmed = await confirmedOnPass(accountId, folder, entry.uidvalidity, passId);
+    if (confirmed.length === 0) continue;
+
+    const eligible = await withoutPendingOps(accountId, confirmed);
+    const localRows = (await getLiveMessagesInFolder(accountId, folder)).length;
+    const plan = planDeletions(localRows, eligible.length);
+
+    if (plan.stop) {
+      // REQ-3.1: a catastrophic mismatch is a human decision. Nothing deleted;
+      // suspects stay confirmed and the dialog asks.
+      summary.stops.push({ folder, confirmed: eligible.length, localRows });
+      console.warn(
+        `[reconcile] ${folder}: ${eligible.length} of ${localRows} local messages confirmed absent on the server — stopped, asking the user`,
+      );
+      useUIStore.getState().pushReconcileStop({
+        accountId,
+        folder,
+        uidvalidity: entry.uidvalidity,
+        confirmed: eligible.length,
+        localRows,
+      });
+      continue;
+    }
+
+    const batch = eligible.slice(0, plan.budget);
+    summary.deleted.push(...(await deleteConfirmed(accountId, folder, entry.uidvalidity, batch)));
+  }
+
+  return summary;
+}
+
+/**
+ * The user answered REQ-3.1's stop with "delete them": remove every confirmed
+ * suspect in that folder's current generation, in cap-sized chunks but all in
+ * one go — the cap rate-limits *unattended* passes, and a person has just
+ * confirmed a mass removal. Rows with pending operations are still skipped.
+ */
+export async function deleteConfirmedAfterUserApproval(
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+): Promise<number> {
+  const confirmed = await confirmedInFolder(accountId, folder, uidvalidity);
+  const eligible = await withoutPendingOps(accountId, confirmed);
+  let total = 0;
+  const CHUNK = 500;
+  for (let i = 0; i < eligible.length; i += CHUNK) {
+    const done = await deleteConfirmed(accountId, folder, uidvalidity, eligible.slice(i, i + CHUNK));
+    total += done.length;
+  }
+  return total;
+}
+
+/** REQ-3.4: a suspect whose message or thread has queued user work waits. */
+async function withoutPendingOps(accountId: string, rows: SuspectRow[]): Promise<SuspectRow[]> {
+  if (rows.length === 0) return rows;
+  const refs = await getMessageRefsByIds(
+    accountId,
+    rows.map((r) => r.message_row_id),
+  );
+  const threadOf = new Map(refs.map((r) => [r.id, r.thread_id]));
+  const checkedThreads = new Map<string, boolean>();
+  const out: SuspectRow[] = [];
+  for (const row of rows) {
+    const threadId = threadOf.get(row.message_row_id);
+    if (threadId === undefined) {
+      // The row is already gone locally; nothing to delete, nothing to block.
+      continue;
+    }
+    let blocked = checkedThreads.get(threadId);
+    if (blocked === undefined) {
+      const ops = await getPendingOpsForResource(accountId, threadId);
+      const msgOps = await getPendingOpsForResource(accountId, row.message_row_id);
+      blocked = ops.length > 0 || msgOps.length > 0;
+      checkedThreads.set(threadId, blocked);
+    }
+    if (!blocked) out.push(row);
+  }
+  return out;
+}
+
+/**
+ * Delete confirmed rows (REQ-1.3) in one transaction: the message rows, then
+ * any thread left with no messages together with its labels; then forget the
+ * suspect records. Each deletion is logged with folder, UID and Message-ID
+ * (REQ-3.2).
+ */
+async function deleteConfirmed(
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+  rows: SuspectRow[],
+): Promise<ReconcileSummary["deleted"]> {
+  if (rows.length === 0) return [];
+  const refs = await getMessageRefsByIds(
+    accountId,
+    rows.map((r) => r.message_row_id),
+  );
+  const refById = new Map<string, FolderMessageRef>(refs.map((r) => [r.id, r]));
+  const present = rows.filter((r) => refById.has(r.message_row_id));
+  const deleted: ReconcileSummary["deleted"] = [];
+
+  await withTransaction(async (db) => {
+    await deleteMessagesByIds(
+      db,
+      accountId,
+      present.map((r) => r.message_row_id),
+    );
+    const threads = new Set(present.map((r) => refById.get(r.message_row_id)!.thread_id));
+    for (const threadId of threads) {
+      if ((await getThreadMessageCount(db, accountId, threadId)) === 0) {
+        await db.execute(
+          "DELETE FROM thread_labels WHERE account_id = $1 AND thread_id = $2",
+          [accountId, threadId],
+        );
+        await db.execute("DELETE FROM threads WHERE account_id = $1 AND id = $2", [
+          accountId,
+          threadId,
+        ]);
+      }
+    }
+  });
+
+  for (const r of present) {
+    const ref = refById.get(r.message_row_id)!;
+    console.info(
+      `[reconcile] deleted ${folder}/${r.uid} (${ref.message_id_header ?? "no Message-ID"}): confirmed absent on the server`,
+    );
+    deleted.push({ folder, uid: r.uid, messageId: ref.message_id_header });
+  }
+
+  await forgetSuspects(
+    accountId,
+    folder,
+    uidvalidity,
+    rows.map((r) => r.uid),
+  );
+  return deleted;
+}

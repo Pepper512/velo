@@ -65,6 +65,23 @@ vi.mock("./folderMapper", () => ({
 vi.mock("../db/messages", () => ({
   upsertMessage: vi.fn(),
   updateMessageThreadIds: vi.fn(),
+  getLiveMessagesInFolder: vi.fn(async () => []),
+}));
+// F-4: the reconciliation pass is exercised on the SQLite harness in
+// reconcilePass.test.ts. Here it is a recorder, so these tests keep asserting
+// sync behaviour; the F-4 wiring block below asserts the calls it receives.
+vi.mock("./reconcilePass", () => ({
+  beginReconcilePass: vi.fn((accountId: string) => ({
+    accountId,
+    passId: "pass-test",
+    gateOpened: new Set<string>(),
+    listed: new Map(),
+  })),
+  shouldListFolder: vi.fn(() => false),
+  reconcileFolderList: vi.fn(async () => {}),
+  markFetchCompleted: vi.fn(),
+  attestPass: vi.fn(() => true),
+  finishReconcilePass: vi.fn(async () => ({ deleted: [], stops: [], attested: true })),
 }));
 vi.mock("../db/threads", () => ({
   upsertThread: vi.fn(),
@@ -101,7 +118,7 @@ import {
   createMockImapFolderStatus,
   createMockImapFetchResult,
 } from "@/test/mocks";
-import { imapListFolders, imapSearchFolder, imapFetchMessages } from "./tauriCommands";
+import { imapListFolders, imapSearchFolder, imapFetchMessages, imapDeltaCheck } from "./tauriCommands";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
 import { withSession } from "./sessionManager";
 import { getAccount } from "../db/accounts";
@@ -857,6 +874,106 @@ describe("sync credential wiring for OAuth accounts", () => {
     expect(mockBuildImapConfigWithFreshToken).not.toHaveBeenCalled();
   });
 
+});
+
+/** SPEC-F-4 part 2 — how the delta pass drives the reconciliation module. */
+describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
+  const mockGetAccount = vi.mocked(getAccount);
+  const mockImapListFolders = vi.mocked(imapListFolders);
+  const mockImapDeltaCheck = vi.mocked(imapDeltaCheck);
+
+  const inbox = () => createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 5 });
+  const checkedInbox = (exists: number | null = 5) => ({
+    folder: "INBOX",
+    uidvalidity: 7,
+    new_uids: [] as number[],
+    uidvalidity_changed: false,
+    exists,
+    checked: true,
+    error: null,
+  });
+
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
+    mockImapListFolders.mockResolvedValue([inbox()]);
+    const { getAllFolderSyncStates } = await import("../db/folderSyncState");
+    vi.mocked(getAllFolderSyncStates).mockResolvedValue([
+      {
+        account_id: "acc-1",
+        folder_path: "INBOX",
+        uidvalidity: 7,
+        last_uid: 5,
+        modseq: null,
+        last_sync_at: 1,
+        flagged_not_expunged: 2,
+      },
+    ]);
+  });
+
+  it("opens the gate with the delta check's numbers, lists the folder, and hands the list to the pass", async () => {
+    const { shouldListFolder, reconcileFolderList, finishReconcilePass, attestPass, markFetchCompleted } =
+      await import("./reconcilePass");
+    const { imapSearchAllUids } = await import("./tauriCommands");
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), new_uids: [6] }]);
+    vi.mocked(shouldListFolder).mockReturnValue(true);
+    vi.mocked(imapSearchAllUids).mockResolvedValue([1, 2, 3, 6]);
+    vi.mocked(imapFetchMessages).mockResolvedValue(createMockImapFetchResult([]));
+
+    await imapDeltaSync("acc-1");
+
+    // live count (mocked []) = 0, incoming new UIDs = 1, flagged = 2 from sync state
+    expect(shouldListFolder).toHaveBeenCalledWith(5, 0, 1, 2);
+    expect(imapSearchAllUids).toHaveBeenCalledWith("test-session", "INBOX");
+    expect(reconcileFolderList).toHaveBeenCalledWith(
+      expect.objectContaining({ accountId: "acc-1", passId: "pass-test" }),
+      "INBOX",
+      7,
+      [1, 2, 3, 6],
+    );
+    const pass = vi.mocked(reconcileFolderList).mock.calls[0]![0];
+    expect(pass.gateOpened.has("INBOX")).toBe(true);
+    expect(markFetchCompleted).toHaveBeenCalledWith(pass, "INBOX");
+    expect(attestPass).toHaveBeenCalledWith(pass, ["INBOX"], new Set(["INBOX"]), 0);
+    expect(finishReconcilePass).toHaveBeenCalledWith(pass, true);
+  });
+
+  it("finishes the pass even when nothing new was fetched (the early-return path)", async () => {
+    const { finishReconcilePass, shouldListFolder } = await import("./reconcilePass");
+    mockImapDeltaCheck.mockResolvedValue([checkedInbox()]);
+    vi.mocked(shouldListFolder).mockReturnValue(false);
+
+    const result = await imapDeltaSync("acc-1");
+
+    expect(result.messages).toEqual([]);
+    expect(finishReconcilePass).toHaveBeenCalledTimes(1);
+  });
+
+  it("a list that throws is a folder error: not listed, pass cannot attest, still finished", async () => {
+    const { shouldListFolder, reconcileFolderList, finishReconcilePass, attestPass } =
+      await import("./reconcilePass");
+    const { imapSearchAllUids } = await import("./tauriCommands");
+    mockImapDeltaCheck.mockResolvedValue([checkedInbox()]);
+    vi.mocked(shouldListFolder).mockReturnValue(true);
+    vi.mocked(imapSearchAllUids).mockRejectedValue(new Error("Malformed UID list from Rust for INBOX"));
+    vi.mocked(attestPass).mockReturnValue(false);
+
+    await expect(imapDeltaSync("acc-1")).rejects.toThrow(/All folders failed/);
+
+    expect(reconcileFolderList).not.toHaveBeenCalled();
+    expect(attestPass).toHaveBeenCalledWith(expect.anything(), ["INBOX"], new Set(["INBOX"]), 1);
+    expect(finishReconcilePass).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it("an unchecked folder never opens the gate and is missing from the checked set", async () => {
+    const { shouldListFolder, attestPass } = await import("./reconcilePass");
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(null), checked: false, error: "SELECT failed: NO" }]);
+
+    await imapDeltaSync("acc-1");
+
+    expect(shouldListFolder).not.toHaveBeenCalled();
+    expect(attestPass).toHaveBeenCalledWith(expect.anything(), ["INBOX"], new Set(), 0);
+  });
 });
 
 /** SPEC-F-1 REQ-1.3 — the IMAP thread-store path consults the snooze rule before upserting. */

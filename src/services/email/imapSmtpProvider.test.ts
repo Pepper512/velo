@@ -64,6 +64,10 @@ vi.mock("../imap/moveHygiene", () => ({
   settleMovedRows: vi.fn(async () => {}),
 }));
 
+vi.mock("../db/folderSyncState", () => ({
+  incrementFlaggedNotExpunged: vi.fn(async () => {}),
+}));
+
 vi.mock("../db/messages", () => ({
   upsertMessage: vi.fn(),
 }));
@@ -90,6 +94,7 @@ import {
 import { invalidateAccountCredentials } from "../imap/sessionManager";
 import { findSpecialFolder, dropTombstonedMessageIds } from "../imap/messageHelper";
 import { settleMovedRows } from "../imap/moveHygiene";
+import { incrementFlaggedNotExpunged } from "../db/folderSyncState";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
 
@@ -285,6 +290,35 @@ describe("ImapSmtpProvider", () => {
 
       expect(findSpecialFolder).toHaveBeenCalledWith("acc-1", "\\Trash");
       expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Trash", [100], null, null);
+    });
+
+    it("counts mail left flagged-but-unexpunged toward the folder's ghost population (F-4 REQ-2.2)", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null, dest_uidvalidity: null });
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: false });
+
+      await provider.archive("t", ["imap-acc-1-INBOX-1", "imap-acc-1-INBOX-2"]);
+      await provider.permanentDelete("t", ["imap-acc-1-Sent-9"]);
+
+      expect(incrementFlaggedNotExpunged).toHaveBeenCalledWith("acc-1", "INBOX", 2);
+      expect(incrementFlaggedNotExpunged).toHaveBeenCalledWith("acc-1", "Sent", 1);
+    });
+
+    it("does not touch the counter when the server actually expunged", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [], dest_uidvalidity: null });
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
+
+      await provider.archive("t", ["imap-acc-1-INBOX-1"]);
+      await provider.permanentDelete("t", ["imap-acc-1-INBOX-2"]);
+
+      expect(incrementFlaggedNotExpunged).not.toHaveBeenCalled();
+    });
+
+    it("a failing counter update never fails the action", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null, dest_uidvalidity: null });
+      vi.mocked(incrementFlaggedNotExpunged).mockRejectedValueOnce(new Error("DB busy"));
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      await expect(provider.archive("t", ["imap-acc-1-INBOX-1"])).resolves.toBeUndefined();
     });
 
     it("settles the rows even if raising the not-expunged notice throws, and still raises it after settling", async () => {
