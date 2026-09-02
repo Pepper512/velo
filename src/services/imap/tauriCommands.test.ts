@@ -361,6 +361,7 @@ describe("MoveResult boundary validation (F-5)", () => {
     ["a UID above u32", [{ source_uid: 5, dest_uid: 4_294_967_296 }]],
     ["a string UID", [{ source_uid: "5", dest_uid: 3 }]],
     ["a repeated source UID", [{ source_uid: 5, dest_uid: 3 }, { source_uid: 5, dest_uid: 4 }]],
+    ["a repeated destination UID", [{ source_uid: 5, dest_uid: 3 }, { source_uid: 6, dest_uid: 3 }]],
   ])("degrades the whole mapping to null for %s", async (_label, mapping) => {
     vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping });
     await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({

@@ -189,18 +189,25 @@ function parseUidMapping(value: unknown): UidMapping[] | null {
     return null;
   }
   const mapping: UidMapping[] = [];
-  const seen = new Set<number>();
+  const seenSource = new Set<number>();
+  const seenDest = new Set<number>();
   for (const entry of value) {
     if (typeof entry !== "object" || entry === null) {
       console.warn("Malformed COPYUID mapping entry from Rust; ignoring the mapping", entry);
       return null;
     }
     const { source_uid, dest_uid } = entry as { source_uid?: unknown; dest_uid?: unknown };
-    if (!isUid(source_uid) || !isUid(dest_uid) || seen.has(source_uid)) {
+    if (
+      !isUid(source_uid) ||
+      !isUid(dest_uid) ||
+      seenSource.has(source_uid) ||
+      seenDest.has(dest_uid)
+    ) {
       console.warn("Malformed COPYUID mapping entry from Rust; ignoring the mapping", entry);
       return null;
     }
-    seen.add(source_uid);
+    seenSource.add(source_uid);
+    seenDest.add(dest_uid);
     mapping.push({ source_uid, dest_uid });
   }
   return mapping;

@@ -128,11 +128,16 @@ export async function upsertMessage(msg: {
   );
 
   // An IMAP row arriving under a folder/UID id is what a tombstoned row was
-  // waiting for: same Message-ID, fresh identity. Reap the stale one now so the
-  // thread never holds both. Gmail rows carry no folder and are never
-  // tombstoned, so they skip the extra statement.
-  if (msg.imapFolder != null && msg.messageIdHeader != null) {
-    await reapMovedTombstones(msg.accountId, msg.messageIdHeader, msg.id);
+  // waiting for: same Message-ID, fresh identity, *in the folder it was moved
+  // to*. Reap the stale one now so the thread never holds both. Gmail rows
+  // carry no folder and are never tombstoned, so they skip the extra
+  // statement; an empty Message-ID matches nothing on purpose.
+  if (
+    msg.imapFolder != null &&
+    msg.messageIdHeader != null &&
+    msg.messageIdHeader.trim().length > 0
+  ) {
+    await reapMovedTombstones(msg.accountId, msg.messageIdHeader, msg.id, msg.imapFolder);
   }
 }
 
@@ -163,6 +168,14 @@ export interface RekeyOutcome {
 
 const REKEY_CHUNK = 500;
 
+/** The rows a re-key could not place, and where they went (see `rekeyMovedMessages`). */
+export interface TombstoneFallback {
+  /** Old ids the caller already knows cannot be re-keyed (no mapping entry). */
+  ids: string[];
+  /** The destination folder — becomes `moved_to`. */
+  movedTo: string;
+}
+
 /**
  * Re-key moved IMAP rows to the identity the server gave them (F-5, option A).
  *
@@ -179,17 +192,26 @@ const REKEY_CHUNK = 500;
  * order in which a parent key can change under a child row. With deferral the
  * check runs at COMMIT, when both sides agree.
  *
- * A new id that already exists locally is detected first and skipped, never
- * overwritten. Should a collision still reach the UPDATE (a race with sync), the
- * composite primary key rejects it and the whole transaction rolls back — every
- * row is left exactly as it was, which is the threat-pass requirement.
+ * A new id that already exists locally — or that an earlier pair in this batch
+ * just took — is skipped, never overwritten. Should a collision still reach
+ * the UPDATE (a race with sync), the composite primary key rejects it and the
+ * whole transaction rolls back — every row is left exactly as it was, which is
+ * the threat-pass requirement.
+ *
+ * `fallback` names the rows that cannot be re-keyed at all; they are
+ * tombstoned in the *same* transaction as the re-keys, together with whatever
+ * this call had to skip, so a crash between the two cannot leave a moved row
+ * live under its stale id (Gemini L4).
  */
 export async function rekeyMovedMessages(
   accountId: string,
   pairs: RekeyPair[],
+  fallback?: TombstoneFallback,
 ): Promise<RekeyOutcome> {
   const outcome: RekeyOutcome = { rekeyed: [], skipped: [] };
-  if (pairs.length === 0) return outcome;
+  if (pairs.length === 0 && (fallback === undefined || fallback.ids.length === 0)) {
+    return outcome;
+  }
 
   await withTransaction(async (db) => {
     await db.execute("PRAGMA defer_foreign_keys = ON", []);
@@ -210,6 +232,7 @@ export async function rekeyMovedMessages(
         outcome.skipped.push(pair.oldId);
         continue;
       }
+      taken.add(pair.newId);
 
       await db.execute(
         `UPDATE messages SET id = $1, imap_folder = $2, imap_uid = $3, moved_to = NULL
@@ -245,6 +268,10 @@ export async function rekeyMovedMessages(
       );
       outcome.rekeyed.push(pair.oldId);
     }
+
+    if (fallback !== undefined) {
+      await tombstoneWithin(db, accountId, [...fallback.ids, ...outcome.skipped], fallback.movedTo);
+    }
   });
 
   return outcome;
@@ -258,6 +285,9 @@ export async function rekeyMovedMessages(
  * (`keepLiveMessageIds`), so nothing acts on a folder/UID pair the server no
  * longer has. They are removed by `reapMovedTombstones` when the destination
  * folder syncs the message in.
+ *
+ * Standalone form, for when the re-key transaction itself failed; the re-key
+ * path tombstones inside its own transaction instead.
  */
 export async function tombstoneMovedMessages(
   accountId: string,
@@ -266,9 +296,40 @@ export async function tombstoneMovedMessages(
 ): Promise<void> {
   if (messageIds.length === 0) return;
   const db = await getDb();
+  await tombstoneWithin(db, accountId, messageIds, movedTo);
+}
+
+/**
+ * The tombstone step itself. If the destination folder has *already* synced
+ * this message in — a live row with the same Message-ID in `movedTo` — there
+ * is nothing to wait for: the stale row is deleted now rather than tombstoned,
+ * because `reapMovedTombstones` already ran for that arrival and will not run
+ * again (Gemini M3's zombie). The rest are marked and wait for the reap.
+ */
+async function tombstoneWithin(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  messageIds: string[],
+  movedTo: string,
+): Promise<void> {
   for (let i = 0; i < messageIds.length; i += REKEY_CHUNK) {
     const chunk = messageIds.slice(i, i + REKEY_CHUNK);
     const placeholders = chunk.map((_, j) => `$${j + 3}`).join(", ");
+    await db.execute(
+      `DELETE FROM messages
+       WHERE account_id = $1
+         AND EXISTS (
+           SELECT 1 FROM messages fresh
+           WHERE fresh.account_id = messages.account_id
+             AND fresh.message_id_header = messages.message_id_header
+             AND fresh.message_id_header <> ''
+             AND fresh.imap_folder = $2
+             AND fresh.moved_to IS NULL
+             AND fresh.id <> messages.id
+         )
+         AND id IN (${placeholders})`,
+      [accountId, movedTo, ...chunk],
+    );
     await db.execute(
       `UPDATE messages SET moved_to = $1 WHERE account_id = $2 AND id IN (${placeholders})`,
       [movedTo, accountId, ...chunk],
@@ -279,19 +340,23 @@ export async function tombstoneMovedMessages(
 /**
  * Remove tombstoned rows for a message that has just arrived under a fresh id.
  *
- * Keyed on `message_id_header`, which is what threads them together in the
- * first place. `id <> $3` protects the fresh row itself; attachments on the
- * tombstone cascade with it, and the fresh row has its own.
+ * Keyed on `message_id_header` — what threads them together in the first place
+ * — **and** on the folder the row was moved to: a copy of the same message
+ * syncing in from some other folder (a filter that files to two places, a
+ * shared-mailbox duplicate) must not reap a tombstone whose destination has not
+ * synced yet, or the message and its cached attachments would vanish locally
+ * until it does (Gemini H1). `id <> $3` protects the fresh row itself.
  */
 export async function reapMovedTombstones(
   accountId: string,
   messageIdHeader: string,
   freshMessageId: string,
+  arrivedIn: string,
 ): Promise<void> {
   const db = await getDb();
   await db.execute(
-    "DELETE FROM messages WHERE account_id = $1 AND message_id_header = $2 AND moved_to IS NOT NULL AND id <> $3",
-    [accountId, messageIdHeader, freshMessageId],
+    "DELETE FROM messages WHERE account_id = $1 AND message_id_header = $2 AND moved_to = $3 AND id <> $4",
+    [accountId, messageIdHeader, arrivedIn, freshMessageId],
   );
 }
 

@@ -45,7 +45,7 @@ export async function settleMovedRows(
   if (uids.length === 0) return;
 
   const oldIdFor = (uid: number) => imapMessageId(accountId, sourceFolder, uid);
-  let toTombstone: string[] = uids.map(oldIdFor);
+  const toTombstone: string[] = uids.map(oldIdFor);
 
   if (mapping !== null) {
     const destUidFor = new Map(mapping.map((m) => [m.source_uid, m.dest_uid]));
@@ -66,8 +66,11 @@ export async function settleMovedRows(
     }
 
     try {
-      const { skipped } = await rekeyMovedMessages(accountId, pairs);
-      toTombstone = [...unmapped, ...skipped];
+      // Re-keys and the tombstones for everything else commit together: a
+      // crash between them could otherwise leave an unmapped row live under
+      // its stale id.
+      await rekeyMovedMessages(accountId, pairs, { ids: unmapped, movedTo: destFolder });
+      return;
     } catch (err) {
       // The transaction rolled back: every row is as it was. Fall back to
       // hiding all of them rather than leaving stale pointers live.

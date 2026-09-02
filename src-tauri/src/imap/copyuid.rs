@@ -99,8 +99,15 @@ pub fn mapping_from_response(response: &Response<'_>) -> Option<Vec<UidMapping>>
         return None;
     }
 
+    // Both sides must be sets: a repeated source has two destinations, and a
+    // repeated destination would re-key two rows to one id — the second would
+    // then collide with the first inside the same transaction (Gemini M2).
     let mut seen = std::collections::HashSet::with_capacity(source.len());
     if !source.iter().all(|uid| seen.insert(*uid)) {
+        return None;
+    }
+    seen.clear();
+    if !dest.iter().all(|uid| seen.insert(*uid)) {
         return None;
     }
 
@@ -199,8 +206,10 @@ mod tests {
 
     #[test]
     fn a_reversed_range_is_the_same_set() {
+        // Built explicitly: the literal `7..=5` trips clippy's
+        // reversed_empty_ranges, which is exactly the property under test.
         let response = copyuid(
-            vec![UidSetMember::UidRange(7..=5)],
+            vec![UidSetMember::UidRange(std::ops::RangeInclusive::new(7, 5))],
             vec![UidSetMember::UidRange(10..=12)],
         );
         assert_eq!(
@@ -281,6 +290,16 @@ mod tests {
         let response = copyuid(
             vec![UidSetMember::Uid(5), UidSetMember::Uid(5)],
             vec![UidSetMember::Uid(3), UidSetMember::Uid(4)],
+        );
+        assert!(mapping_from_response(&response).is_none());
+    }
+
+    #[test]
+    fn a_repeated_destination_uid_is_no_mapping() {
+        // `COPYUID 1 5,6 10,10` — two rows re-keyed to one id would collide.
+        let response = copyuid(
+            vec![UidSetMember::Uid(5), UidSetMember::Uid(6)],
+            vec![UidSetMember::Uid(10), UidSetMember::Uid(10)],
         );
         assert!(mapping_from_response(&response).is_none());
     }

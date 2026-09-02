@@ -221,7 +221,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     // The destination folder syncs the same message in under its new id.
     const fresh = `imap-${ACC}-Archive-11`;
     seedMessage(fresh, "Archive", 11, B_HEADER, "Re: Quarterly numbers");
-    await reapMovedTombstones(ACC, B_HEADER, fresh);
+    await reapMovedTombstones(ACC, B_HEADER, fresh, "Archive");
 
     expect(messageRow(B_OLD)).toBeUndefined();
     expect(messageRow(fresh)).toMatchObject({ moved_to: null });
@@ -230,6 +230,74 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     ).toEqual([]);
     // A is unrelated and untouched.
     expect(messageRow(A_OLD)).toBeDefined();
+  });
+
+  it("does not reap a tombstone when the same message syncs in from a folder other than its destination", async () => {
+    // Gemini H1: a filter that files to two places, or a shared-mailbox copy.
+    // The tombstone waits for Archive; a copy arriving in Sent must not take
+    // the cached row (and its attachments) away before Archive syncs.
+    seedAttachment(B_OLD, "p9");
+    await settleMovedRows(ACC, "INBOX", "Archive", [6], null);
+
+    const elsewhere = `imap-${ACC}-Sent-4`;
+    seedMessage(elsewhere, "Sent", 4, B_HEADER, "Re: Quarterly numbers");
+    await reapMovedTombstones(ACC, B_HEADER, elsewhere, "Sent");
+
+    expect(messageRow(B_OLD)).toMatchObject({ moved_to: "Archive" });
+    expect(
+      raw().prepare<[string], { id: string }>("SELECT id FROM attachments WHERE message_id = ?").all(B_OLD),
+    ).toHaveLength(1);
+  });
+
+  it("deletes the stale row outright when its destination has already synced the message in", async () => {
+    // Gemini M3: the destination arrived (and its reap ran, finding nothing)
+    // before this row was marked. Tombstoning it now would leave a zombie that
+    // no later reap visits, so it is deleted instead.
+    const arrived = `imap-${ACC}-Archive-11`;
+    seedMessage(arrived, "Archive", 11, B_HEADER, "Re: Quarterly numbers");
+
+    await settleMovedRows(ACC, "INBOX", "Archive", [6], null);
+
+    expect(messageRow(B_OLD)).toBeUndefined();
+    expect(messageRow(arrived)).toMatchObject({ moved_to: null });
+    // A row with no header match is still tombstoned, not deleted.
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], null);
+    expect(messageRow(A_OLD)).toMatchObject({ moved_to: "Archive" });
+  });
+
+  it("re-keys unmapped rows' tombstones in the same transaction as the re-keys", async () => {
+    const start = harnessRef.current!.statements.length; // after migrations
+    await settleMovedRows(ACC, "INBOX", "Archive", [5, 6], [{ source_uid: 5, dest_uid: 3 }]);
+
+    // One BEGIN … COMMIT around both the UPDATE … SET id and the tombstone.
+    const s = harnessRef.current!.statements.slice(start);
+    const begin = s.findIndex((x) => x.startsWith("BEGIN"));
+    const commit = s.findIndex((x) => x.startsWith("COMMIT"));
+    const rekey = s.findIndex((x) => x.includes("SET id = $1"));
+    const tomb = s.findIndex((x) => x.includes("SET moved_to = $1"));
+    expect(begin).toBeGreaterThanOrEqual(0);
+    expect(rekey).toBeGreaterThan(begin);
+    expect(tomb).toBeGreaterThan(rekey);
+    expect(commit).toBeGreaterThan(tomb);
+    expect(s.filter((x) => x.startsWith("BEGIN"))).toHaveLength(1);
+  });
+
+  it("skips the second of two pairs that map to one destination id instead of colliding", async () => {
+    // Gemini M2: the IPC validator rejects duplicate destinations, but the DB
+    // layer must be safe on its own.
+    const clash = `imap-${ACC}-Archive-9`;
+    const outcome = await rekeyMovedMessages(
+      ACC,
+      [
+        { oldId: A_OLD, newId: clash, folder: "Archive", uid: 9 },
+        { oldId: B_OLD, newId: clash, folder: "Archive", uid: 9 },
+      ],
+      { ids: [], movedTo: "Archive" },
+    );
+
+    expect(outcome).toEqual({ rekeyed: [A_OLD], skipped: [B_OLD] });
+    expect(messageRow(clash)).toMatchObject({ imap_uid: 9 });
+    expect(messageRow(B_OLD)).toMatchObject({ imap_uid: 6, moved_to: "Archive" });
   });
 
   // ---------- Done-when 3 (last case): a colliding destination id ----------
@@ -249,22 +317,34 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
   });
 
   it("rolls the whole transaction back when a collision reaches the UPDATE, leaving every row untouched", async () => {
-    // Two sources mapped to one destination id: the pre-check sees neither as
-    // taken, the first UPDATE succeeds, the second hits the composite PK.
+    // The pre-check covers `messages`; a collision the pre-check cannot see is
+    // an attachment whose id already equals the rewritten `{newId}_{part}` —
+    // the shape a racing destination sync would leave. The attachments UPDATE
+    // hits that PK after the messages UPDATE has already run.
     const clash = `imap-${ACC}-Archive-9`;
+    const bystander = `imap-${ACC}-Sent-1`;
+    seedMessage(bystander, "Sent", 1, "<sent@example.com>", "Unrelated");
+    raw()
+      .prepare("INSERT INTO attachments (id, message_id, account_id) VALUES (?, ?, ?)")
+      .run(`${clash}_p1`, bystander, ACC);
+
     await expect(
-      rekeyMovedMessages(ACC, [
-        { oldId: A_OLD, newId: clash, folder: "Archive", uid: 9 },
-        { oldId: B_OLD, newId: clash, folder: "Archive", uid: 9 },
-      ]),
+      rekeyMovedMessages(ACC, [{ oldId: A_OLD, newId: clash, folder: "Archive", uid: 9 }]),
     ).rejects.toThrow();
 
     expect(messageRow(clash)).toBeUndefined();
     expect(messageRow(A_OLD)).toMatchObject({ imap_folder: "INBOX", imap_uid: 5, moved_to: null });
     expect(messageRow(B_OLD)).toMatchObject({ imap_folder: "INBOX", imap_uid: 6, moved_to: null });
     expect(
-      raw().prepare<[string], { id: string; message_id: string }>("SELECT id, message_id FROM attachments WHERE account_id = ?").all(ACC),
-    ).toEqual([{ id: `${A_OLD}_p1`, message_id: A_OLD }]);
+      raw()
+        .prepare<[string], { id: string; message_id: string }>(
+          "SELECT id, message_id FROM attachments WHERE account_id = ? ORDER BY id",
+        )
+        .all(ACC),
+    ).toEqual([
+      { id: `${clash}_p1`, message_id: bystander },
+      { id: `${A_OLD}_p1`, message_id: A_OLD },
+    ]);
     expect(
       raw().prepare<[string], { message_id: string }>("SELECT message_id FROM link_scan_results WHERE account_id = ?").all(ACC),
     ).toEqual([{ message_id: A_OLD }]);

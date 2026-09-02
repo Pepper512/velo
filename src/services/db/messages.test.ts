@@ -68,16 +68,17 @@ describe("messages service", () => {
 
       expect(mockDb.execute).toHaveBeenCalledTimes(2);
       expect(mockDb.execute).toHaveBeenLastCalledWith(
-        "DELETE FROM messages WHERE account_id = $1 AND message_id_header = $2 AND moved_to IS NOT NULL AND id <> $3",
-        ["acc-1", "<a@example.com>", "imap-acc-1-Archive-3"],
+        "DELETE FROM messages WHERE account_id = $1 AND message_id_header = $2 AND moved_to = $3 AND id <> $4",
+        ["acc-1", "<a@example.com>", "Archive", "imap-acc-1-Archive-3"],
       );
     });
 
-    it("does not reap for a Gmail row or a row without a Message-ID", async () => {
+    it("does not reap for a Gmail row, a row without a Message-ID, or an empty one", async () => {
       await upsertMessage({ ...base, id: "gmail-1", messageIdHeader: "<a@example.com>" });
       await upsertMessage({ ...base, imapFolder: "Archive", imapUid: 3, messageIdHeader: null });
+      await upsertMessage({ ...base, imapFolder: "Archive", imapUid: 3, messageIdHeader: "  " });
 
-      expect(mockDb.execute).toHaveBeenCalledTimes(2);
+      expect(mockDb.execute).toHaveBeenCalledTimes(3);
       for (const call of mockDb.execute.mock.calls) {
         expect(call[0]).toMatch(/^INSERT INTO messages/);
       }
@@ -90,9 +91,16 @@ describe("messages service", () => {
       expect(mockDb.execute).not.toHaveBeenCalled();
     });
 
-    it("marks the rows with their destination folder", async () => {
+    it("deletes rows whose destination has already synced, then marks the rest", async () => {
       await tombstoneMovedMessages("acc-1", ["m1", "m2"], "Archive");
-      expect(mockDb.execute).toHaveBeenCalledWith(
+      expect(mockDb.execute).toHaveBeenCalledTimes(2);
+      expect(mockDb.execute).toHaveBeenNthCalledWith(
+        1,
+        expect.stringMatching(/^DELETE FROM messages[\s\S]*fresh\.imap_folder = \$2[\s\S]*id IN \(\$3, \$4\)/),
+        ["acc-1", "Archive", "m1", "m2"],
+      );
+      expect(mockDb.execute).toHaveBeenNthCalledWith(
+        2,
         "UPDATE messages SET moved_to = $1 WHERE account_id = $2 AND id IN ($3, $4)",
         ["Archive", "acc-1", "m1", "m2"],
       );
