@@ -439,3 +439,28 @@
     Order: **#33 → #34 → #35 → #36**, then **#37** only after its must-fix items land and the
     re-review at the new head is recorded. The Fable seat's merges stay blocked and are not
     routed anywhere; this entry is the record the Opus seat can point at.
+- **2026-09-02 — F-4 and F-5 plan approvals: APPROVED by Jim, directly.** Asked which of the open
+  items he wanted to take, he answered *"I approve f-4 and f-5"* in his own session. **Not
+  delegated and not relayed** — this is his own word, which matters because both specs had reached
+  a state where only he could move them: F-4's earlier conditional approval had voided itself per
+  its own terms, and F-5's approval line was deliberately left blank throughout the delegation
+  window on the grounds that a data-affecting judgement should not be made by a proxy at 01:00.
+  - **F-4 — vanished-UID reconciliation.** Approved at **rev 5** (vault:
+    `Build Queue/10-Bug-Fixes/SPEC-F-4_Vanished-UID-Reconciliation.md`), the revision that adopted
+    all seven cross-vendor findings and then fixed the three defects a delta-review found in rev 4's
+    own clauses. Tier 2. **The approval line in the vault spec still needs Jim's mark** — the vault
+    is not reachable from this machine's checkout, so this entry is the repo-side record and the two
+    should be reconciled when he is next in the vault.
+  - **F-5 — move-time row hygiene.** Approved as **option A** (re-key on `COPYUID`, with option B's
+    hidden-row semantics as the fallback for accounts without UIDPLUS), **at rev 2** — the revision
+    that corrected rev 1's cost basis after the opposite-line read found `COPYUID` already parsed by
+    `imap-proto` and forwarded on `async-imap`'s unsolicited channel. Rev 1 is not what was
+    approved: its sequencing rested on a `client.rs` collision that turned out to be small.
+    Sequencing confirmed with the approval: **after E2, before F-4**, on rev 2's
+    ownership-interaction reason.
+  - **Neither is started, deliberately.** Both build on `client.rs`'s move path, which **E2/P15 part
+    2 (#39) has just rewritten** and which is still in review. Starting either now would rebase a
+    Tier-2 change onto a moving file for no gain. Order: **#39 lands → F-5 → F-4.**
+  - **Still Jim's alone, unchanged by this:** the `rust MSRV` branch-protection append, and
+    `git worktree remove .claude/worktrees/f2-email-links-open` — both refused to the Opus seat by
+    its permission classifier and neither routed through the other seat.
