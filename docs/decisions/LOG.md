@@ -522,3 +522,60 @@
     `move_messages`. `:11144` (no UIDPLUS, and the harness conf hides MOVE too) → `expunged: false,
     mapping: None`, source still in INBOX flagged — the COPY path, as predicted. Done-when 5 (strike
     F-4's coupling note) is left for the F-4 build, which edits that spec anyway.
+- **2026-09-02 — F-5 reviewed by two vendors and merged (#43, squash `2792251`) — *(delegated)*.**
+  Both legs returned **CHANGES REQUESTED**; every finding was re-derived against the tree before
+  disposition, and the two records are on the PR. What changed the code:
+  - **Gemini 3.7 (`agy`)**: H1 — the tombstone reap was keyed on Message-ID alone, so a same-message
+    copy syncing in from *another* folder would reap a tombstone whose destination had not synced,
+    attachments cascading. Adopted: reap scoped to the folder the fresh row arrived in. M2 —
+    destination UIDs were not checked for uniqueness in either validator. Adopted in Rust, TS and
+    the DB layer. M3 — a re-key losing the race with the destination sync left a zombie tombstone no
+    later reap visits. Adopted: tombstoning deletes outright when the destination already holds the
+    message. L4 — re-key and tombstone were two transactions. Adopted: one. L5 recorded (option-B
+    semantics), NIT 6 declined (already indexed).
+  - **Grok 4.6 (`grok` CLI, diff only)**: M6 — one racing collision rolled back a whole batch of
+    re-keys. Adopted: per-pair `SAVEPOINT`. M7 — notice ran before settle. Adopted: settle first,
+    notice in `finally`. L9 — the `COPYUID`'s UIDVALIDITY was discarded. Adopted: it travels with the
+    mapping and a mapping from the wrong generation is refused. H3 partial — search paths now hide
+    tombstones. L8 **declined**: RFC 3501 §9 defines a range as unordered (`2:4` ≡ `4:2`), so the
+    normalisation is the RFC reading. H2-A carried into F-4 (see the vault spec's Not-doing);
+    H2-B is Decision 1(a)'s accepted no-UIDPLUS ghost; M4 (old→new id alias) is the recorded
+    follow-up; L11/L12 documented limits.
+  - **Both reviews found real defects the author had missed** (H1/M3 would have lost cached mail in
+    a two-copy mailbox; M6 would have degraded whole batches). Same lesson as #39: the cross-vendor
+    leg is not a formality, and two legs found *different* things.
+  - **CI caught one thing local gates did not:** the first push failed clippy on
+    `reversed_empty_ranges` in a test fixture that the local run had not compiled with
+    `--all-targets` at that point. Fixed in the first fix-up. CI remains the source of test status.
+  - Merge preconditions verified on `ca62b18`: `ci` success on that SHA, `mergeStateStatus` CLEAN,
+    no unresolved review conversation. Merged by the build seat under the window's authority.
+  - **The vault is reachable from this machine** (`~/Vaults/Pepper Knowledge/...`); the F-4 spec's
+    approval line, Task 13 and coupling note were reconciled there directly. HANDOFF's "not
+    reachable from this checkout" was wrong and is corrected at wrap-up.
+- **2026-09-02 — F-4 built as "part 1", the substrate only (#44) — *(delegated)*.** With ~70 minutes
+  of the window left after F-5 landed, the seat cut F-4 (a 4–5 day, 13-task spec) to the pieces
+  that delete nothing and that part 2 cannot do without: per-folder attestation from
+  `delta_check_folders` (REQ-1.2b, spec Task 8), `exists` on the wire (Task 5), boundary validation
+  on `imapSearchAllUids` (the command itself already existed — the spec's Task 5 citation was
+  stale), migration 26 (Task 6), and `reconcile.ts` — the pure budget/cap/diff decisions and the
+  REQ-1.5 suspect state machine on the harness (Tasks 9 and 11). **The deleting half is deferred
+  to part 2 with a written plan** (`docs/briefs/2026-09-02-f4-part2-plan.md`) that itself needs an
+  opposite-line read before code; rushing the path that deletes mail into a window's last forty
+  minutes was judged the wrong trade.
+  - **A defect the seat found in its own code before either review arrived:** the timeout path in
+    `delta_check_folders` returned `Ok` after the session was desynchronised, which handed the
+    poisoned connection back to the pool (the pre-F-4 code did the same by `continue`ing). Fixed to
+    `Err`, which is the pool's eviction signal. Both reviewers then filed it as their HIGH.
+  - **Gemini 3.7:** CHANGES REQUESTED (1H 2M 1L 2N), all six adopted — the timeout, the fallback
+    `catch` omitting failed folders (the exact omission REQ-1.2b forbids), `clearReappeared` pushing
+    the whole server list through DELETEs, `recordMissing` outside a transaction, the index, the
+    dedupe.
+  - **Grok 4.6:** CHANGES REQUESTED (11). Three duplicated fixes already made. Adopted: `checked`
+    redefined (it never meant "a `UID SEARCH ALL` ran" — the part 2 plan attests from two bits);
+    `confirmedOnPass` generation-scoped and a single atomic `applySearchAll` as the documented
+    entry point (its resurrection scenario — a UID that comes back and vanishes once more — would
+    have deleted on one observation if part 2 called the pieces separately); `exists` nullable on
+    unchecked rows (`0` reads as "emptied" to the gate); `planDeletions` stops on inconsistent
+    counts; `first_seen_at` NOT NULL; `CHECK` on `status`; leftover re-stamp tests and the re-stamp
+    documented as required.
+  - **Nothing declined this time.** Every finding on #44 was either already fixed or adopted.

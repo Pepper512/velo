@@ -861,20 +861,29 @@ pub async fn delta_check_folders(
 ) -> Result<Vec<DeltaCheckResult>, String> {
     let mut results = Vec::with_capacity(folders.len());
 
+    // F-4 REQ-1.2b: a folder the server refuses (a `NO` to SELECT or SEARCH)
+    // is reported as unchecked, never dropped — the session is still in
+    // protocol. A *timeout* is different: the session is desynchronised
+    // mid-command, so the whole call fails with `Err`, which is what makes
+    // `with_pooled_session` evict the connection instead of returning it to
+    // the pool. The frontend then falls back to per-folder checks on a fresh
+    // session. (Before F-4 a timeout `continue`d and the poisoned session went
+    // back into the pool.)
     for req in folders {
         let mailbox = match net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {}", req.folder), session.select(&req.folder)).await {
             Ok(Ok(m)) => m,
             Ok(Err(e)) => {
                 log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
+                results.push(DeltaCheckResult::unchecked(&req.folder, req.uidvalidity, format!("SELECT failed: {e}")));
                 continue;
             }
-            Err(_) => {
-                log::warn!("delta_check: SELECT {} timed out after {}s", req.folder, IMAP_CMD_TIMEOUT.as_secs());
-                continue;
+            Err(e) => {
+                return Err(format!("delta check abandoned — {e}; the session is desynchronised"));
             }
         };
 
         let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
+        let exists = mailbox.exists;
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
 
         if uidvalidity_changed {
@@ -883,6 +892,9 @@ pub async fn delta_check_folders(
                 uidvalidity: current_uidvalidity,
                 new_uids: vec![],
                 uidvalidity_changed: true,
+                exists: Some(exists),
+                checked: true,
+                error: None,
             });
             continue;
         }
@@ -897,11 +909,15 @@ pub async fn delta_check_folders(
             }
             Ok(Err(e)) => {
                 log::warn!("delta_check: UID SEARCH {} failed: {e}", req.folder);
-                vec![]
+                results.push(DeltaCheckResult::unchecked(&req.folder, current_uidvalidity, format!("UID SEARCH failed: {e}")));
+                continue;
             }
             Err(_) => {
-                log::warn!("delta_check: UID SEARCH {} timed out after {}s", req.folder, IMAP_SEARCH_TIMEOUT.as_secs());
-                vec![]
+                return Err(format!(
+                    "delta check abandoned — UID SEARCH {} timed out after {}s; the session is desynchronised",
+                    req.folder,
+                    IMAP_SEARCH_TIMEOUT.as_secs()
+                ));
             }
         };
 
@@ -910,6 +926,9 @@ pub async fn delta_check_folders(
             uidvalidity: current_uidvalidity,
             new_uids,
             uidvalidity_changed: false,
+            exists: Some(exists),
+            checked: true,
+            error: None,
         });
     }
 
@@ -2184,5 +2203,26 @@ mod tests {
         assert!(!scrubbed.contains(FAKE_TOKEN), "got {scrubbed}");
         assert!(!scrubbed.contains("user@example.com"), "got {scrubbed}");
         assert!(scrubbed.contains("[redacted]"));
+    }
+
+    // ---------- F-4 REQ-1.2b: an unchecked folder is a row, not an omission ----------
+
+    #[test]
+    fn an_unchecked_row_carries_no_observation() {
+        let r = DeltaCheckResult::unchecked("INBOX", 5, "SELECT failed: NO".into());
+
+        assert_eq!(r.folder, "INBOX");
+        assert!(!r.checked);
+        assert!(r.new_uids.is_empty(), "no UIDs a caller could act on");
+        assert!(!r.uidvalidity_changed, "no resync claim either");
+        assert_eq!(r.exists, None, "no count either — 0 would read as 'emptied'");
+        assert_eq!(r.uidvalidity, 5, "echoes the requested generation, claims nothing new");
+        assert_eq!(r.error.as_deref(), Some("SELECT failed: NO"));
+
+        // The wire shape the frontend's `!checked` guard reads.
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["checked"], false);
+        assert!(json["exists"].is_null());
+        assert!(json["error"].is_string());
     }
 }

@@ -117,12 +117,51 @@ pub struct DeltaCheckRequest {
     pub uidvalidity: u32,
 }
 
+/// One folder's answer from `delta_check_folders`.
+///
+/// F-4 REQ-1.2b: **every requested folder gets a row.** A folder the check
+/// could not complete comes back with `checked: false` and the reason in
+/// `error`, instead of being silently omitted — a pass that is missing N
+/// folders used to look identical to a clean one, and "no folder reported an
+/// error" is not the same proposition as "every folder was checked". Only the
+/// second is safe to delete on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeltaCheckResult {
     pub folder: String,
     pub uidvalidity: u32,
     pub new_uids: Vec<u32>,
     pub uidvalidity_changed: bool,
+    /// The server's `EXISTS` at SELECT — F-4's gate compares it with the local
+    /// count to decide whether a full UID list is worth fetching (REQ-2.1).
+    /// `None` when the folder was not checked: `0` would read as "the folder
+    /// emptied", which is the very thing that triggers a full list.
+    pub exists: Option<u32>,
+    /// `true` when this delta check produced a usable observation for the
+    /// folder: SELECT succeeded and either the UIDVALIDITY changed (a full
+    /// resync follows, no search needed) or the delta UID SEARCH completed.
+    /// **This is not "a `UID SEARCH ALL` ran"** — F-4 part 2's attestation
+    /// keeps its own per-folder bit for that, and evaluates it against the
+    /// syncable-folder set, never against the rows that happen to be here.
+    pub checked: bool,
+    /// Why `checked` is `false`, for the log and the pass report.
+    pub error: Option<String>,
+}
+
+impl DeltaCheckResult {
+    /// The row for a folder this pass could not check. Carries nothing the
+    /// caller could mistake for an observation: no UIDs, no UIDVALIDITY claim,
+    /// no message count.
+    pub fn unchecked(folder: &str, uidvalidity: u32, reason: String) -> Self {
+        Self {
+            folder: folder.to_string(),
+            uidvalidity,
+            new_uids: Vec::new(),
+            uidvalidity_changed: false,
+            exists: None,
+            checked: false,
+            error: Some(reason),
+        }
+    }
 }
 
 /// What a move or delete actually did to the source folder (brief REQ-4.1).

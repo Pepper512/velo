@@ -94,11 +94,25 @@ export interface DeltaCheckRequest {
   uidvalidity: number;
 }
 
+/**
+ * One folder's answer from the batch delta check. Mirrors `DeltaCheckResult`
+ * in `src-tauri/src/imap/types.rs`.
+ *
+ * F-4 REQ-1.2b: every requested folder comes back, `checked: false` with an
+ * `error` when the check did not produce a usable observation. `checked` is
+ * NOT "a `UID SEARCH ALL` ran" — part 2's attestation keeps a separate
+ * per-folder bit for that and evaluates it against the syncable-folder set,
+ * treating a folder missing from the results as unchecked.
+ */
 export interface DeltaCheckResult {
   folder: string;
   uidvalidity: number;
   new_uids: number[];
   uidvalidity_changed: boolean;
+  /** The server's EXISTS at SELECT (F-4 REQ-2.1 gate input); `null` when unchecked. */
+  exists: number | null;
+  checked: boolean;
+  error: string | null;
 }
 
 // ---------- SMTP types ----------
@@ -361,12 +375,20 @@ export async function imapFetchNewUids(
 /**
  * Search for all UIDs in a folder using UID SEARCH ALL.
  * Returns real UIDs — avoids the sparse UID gap problem with generateUidRange.
+ *
+ * Validated at the boundary (F-4 REQ-1.1): this list feeds a local-deletion
+ * decision, so a malformed answer is an error, never an empty list — an empty
+ * list would read as "everything vanished".
  */
 export async function imapSearchAllUids(
   sessionId: string,
   folder: string
 ): Promise<number[]> {
-  return invoke<number[]>('imap_search_all_uids', { sessionId, folder });
+  const value: unknown = await invoke('imap_search_all_uids', { sessionId, folder });
+  if (!Array.isArray(value) || !value.every(isUid)) {
+    throw new Error(`Malformed UID list from Rust for ${folder}`);
+  }
+  return value;
 }
 
 /**
