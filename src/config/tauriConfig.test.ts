@@ -12,24 +12,32 @@ describe("tauri.conf.json", () => {
    * per-sender allowlist); the CSP must let an allowed HTTPS image load and
    * must not move anything else.
    */
-  const csp: Record<string, string[]> = Object.fromEntries(
-    (config.app.security.csp as string)
+  function cspDirectives(): Record<string, string[]> {
+    const pairs = (config.app.security.csp as string)
       .split(";")
       .map((d: string) => d.trim())
       .filter(Boolean)
-      .map((d: string) => {
+      .map((d: string): [string, string[]] => {
         const [name, ...sources] = d.split(/\s+/);
-        return [name, sources];
-      }),
-  );
+        return [name!, sources];
+      });
+    // A duplicated directive is ignored by the browser (CSP 3 §5.1) but would
+    // be the one a map keeps — refuse the shape outright (Gemini M2 on #60).
+    const names = pairs.map(([name]) => name);
+    expect(names).toEqual([...new Set(names)]);
+    return Object.fromEntries(pairs);
+  }
 
   it("lets an allowed remote image load over https, and nothing else (SPEC-197 REQ-1.1–1.3)", () => {
+    const csp = cspDirectives();
     expect(csp["img-src"]).toEqual(["'self'", "data:", "https:"]);
     expect(csp["img-src"]).not.toContain("http:");
     expect(csp["img-src"]).not.toContain("*");
+    expect(csp["img-src"]).not.toContain("blob:");
   });
 
   it("leaves the other directives exactly as they are (SPEC-197 REQ-1.3)", () => {
+    const csp = cspDirectives();
     expect(csp["default-src"]).toEqual(["'self'"]);
     expect(csp["script-src"]).toEqual(["'self'"]);
     expect(csp["style-src"]).toEqual(["'self'", "'unsafe-inline'"]);
