@@ -58,6 +58,38 @@ describe("stripRemoteImages", () => {
     const result = stripRemoteImages(html);
     expect(result).not.toContain("https://tracker.com/bg.png");
   });
+
+  // SPEC-197 (Gemini H1 on #60): once img-src allows https:, everything the
+  // block relies on must be the blocker's. SVG href fetches on render.
+  it("strips a remote href on SVG image and use, which fetch on render", () => {
+    const html =
+      '<svg><image href="https://tracker.com/px.png"/><use href="https://tracker.com/s.svg#i"/><image xlink:href="https://tracker.com/x.png"/></svg>';
+    const result = stripRemoteImages(html);
+    expect(result).not.toContain("tracker.com");
+  });
+
+  it("leaves a link's href alone — a link fetches on click, not on render", () => {
+    const html = '<a href="https://example.com/read">Read</a><area href="https://example.com/a">';
+    const result = stripRemoteImages(html);
+    expect(result).toContain('href="https://example.com/read"');
+    expect(result).toContain('href="https://example.com/a"');
+  });
+
+  it("still neutralises the other on-render image vectors the review named", () => {
+    const html =
+      '<img srcset="https://t.com/p.png 1x" src="https://t.com/p.png">' +
+      '<picture><source srcset="https://t.com/s.png"><img src="https://t.com/i.png"></picture>' +
+      '<video poster="https://t.com/v.png"></video>' +
+      '<input type="image" src="https://t.com/b.png">' +
+      '<table background="https://t.com/bg.png"><tr><td>x</td></tr></table>' +
+      '<div style="background: image-set(\'https://t.com/is.png\' 1x)">y</div>';
+    const result = stripRemoteImages(html);
+    // Attribute names at a word boundary, so `data-blocked-src` is not counted as `src`.
+    expect(result).not.toMatch(/(?:^|\s)(?:src|srcset|poster|background)="https?:/);
+    expect(result).not.toContain("https://t.com/is.png");
+    // Every <img>/<input> src became a restorable data-blocked-src.
+    expect(result.match(/data-blocked-src="https:\/\/t\.com/g)).toHaveLength(3);
+  });
 });
 
 describe("restoreRemoteImages", () => {

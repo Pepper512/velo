@@ -849,6 +849,32 @@
   sees a nulled field, and the new tests pin that; a component test for the form (Gemini L3,
   Grok M3's test half) — no harness exists, and the property is now enforced by shape. Raw
   outputs in `docs/reviews/2026-09-03-pr59-{gemini,grok}-raw.md`.
+- **2026-09-03 — #197 built (remote images: CSP `img-src` widened to `https:`)** on Jim's
+  decision 1 of 2026-09-02 and his instruction. Verified first: the block is enforced by the
+  sanitizer (`EmailRenderer.tsx:42`, `stripRemoteImages` moving `src` to `data-blocked-src`);
+  when the user allows images the HTML keeps `src`, the body is written into a same-origin
+  iframe that inherits the window CSP, and `img-src` listed four avatar hosts — so an allowed
+  image was refused one layer below the opt-in. Plan committed first
+  (`docs/briefs/2026-09-03-197-img-src-csp.md`, Tier 2 — CSP). **Decisions:** `img-src 'self'
+  data: https:` — the three explicit hosts are subsumed and dropped; **no `http:`** (a
+  plaintext image fetch from the mail client would leak in the clear; the decision names
+  `https:`); the sanitizer, the default (block on) and the sandbox flags are untouched; a test
+  parses the CSP into directives and pins `img-src` exactly and every other directive exactly,
+  so nothing else can move with it. TDD: the CSP test red first. The Rust image proxy stays
+  queued as the privacy enhancement.
+- **2026-09-03 — PR #60 (#197) cross-vendor review, both legs.** Gemini 3.7 and Grok 4.6 both
+  CHANGES REQUESTED on the same point: once `img-src` is `https:`, the block is entirely the
+  sanitizer's, so every image-fetching vector must be neutralised by it. **Verified:** the
+  audit-P9 blocker is DOM-based and already removes every fetching attribute (`src`, `srcset`,
+  `poster`, `background`, `xlink:href`, …) and inline-style URLs; `<style>`/`<link>` are
+  forbidden. **One real gap, adopted:** `href` was excluded for links, and SVG `<image>`/`<use>`
+  fetch on render — the four-host CSP had hidden it; a remote `href` is now removed on every
+  element that is not `<a>`/`<area>`, with tests for every vector both reviews named. Also
+  adopted: the CSP test refuses duplicate directive names (browsers keep the first, a map keeps
+  the last), parses inside a helper, and asserts `blob:` absent. **Recorded:** the opted-in
+  cookie-bearing GET residual (Grok L4) — the webview holds bearer tokens, not provider
+  cookies. The brief's threat pass was corrected: it rests on the blocker's coverage, not on "no
+  `src` remains". Raw outputs in `docs/reviews/2026-09-03-pr60-{gemini,grok}-raw.md`.
 - **2026-09-02 ~22:30 UTC — #280 built (http scope for local AI; connection-test reason)** on
   Jim's instruction. Verified first: the Ollama client uses `@tauri-apps/plugin-http`'s `fetch`
   (`ollamaProvider.ts:2`), the plugin matches its scope with the `urlpattern` crate, and under
