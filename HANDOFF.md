@@ -4,40 +4,43 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `33c87a5`** (#37, E2/P15 part 1 — the last commit that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `b66978d` (#38) sits above it and touched only
-  `scripts/docs-check.mjs` and two docs. To see what is above the pin: `git log --oneline
-  33c87a5..origin/main` — anything that is not `docs:`/`chore(docs-check)` means the pin is stale.
-  **Brief line numbers have NOT been re-verified at this pin:** the E2 brief cites the pre-pool
-  `commands.rs`; the F-5 brief cites `client.rs:540` and `imapSmtpProvider.ts:638`. #39 rewrites
-  `commands.rs` again — re-grep before citing anything.
-- **Open PRs:** never trust this line — run `gh pr list --repo Pepper512/velo`. At writing:
-  **#39** (E2/P15 part 2, code, CLEAN), **#40** (LOG: Jim's direct F-4/F-5 approval, docs, CLEAN),
-  and this file's own PR. All three wait on the Fable seat's EX-005 read, then the Opus seat merges.
+- **Code pin: `9e991bb`** (#39, E2/P15 part 2 — the last commit that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** To see what is above it:
+  `git log --oneline 9e991bb..origin/main` — anything that is not `docs:` means the pin is stale.
+  **Brief line numbers are stale at this pin and must be re-grepped before citing.** #37 and #39
+  rewrote `commands.rs` twice: the E2 brief cites the pre-pool version, and the F-5 brief cites
+  `client.rs:540` and `imapSmtpProvider.ts:638`, which the pooling rewrite moved. F-5's build must
+  re-derive its citations first — that is not optional, it is what §6 is about.
+- **Open PRs:** never trust this line — run `gh pr list --repo Pepper512/velo`. At writing: only
+  this file's own PR. **#39 and #40 have landed**, so any instruction below that refers to them as
+  pending is describing a queue that no longer exists.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
-- **⚠️ Two agent seats, not one-per-tree.** Name **seats, never session ids**; run **`ListAgents`**.
-  - **The Opus seat holds merge permission** (Jim, in person, 2026-09-02 ~03:30 UTC; LOG via #33
+- **One seat, as of 2026-09-02.** Jim wound the second (Fable) seat down after this session. Name
+  **seats, never session ids**, and run **`ListAgents`** before assuming any peer is live — every
+  id this file ever pinned went stale within a day.
+  - **The build seat holds merge permission** (Jim, in person, 2026-09-02 ~03:30 UTC; LOG via #33
     `db00e09`) under `CLAUDE.md` *Agents perform the merge*: green on the exact rebased SHA, up to
-    date, no unresolved conversation, and — its own addition, keep it — **re-verify that a rebase
-    changed none of the branch's own content before relying on an approval given earlier.** It
-    caught a semantically wrong test-count merge that way. The Fable seat's merges are
-    classifier-blocked; it reviews, it does not merge.
-  - **Comms are one-way until a file exists.** Opus → Fable `SendMessage` is refused by the Opus
-    session's classifier; Fable → Opus works. Jim's fix: create `velo/.claude/settings.local.json`
-    (gitignored, `.gitignore:51`) containing `{"permissions":{"allow":["SendMessage"]}}` in the
-    **main checkout** — the Fable seat's worktree guard cannot write there, so it created only its
-    own copy. **As of writing the main-checkout file does not exist**; the Opus seat reports through
-    PR threads meanwhile, which works. Any seat may create it; Jim authorised the content verbatim.
-  - The Fable seat works in **`.claude/worktrees/f1-decisions`** (`EnterWorktree`); the main
-    checkout is the Opus seat's. Inside a worktree, Bash refuses compound/substituted commands near
-    anything it cannot prove is not `git` — plain commands, the file tools, a `.sh` wrapper for
-    `agy`.
-  - **`f2-email-links-open` @ `86bbc52` is dead** (= what #31 merged, clean, unlocked, nothing
-    unlanded, verified by both seats) and **removal is Jim's alone** — `git worktree remove` was
-    refused to both seats.
+    date, no unresolved conversation, and — **keep this one, it earned itself** — **re-verify that a
+    rebase changed none of the branch's own content before relying on an approval given earlier.**
+    It caught a rebase that was mechanically clean and semantically wrong: two branches each bumped
+    a test count 152→153, git merged the identical lines without conflict, and the real total was
+    154.
+  - **The independent review leg is now the cross-vendor seat** (Gemini 3.7 via the `agy` wrapper),
+    not a second Claude session. **It is not a formality**: on #39 it returned CHANGES REQUESTED
+    with two HIGH findings the author had missed, one of which undercut an invariant the author had
+    explicitly defended in a prior review thread. Do not merge a Tier-2 change on one pair of eyes
+    because the second seat is gone — run the cross-vendor leg and post it to the PR.
+    `agy` gotchas: `--print` swallows the next flag, so pass other flags first and the prompt via
+    `--print="$(cat file)"` from a small `.sh` wrapper; headless mode auto-denies shell, so tell it
+    **not to use tools** and inline everything it needs, or it returns nothing at all.
+  - **Both worktrees are dead** and their removal is **Jim's alone** — `git worktree remove` is
+    refused to the agent seat. `f2-email-links-open` @ `86bbc52` (= what #31 merged) and
+    `f1-decisions` @ the wrap-up branch (= this PR). **Both verified clean, nothing uncommitted,
+    nothing unpushed, every branch's content landed via a squash merge.** `f1-decisions` is
+    **locked** and needs unlocking first.
   - Worktrees are gitignored but **not vitest-excluded** — always pass the excludes in §1.
-- **State on `main`:** frontend **1,843** tests (**154** files — the breakdown is now gated too,
+- **State on `main`:** frontend **1,875** tests (**155** files — the breakdown is now gated too,
   #38) · Rust **78** · npm audit **0 — full tree AND prod** · 0 service import cycles ·
   EX-001/002/004 closed; EX-003/005/006/007 open. **Dependencies: −1 this session** (`@google/generative-ai`
   gone, nothing added; `getrandom 0.3` was Jim's direct Decision 2).
@@ -46,26 +49,30 @@
 
 ## 1. Exact next step
 
-**Fable seat: EX-005 review of #40, then #39 (E2 part 2). Opus seat: merge each on green after
-the read.** That is the whole queue. Nothing waits on Jim except the four items in §2.
+**Build F-5 (option A, rev 2), then F-4 (rev 5).** Both are Jim-approved directly (#40) and both
+were parked behind E2, which has now landed. Nothing else is queued and nothing waits on a review
+seat.
 
-Order and why: **#40 first** (docs-only, records Jim's F-4/F-5 approval — the record F-5's build
-will cite), then **#39** (code, 13 files, +804/−279: the other 14 IMAP commands pooled, Decision 4(a)
-implemented with the fallback deliberately evicting, `with_pooled_session` helper, ADR-003,
-`poolBoundary.test.ts` asserting the password crosses IPC exactly twice per round). Review #39
-the way part 1 was reviewed — re-derive from the tree, run every gate on the exact head, Gemini
-cross-vendor via the `agy` wrapper (`e2-review.sh` pattern), post both legs to the thread. The
-part-1 must-fix list is the checklist for what part 2 must not have re-introduced: retry gate on the
-wrong error class, dead branches, attributes on the wrong item, unbounded exit paths, claims the
-tree does not back. **Attack the helper:** the guard must stay in scope with the `await` or the
-cancellation guarantee dies silently — #39's own body says so.
+**Re-grep before writing a line of it.** F-5's brief cites `client.rs:540` and
+`imapSmtpProvider.ts:638` at a pin two rewrites old. Its design also assumed a `client.rs` whose
+move path has since been pooled — the `COPYUID` mapping now has to be drained from a session the
+pool owns, which is the ownership interaction rev 2 gave as its sequencing reason. That reason is
+now the *design* problem, not a scheduling one.
 
-**After that, the Fable seat's next build item is the PR D plan** (TypeScript 5.9 → 6.0 → 7.0 with
-the `baseUrl` fix, then Vite 8 + `@vitejs/plugin-react` 6; two gated commits, ~4 h; defined in the
-vault at `2026-09-01_Velo_Dependency-Audit.md:93`; **no plan file exists yet**). Tier 2 (dependency
-change): plan approved before code — Jim is reachable now, so ask him rather than proxy it.
-**The Opus seat's next build item is E2 part 3** (the carry list in #39's scope table), then **F-5
-option A at rev 2** and **F-4 rev 5**, both now Jim-approved (#40) and both parked behind E2.
+**Single-seat working, as of 2026-09-02.** Jim wound the Fable seat down. One seat builds; the
+**cross-vendor seat (Gemini 3.7 via the `agy` wrapper) is the independent review leg**, and it is
+not a formality — on #39 it returned CHANGES REQUESTED with two HIGH findings that a same-vendor
+reviewer and the author had both missed, one of which undercut an invariant the author had
+explicitly defended. EX-005's mitigation is satisfied by that leg plus Jim; do not merge a Tier-2
+change on one pair of eyes because the second seat is gone.
+
+**Carried work with no PR:** E2 part 3 (the carry list in #39's body — the redundant `Arc` together
+with `logout_arc`'s `try_unwrap`, evictions dropped without LOGOUT, `bump_credential_version`
+evicting by ident regardless of version, the cross-window invalidation race, the unvalidated
+session-id wrapper, and Done-when 9 plus the live-server halves of 2 and 10, which need the Dovecot
+harness rather than another unit test). **PR D** (TypeScript 5.9 → 6.0 → 7.0 with the `baseUrl`
+fix, then Vite 8; vault `2026-09-01_Velo_Dependency-Audit.md:93`) has **no plan file** and is a
+dependency change, so it is Tier 2 and needs Jim's plan approval before code.
 
 ### Resume commands
 
@@ -99,14 +106,20 @@ Expected on `main`: **154 test files, 1,843 tests; 78 Rust.** #39 will move all 
 **No credentials to rotate. None were created, read, or logged this session.** The Gemini SDK
 tarball used to verify a wire format was unpacked in a scratchpad and never installed.
 
-**Jim only, all four refused to both seats:**
+**Jim only, all three refused to the agent seat:**
 1. **Make `rust MSRV` a required check** —
    `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`.
-   Until it lands the MSRV is not enforced.
-2. **`git worktree remove .claude/worktrees/f2-email-links-open`**.
-3. **Create `velo/.claude/settings.local.json`** (content above) so the Opus seat can message the
-   Fable seat — or let a seat do it; the content is his verbatim.
-4. **Mark the F-4 approval in the vault spec** (`Build Queue/10-Bug-Fixes/SPEC-F-4_…`, §Approval).
+   Until it lands the MSRV is not enforced. This has been open since 2026-09-01 and is the only
+   gate in the ledger that passes on every PR while enforcing nothing.
+2. **Remove both worktrees** — `git worktree remove .claude/worktrees/f2-email-links-open` and
+   `.claude/worktrees/f1-decisions` (**locked**; `git worktree unlock` it first). Both verified
+   clean, nothing uncommitted, nothing unpushed, every branch's content landed by squash merge.
+3. **Mark the F-4 approval in the vault spec** (`Build Queue/10-Bug-Fixes/SPEC-F-4_…`, §Approval).
+   The repo-side record is in `LOG.md` via #40; the vault is not reachable from this checkout, so
+   the two records are deliberately not claimed to be in sync.
+
+*(The `settings.local.json` item is gone: it existed only so one seat could message the other, and
+there is one seat now.)*
 
 Still parked, unchanged: **P11** (brief written; needs approval + 5-step manual QA) · **P19/F-3**.
 
@@ -201,25 +214,28 @@ gate the number, don't trust the merge. Trust backlogs, verify numbers, includin
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `33c87a5`** (#37; the
-only SHA pinned — `git log --oneline 33c87a5..origin/main` shows what is above it; a non-docs
-commit there means brief line numbers are stale) · CI green · 154 files / 1,843 tests / 78 Rust ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `9e991bb`** (#39; the
+only SHA pinned — `git log --oneline 9e991bb..origin/main` shows what is above it; a non-docs
+commit there means brief line numbers are stale) · CI green · 155 files / 1,875 tests / 78 Rust ·
 npm audit 0.
 
-**Next action:** **Fable seat reviews #40 then #39** (E2 part 2 — re-derive from the tree, all
-gates on the exact head, Gemini via the `agy` wrapper, both legs in the thread; attack
-`with_pooled_session` keeping the guard in scope with the await). **Opus seat merges each on green
-after the read** (it holds merge permission; LOG #33 `db00e09`). Then: Fable → PR D plan (Tier 2,
-ask Jim); Opus → E2 part 3, then F-5 (A, rev 2) and F-4 (rev 5), both Jim-approved in #40.
+**Next action: build F-5 (option A, rev 2), then F-4 (rev 5).** Both Jim-approved directly in #40,
+both were parked behind E2, and E2 has landed. **Re-grep their citations first** — F-5's brief
+points at a `client.rs` that #37 and #39 have since rewritten, and its `COPYUID` mapping must now
+be drained from a session the pool owns. That is the design problem, not a scheduling one.
 
-**Jim only, four items, all refused to both seats:** `rust MSRV` required-check `gh api` (§2) ·
-`git worktree remove .claude/worktrees/f2-email-links-open` · create
-`velo/.claude/settings.local.json` with `{"permissions":{"allow":["SendMessage"]}}` so Opus can
-message Fable · mark F-4 approved in the vault spec.
+**One seat now.** The cross-vendor leg (Gemini via `agy`) is the independent review, and it is not
+a formality — it found two HIGH issues in #39 that the author missed. Don't merge Tier 2 on one
+pair of eyes.
+
+**Jim only, three items, all refused to the agent seat:** `rust MSRV` required-check `gh api` (§2) ·
+`git worktree remove` for **both** worktrees (`f1-decisions` is **locked** — unlock first; both are
+verified clean and fully merged) · mark F-4 approved in the vault spec, which this repo cannot
+reach.
 
 **Verify first:** `git worktree list` (never assert "clean on `main`" without it) · `gh pr list` ·
-`ListAgents` for who is live · `gh run list --branch main --limit 2` (ci success, Release Please
-**skipped**) · `ls velo/.claude/settings.local.json` (comms two-way or not).
+`ListAgents` before assuming a peer exists · `gh run list --branch main --limit 2` (ci success,
+Release Please **skipped**).
 
 **Get running:** `git checkout main && git pull && npm ci`, then
 `npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'`,
