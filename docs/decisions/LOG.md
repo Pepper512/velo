@@ -1172,3 +1172,20 @@
   **Comparison:** Grok and Gemini 3.8 each found the three MEDIUM-class defects Gemini 3.7
   missed; Grok alone found the drop-guard and duplicate-id leaks. Raw outputs in
   `docs/reviews/2026-09-03-pr68-{grok,gemini38}-raw.md`.
+- **2026-09-03 — #281 built (paste an image from the clipboard)** on Jim's instruction, the
+  last bug-fix queue item, **Tier 1** (composer only). Verified first: the triage's "M"
+  assumed two halves were missing; only one is — the TipTap image node (`allowBase64`) is
+  configured and `emailBuilder.extractInlineImages` already turns a data-URL `<img>` into a
+  `multipart/related` CID part; what nothing handled was an image *file* on the clipboard
+  (ProseMirror's default paste is text/HTML). **Change:** a pure `pasteImage.ts` boundary —
+  the image file wins over accompanying text; only `image/png|jpeg|gif|webp` (SVG refused:
+  it can carry script); 5 MiB cap; the `data:` URL built from the file's own bytes and
+  checked for its declared type — and an `editorProps.handlePaste` that inserts the image
+  node at the cursor or shows the refusal for five seconds in the composer's existing
+  status line; text/HTML pastes fall through unchanged, dropped files still go to
+  attachments by design. TDD: ten helper cases (null for text-only, PNG picked, file over
+  text, each admitted type, SVG/BMP refused with the reason, cap boundary, `files` fallback,
+  data-URL read) and a builder test pinning that a data-URL `<img>` ships as a CID part with
+  no data URL left in the HTML. Help card updated. Spec
+  `docs/briefs/2026-09-03-281-paste-inline-images.md`, committed before the code.
+  Gates: 171 files / 2,219 tests, tsc, graph, docs. One review leg (Tier 1): Gemini 3.7.

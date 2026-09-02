@@ -152,6 +152,28 @@ describe("emailBuilder", () => {
   });
 });
 
+// SPEC-281 REQ-3 — a pasted image is a data-URL <img> in the body; the builder
+// must ship it as an inline CID part, never as a data URL in the HTML.
+describe("emailBuilder — pasted inline image", () => {
+  it("turns a data-URL <img> into a multipart/related CID part", () => {
+    const raw = buildRawEmail({
+      from: "sender@example.com",
+      to: ["to@example.com"],
+      subject: "Screenshot",
+      htmlBody: '<p>See:</p><p><img src="data:image/png;base64,iVBORw==" alt=""></p>',
+    });
+    const decoded = decodeBase64Url(raw);
+
+    expect(decoded).toContain("multipart/related");
+    expect(decoded).toMatch(/<img src="cid:inline_\d+_0@velomail" alt="">/);
+    expect(decoded).not.toContain("data:image/png;base64");
+    expect(decoded).toMatch(/Content-Type: image\/png/);
+    expect(decoded).toMatch(/Content-ID: <inline_\d+_0@velomail>/);
+    expect(decoded).toContain("Content-Disposition: inline");
+    expect(decoded).toContain("iVBORw==");
+  });
+});
+
 function decodeBase64Url(encoded: string): string {
   // Add back padding
   let base64 = encoded.replace(/-/g, "+").replace(/_/g, "/");
