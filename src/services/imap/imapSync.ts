@@ -58,6 +58,7 @@ import {
   type ThreadGroup,
 } from "../threading/threadBuilder";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { isAllTime } from "../syncPeriod";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -133,11 +134,23 @@ export function formatImapDate(date: Date): string {
  * Compute a `DD-Mon-YYYY` SINCE date string for the given `daysBack` value.
  * Subtracts an extra day as a safety margin for timezone differences
  * (IMAP SINCE has date-only granularity, no time component).
+ *
+ * Not a sync-period reader: `0` here means "since yesterday", not "all time".
+ * Search sites take the period through `sinceDateForDaysBack`, which maps
+ * all time to `null` before this runs (SPEC-276).
  */
 export function computeSinceDate(daysBack: number): string {
   const date = new Date();
   date.setUTCDate(date.getUTCDate() - daysBack - 1);
   return formatImapDate(date);
+}
+
+/**
+ * The SINCE date for a sync period, or `null` for "all time" (SPEC-276): the
+ * Rust command then issues `UID SEARCH ALL` instead of `UID SEARCH SINCE`.
+ */
+export function sinceDateForDaysBack(daysBack: number): string | null {
+  return isAllTime(daysBack) ? null : computeSinceDate(daysBack);
 }
 
 // ---------------------------------------------------------------------------
@@ -574,7 +587,7 @@ export async function imapInitialSync(
 
     try {
       // Phase 2a: Lightweight search — get UIDs only (no message bodies over IPC)
-      const sinceDate = computeSinceDate(daysBack);
+      const sinceDate = sinceDateForDaysBack(daysBack);
       const searchResult = await withSession(accountId, "sync", {}, (id) =>
         imapSearchFolder(id, folder.raw_path, sinceDate),
       );
@@ -585,8 +598,9 @@ export async function imapInitialSync(
 
       if (uidsToFetch.length === 0) continue;
 
-      // Date filter config
-      const cutoffDate = Math.floor(Date.now() / 1000) - daysBack * 86400;
+      // Date filter config. "All time" keeps every message the search returned
+      // (SPEC-276 REQ-1.3) — a cutoff of 0 is below any real date.
+      const cutoffDate = isAllTime(daysBack) ? 0 : Math.floor(Date.now() / 1000) - daysBack * 86400;
       const nowSeconds = Math.floor(Date.now() / 1000);
       let dateFallbackCount = 0;
       let folderFetchedCount = 0;
@@ -1007,7 +1021,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
     const folderMapping = mapFolderToLabel(folder);
     try {
-      const sinceDate = computeSinceDate(daysBack);
+      const sinceDate = sinceDateForDaysBack(daysBack);
       const searchResult = await withSession(accountId, "sync", {}, (id) =>
         imapSearchFolder(id, folder.raw_path, sinceDate),
       );
@@ -1162,7 +1176,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           // on them — is void. The gate does not run for this folder this
           // pass; the resync below is the observation.
           await invalidateFolderSuspects(accountId, folder.raw_path, deltaResult.uidvalidity);
-          const sinceDate = computeSinceDate(daysBack);
+          const sinceDate = sinceDateForDaysBack(daysBack);
           const searchResult = await withSession(accountId, "sync", {}, (id) =>
         imapSearchFolder(id, folder.raw_path, sinceDate),
       );

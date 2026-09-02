@@ -10,6 +10,7 @@ import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { hasCalendarSupport, getCalendarProvider } from "../calendar/providerFactory";
 import { getVisibleCalendars, upsertCalendar, updateCalendarSyncToken } from "../db/calendars";
 import { upsertCalendarEvent, deleteEventByRemoteId } from "../db/calendarEvents";
+import { parseSyncPeriodDays } from "../syncPeriod";
 
 const SYNC_INTERVAL_MS = 60_000; // 60 seconds — delta syncs are lightweight (single API call when idle)
 
@@ -53,8 +54,7 @@ async function syncGmailAccount(accountId: string): Promise<void> {
     throw new Error("Account not found");
   }
 
-  const syncPeriodStr = await getSetting("sync_period_days");
-  const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
+  const syncDays = parseSyncPeriodDays(await getSetting("sync_period_days"));
 
   if (account.history_id) {
     // Delta sync
@@ -94,8 +94,7 @@ async function syncImapAccount(accountId: string): Promise<void> {
     await ensureFreshToken(account);
   }
 
-  const syncPeriodStr = await getSetting("sync_period_days");
-  const syncDays = parseInt(syncPeriodStr ?? "365", 10) || 365;
+  const syncDays = parseSyncPeriodDays(await getSetting("sync_period_days"));
 
   if (account.history_id) {
     // Delta sync — IMAP uses folder-level UID tracking

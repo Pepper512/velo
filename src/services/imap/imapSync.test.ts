@@ -122,7 +122,7 @@ vi.mock("../snooze/snoozeSync", () => ({
   clearSnoozeForNewExternalMessages: vi.fn().mockResolvedValue(false),
 }));
 
-import { imapMessageToParsedMessage, imapInitialSync, imapDeltaSync, formatImapDate, computeSinceDate, isConnectionError } from "./imapSync";
+import { imapMessageToParsedMessage, imapInitialSync, imapDeltaSync, formatImapDate, computeSinceDate, sinceDateForDaysBack, isConnectionError } from "./imapSync";
 import {
   createMockImapMessage,
   createMockImapAccount,
@@ -478,6 +478,23 @@ describe("imapInitialSync", () => {
     expect(mockUpsertMessage.mock.calls[0]![0].id).toContain("1"); // uid=1
   });
 
+  // SPEC-276 REQ-1.2 / REQ-1.3: "All time" is daysBack = 0 — no SINCE date
+  // (the Rust side then issues UID SEARCH ALL) and no per-message cutoff.
+  it("all time (daysBack 0) searches without SINCE and keeps old messages", async () => {
+    const oldDate = Math.floor(Date.now() / 1000) - 400 * 86400; // beyond any preset
+    const veryOldDate = Math.floor(Date.now() / 1000) - 12 * 365 * 86400;
+    const oldMsg = createMockImapMessage({ uid: 1, message_id: "<old@test>", date: oldDate });
+    const veryOldMsg = createMockImapMessage({ uid: 2, message_id: "<older@test>", date: veryOldDate });
+
+    setupFolderWithMessages("INBOX", [oldMsg, veryOldMsg]);
+
+    await imapInitialSync("acc-1", 0);
+
+    expect(mockImapSearchFolder).toHaveBeenCalledTimes(1);
+    expect(mockImapSearchFolder).toHaveBeenCalledWith("test-session", "INBOX", null);
+    expect(mockUpsertMessage).toHaveBeenCalledTimes(2);
+  });
+
   it("handles empty folders gracefully", async () => {
     const mockFolder = createMockImapFolder({ path: "INBOX", raw_path: "INBOX", exists: 0 });
     mockImapListFolders.mockResolvedValue([mockFolder]);
@@ -692,6 +709,17 @@ describe("computeSinceDate", () => {
     const yesterday = new Date();
     yesterday.setUTCDate(yesterday.getUTCDate() - 1);
     expect(result).toBe(formatImapDate(yesterday));
+  });
+});
+
+describe("sinceDateForDaysBack (SPEC-276)", () => {
+  it("is null for all time (0), so the search has no SINCE clause", () => {
+    expect(sinceDateForDaysBack(0)).toBeNull();
+  });
+
+  it("is the computeSinceDate string for a positive period", () => {
+    expect(sinceDateForDaysBack(365)).toBe(computeSinceDate(365));
+    expect(sinceDateForDaysBack(30)).toMatch(/^\d{1,2}-[A-Z][a-z]{2}-\d{4}$/);
   });
 });
 
@@ -1148,6 +1176,37 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
 
     expect(shouldListFolder).not.toHaveBeenCalled();
     expect(attestPass).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining(["INBOX"]), new Set(), 0);
+  });
+
+  // SPEC-276 REQ-1.2 (Gemini L1 on #62): both delta-sync search sites — a folder
+  // with no saved state, and a UIDVALIDITY resync — search without SINCE for all time.
+  it("all time (daysBack 0) searches a new folder and a UIDVALIDITY resync without SINCE", async () => {
+    mockImapListFolders.mockResolvedValue([
+      inbox(),
+      createMockImapFolder({ path: "Archive", raw_path: "Archive", exists: 3 }),
+    ]);
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), uidvalidity: 8, uidvalidity_changed: true }]);
+    vi.mocked(imapSearchFolder).mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ exists: 0 }) });
+
+    await imapDeltaSync("acc-1", 0);
+
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "Archive", null);
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "INBOX", null);
+  });
+
+  it("a positive period keeps the SINCE date on both delta-sync search sites", async () => {
+    mockImapListFolders.mockResolvedValue([
+      inbox(),
+      createMockImapFolder({ path: "Archive", raw_path: "Archive", exists: 3 }),
+    ]);
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), uidvalidity: 8, uidvalidity_changed: true }]);
+    vi.mocked(imapSearchFolder).mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ exists: 0 }) });
+
+    await imapDeltaSync("acc-1", 365);
+
+    const since = expect.stringMatching(/^\d{1,2}-[A-Z][a-z]{2}-\d{4}$/);
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "Archive", since);
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "INBOX", since);
   });
 });
 
