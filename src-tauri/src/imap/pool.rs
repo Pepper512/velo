@@ -123,6 +123,12 @@ pub enum PoolError {
     SessionBusy,
     /// The per-account cap is reached and no session could be evicted.
     TooManySessions,
+    /// `insert` was handed an id the pool could not have issued, or one that
+    /// is already in the map. Unreachable with 128 random bits; refused rather
+    /// than overwriting, because an overwrite would drop the sitting session
+    /// inside the map lock — the one thing this pool promises never to do
+    /// (review, Grok 6).
+    BadId,
     /// The session was authenticated under a credential generation that is no
     /// longer the account's current one (SPEC-E2-3 REQ-2.1).
     ///
@@ -151,6 +157,7 @@ impl std::fmt::Display for PoolError {
             Self::NoSuchSession => write!(f, "{SENTINEL_PREFIX}NoSuchSession"),
             Self::SessionBusy => write!(f, "{SENTINEL_PREFIX}SessionBusy"),
             Self::TooManySessions => write!(f, "{SENTINEL_PREFIX}TooManySessions"),
+            Self::BadId => write!(f, "{SENTINEL_PREFIX}BadId"),
             Self::StaleCredential => write!(f, "{SENTINEL_PREFIX}StaleCredential"),
         }
     }
@@ -263,11 +270,14 @@ impl<S> SessionPool<S> {
         account_key: AccountKey,
         session: S,
     ) -> Result<Option<S>, (PoolError, S)> {
-        debug_assert!(
-            is_well_formed_id(&id),
-            "the pool only issues well-formed ids"
-        );
+        if !is_well_formed_id(&id) {
+            return Err((PoolError::BadId, session));
+        }
         let mut inner = self.lock();
+
+        if inner.entries.contains_key(&id) {
+            return Err((PoolError::BadId, session));
+        }
 
         if account_key.credential_version != inner.current_version(&account_key.ident) {
             return Err((PoolError::StaleCredential, session));
@@ -775,6 +785,30 @@ mod tests {
 
         assert_eq!(pool.len(), 1);
         assert!(pool.contains(&id), "the real session is untouched");
+    }
+
+    #[test]
+    fn an_insert_with_a_malformed_id_is_refused_and_the_session_handed_back() {
+        // Grok 6 on PR #73: shape is checked in every build, not only debug.
+        let pool: SessionPool<FakeSession> = SessionPool::new();
+        let refused = pool.insert("nope".to_string(), key("a@example.com"), fake("x"));
+        assert_eq!(refused, Err((PoolError::BadId, fake("x"))));
+        assert!(pool.is_empty());
+    }
+
+    #[test]
+    fn an_insert_under_an_id_already_in_the_map_is_refused_not_overwritten() {
+        // Grok 6 on PR #73: an overwrite would drop the sitting session inside
+        // the map lock with nothing returned for LOGOUT.
+        let (pool, id) = pool_with_one();
+        let refused = pool.insert(id.clone(), key("b@example.com"), fake("intruder"));
+        assert_eq!(refused, Err((PoolError::BadId, fake("intruder"))));
+        assert_eq!(pool.len(), 1);
+        assert_eq!(
+            pool.remove(&id),
+            Some(fake("a")),
+            "the sitting session is untouched"
+        );
     }
 
     #[test]

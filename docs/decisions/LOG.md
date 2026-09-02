@@ -1300,3 +1300,35 @@
   sessions concurrently (`join_all`), as at exit, so two slow servers cost one budget before
   the other windows hear about it. N5 — the `Drop` comment named the wrong path. Raw output
   in `docs/reviews/2026-09-03-pr73-gemini-raw.md`.
+- **2026-09-03 — PR #73 (E2 part 3) review, second leg (Tier 2).** Grok 4.6 via the `grok`
+  CLI on the same diff `5ae7a7c..6d4b49a` (~14 minutes): CHANGES REQUESTED (1H 1M 6L 2N).
+  Its ownership, cancellation, HRTB, first-open and once-only-retry checks passed. Two
+  findings duplicated Gemini's (M2 = Gemini H1, L3 = Gemini M2 plus "await the listener
+  before the first open", which was adopted on top). **Adopted:** **H1 — the dual race.**
+  A config built before another window's bump whose Rust command *starts after* it reads
+  the current generation, connects with the retired credential (an access token that still
+  logs in, in the OAuth-revocation case), and `insert` accepts it — `StaleCredential` can
+  only see a generation that moved *during* the command. Real, and the mirror of the
+  interleaving the build had closed. Closed on the frontend: a per-account invalidation
+  epoch, bumped by this window's own invalidation and by another window's event; the open
+  snapshots it before building the config, and if it moved when Rust answers, the id is
+  closed (Rust LOGOUTs it) and the open retried once with a rebuilt config; the identity
+  is recorded *before* the open so a first-ever open can be matched to the event; the
+  broadcast now carries the caller's nonce (bounded at 64 chars) so the invalidating
+  window ignores its own echo instead of reopening for nothing. L4 — the event is emitted
+  right after the bump, before the LOGOUTs, and a failed broadcast is logged. L6 — `insert`
+  shape-checks the id in every build and refuses an id already in the map (`BadId`, a new
+  pool error) rather than overwriting the sitting session inside the lock. L7 — the
+  listener drops a payload that is not `{username, host, nonce}` strings. N9 — the wait on a
+  pending invalidation is bounded at 8 s. N10 — the live folder-isolation test reads *back*
+  from A after B (own marker per folder; UID list unchanged). **Recorded as accepted
+  residuals in the spec's threat pass, not changed:** L5 — spawned LOGOUTs are best-effort
+  and outside the exit drain (a join set for three rare paths is not worth the machinery;
+  documented on `spawn_logout`); L8 — an in-flight operation completes against a socket
+  the invalidation meant to kill, then the orphan is logged out; the alternative Grok
+  offered, failing `release_ok` after a bump, would report a completed server-side side
+  effect as a failure and was **declined**; L7's second half — any renderer can emit the
+  event, which is a cache-drop DoS bounded by the cap, not an authz bypass. Raw output in
+  `docs/reviews/2026-09-03-pr73-grok-raw.md`. **Independent samples, again:** Gemini found
+  the listener lock-out and the sequential LOGOUTs; Grok found the dual race, the overwrite
+  and the test's missing half; neither found the other's.

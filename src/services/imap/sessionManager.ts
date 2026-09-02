@@ -93,7 +93,23 @@ export const SESSIONS_INVALIDATED_EVENT = "velo-imap-sessions-invalidated";
 interface SessionsInvalidatedPayload {
   username: string;
   host: string;
+  /** Echo of the nonce the invalidating window sent, so it can skip itself. */
+  nonce: string;
 }
+
+function isSessionsInvalidatedPayload(value: unknown): value is SessionsInvalidatedPayload {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.username === "string" && typeof v.host === "string" && typeof v.nonce === "string";
+}
+
+/**
+ * How long an open waits for this window's pending invalidation before going
+ * ahead anyway. Rust bounds its side (two LOGOUTs at 3 s each); the IPC call
+ * itself is not bounded, and a stuck one must not wedge every later open —
+ * the `StaleCredential` reopen is the backstop (review, Grok 9).
+ */
+const PENDING_INVALIDATION_BUDGET_MS = 8_000;
 
 /**
  * Pause before retrying a busy session.
@@ -130,38 +146,90 @@ const accountIdents = new Map<string, { username: string; host: string }>();
  */
 const pendingInvalidations = new Map<string, Promise<void>>();
 
+/**
+ * Invalidation epoch per account: bumped by this window's own invalidation
+ * and by another window's event. An open snapshots it before building its
+ * config and compares after Rust answers; a change means the config may carry
+ * the retired credential while Rust, which tags by generation, could not tell
+ * (review, Grok 1 — the dual of the race `StaleCredential` closes).
+ */
+const invalidationEpochs = new Map<string, number>();
+
+/** Nonces of invalidations this window sent, so it can skip its own echo. */
+const ownInvalidationNonces = new Set<string>();
+
+function epochOf(accountId: string): number {
+  return invalidationEpochs.get(accountId) ?? 0;
+}
+
+function bumpEpoch(accountId: string): void {
+  invalidationEpochs.set(accountId, epochOf(accountId) + 1);
+}
+
 function cacheKey(accountId: string, kind: SessionKind): CacheKey {
   return `${accountId}::${kind}`;
 }
 
 async function openSession(accountId: string, kind: SessionKind): Promise<SessionId> {
+  // The listener first, so an invalidation that lands during this open is
+  // heard rather than missed (review, Grok 3). A failed registration is
+  // already logged and does not block.
+  await ensureInvalidationListener();
+
   // A failed invalidation must not block the open — it only costs a stale
-  // session the reaper will take — so the wait swallows the rejection; the
-  // invalidation's own caller still sees it.
-  await pendingInvalidations.get(accountId)?.catch(() => undefined);
+  // session the reaper will take — so the wait swallows the rejection (the
+  // invalidation's own caller still sees it), and it is bounded.
+  const pending = pendingInvalidations.get(accountId);
+  if (pending) {
+    await Promise.race([pending.catch(() => undefined), delay(PENDING_INVALIDATION_BUDGET_MS)]);
+  }
 
   const account: DbAccount | null = await getAccount(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
 
+  const id = await openAgainstCurrentCredential(accountId, account, 0);
+  sessions.set(cacheKey(accountId, kind), id);
+  return id;
+}
+
+/**
+ * One open, retried **once** when it cannot be trusted to carry the current
+ * credential: Rust refused it (`StaleCredential`), or an invalidation landed
+ * while it was in flight (the epoch moved). Never a loop — a second miss
+ * surfaces.
+ */
+async function openAgainstCurrentCredential(
+  accountId: string,
+  account: DbAccount,
+  attempt: number,
+): Promise<SessionId> {
+  const epoch = epochOf(accountId);
+
   // Always through the fresh-token builder (Decision 3): a pooled session may
   // outlive the access token that opened it, but it must never be *opened*
   // with a stale one.
-  let config = await buildImapConfigWithFreshToken(account);
+  const config = await buildImapConfigWithFreshToken(account);
+  // Recorded before the open, so an invalidation event that lands while the
+  // open is in flight can be mapped onto this account (review, Grok 1).
+  accountIdents.set(accountId, { username: config.username, host: config.host });
+
   let id: SessionId;
   try {
     id = await imapSessionOpen(config);
   } catch (err) {
-    // Rust refused to pool the session because a credential bump landed during
-    // the open's round trip (another window's invalidation, typically). The
-    // config is rebuilt so the reopen carries the current credential, and it is
-    // tried exactly once — a second refusal surfaces.
-    if (!isPoolError(err, STALE_CREDENTIAL)) throw err;
-    config = await buildImapConfigWithFreshToken(account);
-    id = await imapSessionOpen(config);
+    if (!isPoolError(err, STALE_CREDENTIAL) || attempt > 0) throw err;
+    return openAgainstCurrentCredential(accountId, account, attempt + 1);
   }
 
-  sessions.set(cacheKey(accountId, kind), id);
-  accountIdents.set(accountId, { username: config.username, host: config.host });
+  if (epochOf(accountId) !== epoch) {
+    // Rust accepted it under the current generation, but the config was built
+    // before an invalidation this window has since heard about. Close it
+    // (Rust logs it out) rather than cache it.
+    void imapSessionClose(id).catch(() => undefined);
+    if (attempt > 0) throw new Error(STALE_CREDENTIAL);
+    return openAgainstCurrentCredential(accountId, account, attempt + 1);
+  }
+
   return id;
 }
 
@@ -181,7 +249,7 @@ function forgetAccount(accountId: string): void {
   forget(accountId, "interactive");
 }
 
-let invalidationListenerStarted = false;
+let listenerReady: Promise<void> | null = null;
 
 /**
  * Hear other windows' invalidations (REQ-3.2). Registered once per window,
@@ -190,29 +258,51 @@ let invalidationListenerStarted = false;
  *
  * Only the identity travels; each window maps it onto the accounts *it* has
  * opened. An identity this window never opened is a no-op.
+ *
+ * Resolves once the listener is registered, and never rejects: a failed
+ * registration is logged, the next call tries again rather than giving up for
+ * the window's life (review, Gemini M2), and an open proceeds either way.
  */
-function ensureInvalidationListener(): void {
-  if (invalidationListenerStarted) return;
-  invalidationListenerStarted = true;
-  listen<SessionsInvalidatedPayload>(SESSIONS_INVALIDATED_EVENT, (event) => {
+function ensureInvalidationListener(): Promise<void> {
+  if (listenerReady) return listenerReady;
+  listenerReady = listen<unknown>(SESSIONS_INVALIDATED_EVENT, (event) => {
     onSessionsInvalidated(event.payload);
-  }).catch((err: unknown) => {
-    // Without the listener a pop-out still self-heals through NoSuchSession;
-    // it just pays one failed call first. Worth a line, not a failure — and
-    // the next call tries again rather than giving up for the window's life
-    // (review, Gemini M2).
-    invalidationListenerStarted = false;
-    console.warn("[sessionManager] Could not listen for session invalidations:", err);
-  });
+  })
+    .then(() => undefined)
+    .catch((err: unknown) => {
+      // Without the listener a pop-out still self-heals through NoSuchSession;
+      // it just pays one failed call first. Worth a line, not a failure.
+      listenerReady = null;
+      console.warn("[sessionManager] Could not listen for session invalidations:", err);
+    });
+  return listenerReady;
 }
 
-/** The listener's body, exported for tests and free of any Tauri surface. */
-export function onSessionsInvalidated(payload: SessionsInvalidatedPayload): void {
+/**
+ * The listener's body, exported for tests and free of any Tauri surface.
+ *
+ * Any window can emit this event name, so the payload is checked before use
+ * and a malformed one is dropped rather than thrown inside the plugin's
+ * callback (review, Grok 7). This window's own broadcast — recognised by the
+ * nonce it sent — is skipped: it already forgot its ids, and bumping its epoch
+ * again would make the open that follows its own invalidation reopen for
+ * nothing.
+ */
+export function onSessionsInvalidated(payload: unknown): void {
+  if (!isSessionsInvalidatedPayload(payload)) return;
+  if (ownInvalidationNonces.delete(payload.nonce)) return;
   for (const [accountId, ident] of accountIdents) {
     if (ident.username === payload.username && ident.host === payload.host) {
       forgetAccount(accountId);
+      bumpEpoch(accountId);
     }
   }
+}
+
+/** A per-call nonce for the invalidation broadcast; never a secret. */
+function newInvalidationNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
 export interface WithSessionOptions {
@@ -240,7 +330,6 @@ export async function withSession<T>(
   opts: WithSessionOptions,
   fn: (id: SessionId) => Promise<T>,
 ): Promise<T> {
-  ensureInvalidationListener();
   const retrySafe = opts.retrySafe ?? true;
 
   let id: SessionId;
@@ -318,13 +407,18 @@ export async function closeAccountSessions(accountId: string): Promise<void> {
  */
 export async function invalidateAccountCredentials(accountId: string): Promise<void> {
   forgetAccount(accountId);
+  // An open already in flight for this account was built before this point;
+  // the epoch tells it so when it returns.
+  bumpEpoch(accountId);
   let ident = accountIdents.get(accountId);
   if (!ident) {
     const account = await getAccount(accountId);
     if (!account) return;
     ident = imapIdentityOf(account);
   }
-  const pending = imapSessionsInvalidate(ident.username, ident.host).finally(() => {
+  const nonce = newInvalidationNonce();
+  ownInvalidationNonces.add(nonce);
+  const pending = imapSessionsInvalidate(ident.username, ident.host, nonce).finally(() => {
     if (pendingInvalidations.get(accountId) === pending) {
       pendingInvalidations.delete(accountId);
     }
@@ -339,6 +433,8 @@ export async function closeAllSessions(): Promise<void> {
   sessions.clear();
   accountIdents.clear();
   pendingInvalidations.clear();
+  invalidationEpochs.clear();
+  ownInvalidationNonces.clear();
   await Promise.all(ids.map((id) => imapSessionClose(id)));
 }
 

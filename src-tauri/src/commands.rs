@@ -116,13 +116,20 @@ pub async fn imap_session_close(
 /// receipt, so a pop-out does not have to fail one call to learn its id is gone.
 pub const SESSIONS_INVALIDATED_EVENT: &str = "velo-imap-sessions-invalidated";
 
-/// Payload of [`SESSIONS_INVALIDATED_EVENT`]: the account identity, never a
-/// session id and never a credential.
+/// Payload of [`SESSIONS_INVALIDATED_EVENT`]: the account identity and the
+/// caller's nonce — never a session id and never a credential. The window
+/// that asked for the invalidation already forgot its ids; the echoed nonce
+/// lets it recognise and ignore its own broadcast (review, Grok 1).
 #[derive(Clone, serde::Serialize)]
 pub struct SessionsInvalidated {
     pub username: String,
     pub host: String,
+    pub nonce: String,
 }
+
+/// Longest nonce accepted: a UUID is 36 characters; the payload goes to every
+/// window, so a caller cannot inflate it.
+const MAX_INVALIDATION_NONCE_LEN: usize = 64;
 
 /// Invalidate every session for an account after a credential change.
 ///
@@ -135,19 +142,32 @@ pub async fn imap_sessions_invalidate(
     pool: tauri::State<'_, ImapPool>,
     username: String,
     host: String,
+    nonce: String,
 ) -> Result<(), String> {
+    if nonce.len() > MAX_INVALIDATION_NONCE_LEN {
+        return Err("invalidation nonce too long".to_string());
+    }
     let ident = AccountIdent { username, host };
-    // Concurrently, as at exit: two slow servers must not cost two budgets
-    // before the other windows hear about it (review, Gemini L4).
     let evicted = pool.bump_credential_version(&ident);
-    futures::future::join_all(evicted.into_iter().map(logout)).await;
-    let _ = app.emit(
+
+    // The map is already clear, so tell the other windows *now*: their cached
+    // ids are dead from this point, and waiting for the LOGOUTs would only
+    // cost them `NoSuchSession` round trips for the whole budget (review,
+    // Grok 4). A failed broadcast is worth a line: no window forgets.
+    if let Err(err) = app.emit(
         SESSIONS_INVALIDATED_EVENT,
         SessionsInvalidated {
-            username: ident.username,
-            host: ident.host,
+            username: ident.username.clone(),
+            host: ident.host.clone(),
+            nonce,
         },
-    );
+    ) {
+        log::warn!("Could not broadcast the session invalidation: {err}");
+    }
+
+    // Concurrently, as at exit: two slow servers must not cost two budgets
+    // (review, Gemini L4).
+    futures::future::join_all(evicted.into_iter().map(logout)).await;
     Ok(())
 }
 
@@ -167,6 +187,12 @@ pub async fn logout(mut session: ImapSession) {
 }
 
 /// LOGOUT on a background task, for callers that must not wait on it.
+///
+/// Best-effort by construction: the session is already out of the map, so the
+/// exit hook's drain cannot see it, and a task still running when the runtime
+/// shuts down is dropped with its socket. Bounded by `LOGOUT_TIMEOUT` either
+/// way. Used only where the alternative is a caller stalled on a stranger's
+/// server (recorded as a residual in SPEC-E2-3; review, Grok 5).
 fn spawn_logout(session: ImapSession) {
     tauri::async_runtime::spawn(logout(session));
 }
@@ -698,37 +724,51 @@ mod live_tests {
         assert!(matches!(inserted, Ok(None)), "first insert is under the cap");
 
         let folder_b = format!("E2Iso{}", std::process::id());
-        let marker = format!("<e2-iso-{}@example.com>", std::process::id());
+        let marker_a = format!("<e2-iso-a-{}@example.com>", std::process::id());
+        let marker_b = format!("<e2-iso-b-{}@example.com>", std::process::id());
 
-        // Folder A (INBOX) first, then B, on the same checked-out session.
-        let (inbox_uids, b_uids, b_body) =
+        // A (INBOX), then B, then A again, on the same checked-out session:
+        // the read *back* on A is the half a one-way test misses (review,
+        // Grok 10).
+        let (inbox_before, inbox_after, a_body, b_body) =
             with_pooled_session(&pool, &id, |session| {
                 let folder_b = folder_b.clone();
-                let marker = marker.clone();
+                let marker_a = marker_a.clone();
+                let marker_b = marker_b.clone();
                 async move {
-                    let inbox = imap_client::search_all_uids(session, "INBOX").await?;
-                    let _ = session.create(&folder_b).await; // may exist from a prior run
-                    let raw = format!(
-                        "From: a@example.com\r\nTo: b@example.com\r\nSubject: E2 isolation\r\n\
-                         Message-ID: {marker}\r\n\r\nfolder B only\r\n"
+                    let raw_a = format!(
+                        "From: a@example.com\r\nTo: b@example.com\r\nSubject: E2 isolation A\r\n\
+                         Message-ID: {marker_a}\r\n\r\nINBOX only\r\n"
                     );
-                    imap_client::append_message(session, &folder_b, None, raw.as_bytes()).await?;
+                    imap_client::append_message(session, "INBOX", None, raw_a.as_bytes()).await?;
+                    let inbox_before = imap_client::search_all_uids(session, "INBOX").await?;
+                    let a_uid = *inbox_before.iter().max().expect("the INBOX marker is there");
+
+                    let _ = session.create(&folder_b).await; // may exist from a prior run
+                    let raw_b = format!(
+                        "From: a@example.com\r\nTo: b@example.com\r\nSubject: E2 isolation B\r\n\
+                         Message-ID: {marker_b}\r\n\r\nfolder B only\r\n"
+                    );
+                    imap_client::append_message(session, &folder_b, None, raw_b.as_bytes()).await?;
                     let b = imap_client::search_all_uids(session, &folder_b).await?;
-                    let newest = *b.iter().max().expect("the appended message is in B");
-                    let body = imap_client::fetch_raw_message(session, &folder_b, newest).await?;
-                    Ok((inbox, b, body))
+                    let b_uid = *b.iter().max().expect("the appended message is in B");
+                    let b_body = imap_client::fetch_raw_message(session, &folder_b, b_uid).await?;
+
+                    // Back to A: the same UID must still name A's message.
+                    let inbox_after = imap_client::search_all_uids(session, "INBOX").await?;
+                    let a_body = imap_client::fetch_raw_message(session, "INBOX", a_uid).await?;
+                    Ok((inbox_before, inbox_after, a_body, b_body))
                 }
                 .boxed()
             })
             .await
             .expect("operations over one session");
 
-        assert!(!b_uids.is_empty(), "B has the appended message");
-        assert!(b_body.contains(&marker), "the fetch after switching folders returns B's data");
-        // INBOX's UID list was taken before B was touched; if the session had
-        // leaked B's selection into INBOX's query the two would not be
-        // independent. They were fetched through one session, in sequence.
-        eprintln!("INBOX uids={inbox_uids:?}, {folder_b} uids={b_uids:?}");
+        assert!(b_body.contains(&marker_b), "the fetch after switching to B returns B's data");
+        assert!(a_body.contains(&marker_a), "the fetch after switching back returns A's data");
+        assert!(!a_body.contains(&marker_b), "nothing of B leaked into A");
+        assert_eq!(inbox_before, inbox_after, "touching B changed nothing in A");
+        eprintln!("INBOX uids={inbox_after:?}");
 
         for session in pool.drain() {
             logout(session).await;

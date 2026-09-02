@@ -284,7 +284,27 @@ new sentinel and event are additive and disappear with the code.
 - **Elevation:** the lookup stays in each command body (through the helper it calls), not
   in middleware; a skipped check is a compile error because the session only exists inside
   the guard.
-- **Residual:** per-window binding (ADR-003, P11).
+- **Residual:** per-window binding (ADR-003, P11). **Added after review:**
+  - *In-flight operations are not revoked* (Grok 8). `bump_credential_version` skips a
+    checked-out entry; the operation completes against the socket the invalidation meant
+    to kill, then `release_ok` returns the orphan and it is logged out. Accepted: cancelling
+    a `&mut` session from another task is not protocol-safe, and reporting the completed
+    operation as a failure would mislead the frontend about a side effect that happened.
+    Revocation is immediate for every *next* command, not for the one already on the wire.
+  - *Spawned LOGOUTs are best-effort* (Grok 5). The cap's victim, a `release_ok` orphan and
+    a refused open are logged out on a background task that the exit drain cannot see; a
+    task still running at runtime shutdown is dropped with its socket. Bounded by 3 s.
+  - *Any window can emit the invalidation event* (Grok 7). It carries no secret and grants
+    nothing: the worst a rogue renderer can do with it is make every window drop its
+    cached ids and pay a reopen, bounded by the per-account cap. The listener drops a
+    payload that is not `{username, host, nonce}` strings, and ignores its own nonce.
+  - *The dual race* (Grok 1) — a config built before another window's bump whose Rust
+    command starts after it, so `insert` sees the current generation while the socket
+    was authenticated with the retired credential — is closed on the frontend: each
+    account keeps an invalidation epoch, bumped by a local invalidation and by another
+    window's event; an open that returns into a changed epoch is closed (Rust logs it out)
+    and retried once with a rebuilt config. Rust's generation check remains the backstop
+    for the interleaving it can see.
 
 ## Review
 Two legs on the PR: Gemini 3.7 via `agy`; Grok 4.6 via the `grok` CLI when its ~12 minutes

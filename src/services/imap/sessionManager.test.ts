@@ -387,7 +387,11 @@ describe("credential invalidation", () => {
 
     await invalidateAccountCredentials("acc-1");
 
-    expect(mockInvalidate).toHaveBeenCalledWith("user@example.com", "imap.example.com");
+    expect(mockInvalidate).toHaveBeenCalledWith(
+      "user@example.com",
+      "imap.example.com",
+      expect.any(String),
+    );
   });
 
   it("forgets the cached ids so the next call reopens", async () => {
@@ -412,7 +416,11 @@ describe("credential invalidation", () => {
 
     await invalidateAccountCredentials("acc-never-opened");
 
-    expect(mockInvalidate).toHaveBeenCalledWith("user@example.com", "imap.example.com");
+    expect(mockInvalidate).toHaveBeenCalledWith(
+      "user@example.com",
+      "imap.example.com",
+      expect.any(String),
+    );
     expect(mockOpen).not.toHaveBeenCalled();
     expect(mockBuildConfig).not.toHaveBeenCalled();
   });
@@ -447,6 +455,24 @@ describe("an open waits for this window's pending invalidation (SPEC-E2-3 REQ-2.
     expect(mockInvalidate.mock.invocationCallOrder[0]).toBeLessThan(
       mockOpen.mock.invocationCallOrder[1]!,
     );
+  });
+
+  it("stops waiting after its budget when the invalidation never answers (Grok 9)", async () => {
+    vi.useFakeTimers();
+    try {
+      await withSession("acc-1", "sync", {}, async (id) => id);
+      mockInvalidate.mockImplementation(() => new Promise<void>(() => {}));
+      void invalidateAccountCredentials("acc-1");
+
+      const opened = withSession("acc-1", "sync", {}, async (id) => id);
+      await vi.advanceTimersByTimeAsync(7_999);
+      expect(mockOpen).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(2);
+
+      expect(await opened).toBe("session-2");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("still opens when the invalidation itself fails", async () => {
@@ -502,18 +528,104 @@ describe("a stale credential generation at open (SPEC-E2-3 REQ-2.2)", () => {
 });
 
 describe("another window's invalidation (SPEC-E2-3 REQ-3)", () => {
-  function deliver(payload: { username: string; host: string }): void {
+  function deliver(payload: unknown): void {
     const registered = listeners.filter((l) => l.name === "velo-imap-sessions-invalidated");
     expect(registered.length).toBeGreaterThan(0);
     for (const l of registered) l.handler({ payload });
   }
 
-  it("registers the listener once per window, on first use", async () => {
-    await withSession("acc-1", "sync", {}, async (id) => id);
-    await withSession("acc-1", "interactive", {}, async (id) => id);
+  /** What another window's invalidation looks like on the wire. */
+  function fromOtherWindow(username: string, host = "imap.example.com") {
+    return { username, host, nonce: "another-window" };
+  }
 
-    const names = listeners.map((l) => l.name);
-    expect(names.filter((n) => n === "velo-imap-sessions-invalidated")).toHaveLength(1);
+  it("registers the listener before the first open, so nothing in flight is missed", async () => {
+    // The listener is module state; a fresh module instance is the only way
+    // to observe its first registration from inside a test.
+    vi.resetModules();
+    const fresh = await import("./sessionManager");
+
+    await fresh.withSession("acc-1", "sync", {}, async (id) => id);
+
+    expect(mockListen).toHaveBeenCalledTimes(1);
+    expect(mockListen.mock.invocationCallOrder[0]).toBeLessThan(
+      mockOpen.mock.invocationCallOrder[0]!,
+    );
+    await fresh.closeAllSessions();
+  });
+
+  it("closes and reopens once when the event lands while an open is in flight (Grok 1)", async () => {
+    // The config was built before another window's bump; Rust, which tags by
+    // generation, accepts the socket. The epoch says otherwise.
+    let finishFirstOpen!: (id: string) => void;
+    mockOpen
+      .mockImplementationOnce(() => new Promise<string>((resolve) => (finishFirstOpen = resolve)))
+      .mockResolvedValueOnce("session-current");
+
+    const opened = withSession("acc-1", "sync", {}, async (id) => id);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+
+    // Another window invalidated this account. This is the first-ever open in
+    // this window, so the identity had to be recorded before the open.
+    deliver(fromOtherWindow("user@example.com"));
+    finishFirstOpen("session-retired");
+
+    expect(await opened).toBe("session-current");
+    expect(mockClose).toHaveBeenCalledWith("session-retired");
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+    expect(mockBuildConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after the one retry when the epoch keeps moving", async () => {
+    mockOpen.mockImplementation(async () => {
+      deliver(fromOtherWindow("user@example.com"));
+      return "session-x";
+    });
+
+    await expect(withSession("acc-1", "sync", {}, async (id) => id)).rejects.toThrow(
+      "velo:pool:StaleCredential",
+    );
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+    expect(mockClose).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores the echo of its own invalidation", async () => {
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await invalidateAccountCredentials("acc-1");
+    const nonce = mockInvalidate.mock.calls[0]![2];
+    const reopened = await withSession("acc-1", "sync", {}, async (id) => id);
+
+    deliver({ username: "user@example.com", host: "imap.example.com", nonce });
+
+    const after = await withSession("acc-1", "sync", {}, async (id) => id);
+    expect(after).toBe(reopened);
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("drops a malformed payload instead of throwing inside the plugin callback", async () => {
+    await withSession("acc-1", "sync", {}, async (id) => id);
+
+    expect(() => deliver({ username: 1 })).not.toThrow();
+    expect(() => deliver(null)).not.toThrow();
+    expect(() => deliver({ username: "user@example.com", host: "imap.example.com" })).not.toThrow();
+
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers the listener once per window, on first use", async () => {
+    vi.resetModules();
+    const fresh = await import("./sessionManager");
+
+    await fresh.withSession("acc-1", "sync", {}, async (id) => id);
+    await fresh.withSession("acc-1", "interactive", {}, async (id) => id);
+
+    expect(mockListen).toHaveBeenCalledTimes(1);
+    expect(mockListen).toHaveBeenCalledWith("velo-imap-sessions-invalidated", expect.any(Function));
+    await fresh.closeAllSessions();
   });
 
   it("tries again on the next call when registration failed", async () => {
@@ -544,7 +656,7 @@ describe("another window's invalidation (SPEC-E2-3 REQ-3)", () => {
     await withSession("acc-1", "interactive", {}, async (id) => id);
     expect(mockOpen).toHaveBeenCalledTimes(2);
 
-    deliver({ username: "user@example.com", host: "imap.example.com" });
+    deliver(fromOtherWindow("user@example.com"));
 
     await withSession("acc-1", "sync", {}, async (id) => id);
     await withSession("acc-1", "interactive", {}, async (id) => id);
@@ -563,7 +675,7 @@ describe("another window's invalidation (SPEC-E2-3 REQ-3)", () => {
     await withSession("acc-2", "sync", {}, async (id) => id);
     expect(mockOpen).toHaveBeenCalledTimes(2);
 
-    deliver({ username: "acc-1@example.com", host: "imap.example.com" });
+    deliver(fromOtherWindow("acc-1@example.com"));
 
     await withSession("acc-2", "sync", {}, async (id) => id);
     expect(mockOpen).toHaveBeenCalledTimes(2);
@@ -574,7 +686,7 @@ describe("another window's invalidation (SPEC-E2-3 REQ-3)", () => {
   it("ignores an identity this window never opened", async () => {
     await withSession("acc-1", "sync", {}, async (id) => id);
 
-    deliver({ username: "stranger@example.com", host: "imap.example.com" });
+    deliver(fromOtherWindow("stranger@example.com"));
 
     await withSession("acc-1", "sync", {}, async (id) => id);
     expect(mockOpen).toHaveBeenCalledTimes(1);
