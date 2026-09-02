@@ -232,11 +232,11 @@ Tailwind CSS v4 — uses `@import "tailwindcss"`, `@theme {}` for custom propert
 
 Vitest + jsdom. Setup file: `src/test/setup.ts` (imports `@testing-library/jest-dom/vitest`). Config: `globals: true` (no imports needed for `describe`, `it`, `expect`). Tests are colocated with source files (e.g., `uiStore.test.ts` next to `uiStore.ts`). Zustand test pattern: `useStore.setState()` in beforeEach, assert via `.getState()`.
 
-156 test files across services (85), components (34), utils (17), stores (9), constants (4), hooks (3), router (2), config (1), test (1). Both numbers are measured by `npm run docs:check`, not maintained by hand.
+157 test files across services (86), components (34), utils (17), stores (9), constants (4), hooks (3), router (2), config (1), test (1). Both numbers are measured by `npm run docs:check`, not maintained by hand.
 
 ## Database
 
-SQLite via Tauri SQL plugin. 25 migrations (version-tracked in `_migrations` table, transactional). Custom `splitStatements()` handles BEGIN...END blocks in triggers.
+SQLite via Tauri SQL plugin. 26 migrations (version-tracked in `_migrations` table, transactional). Custom `splitStatements()` handles BEGIN...END blocks in triggers.
 
 Key tables (37 total): `accounts` (with `provider` "gmail_api"|"imap", IMAP/SMTP host/port/security fields, `auth_method`, encrypted `imap_password`, optional `imap_username`), `messages` (with FTS5 index `messages_fts`, `auth_results`, `message_id_header`, `references_header`, `in_reply_to_header`, `imap_uid`, `imap_folder`), `threads` (with `is_pinned`, `is_muted`), `thread_labels`, `labels` (with `imap_folder_path`, `imap_special_use`), `contacts` (frequency-ranked for autocomplete, with `first_contacted_at`), `attachments` (with `cached_at`, `cache_size`, `imap_part_id`), `filter_rules` (criteria/actions as JSON), `scheduled_emails` (status: pending/sent/failed), `templates` (with optional keyboard shortcut), `signatures`, `image_allowlist`, `settings` (key-value store), `ai_cache`, `thread_categories`, `calendar_events`, `follow_up_reminders`, `notification_vips`, `unsubscribe_actions`, `bundle_rules`, `bundled_threads`, `send_as_aliases`, `smart_folders`, `link_scan_results`, `phishing_allowlist`, `quick_steps`, `folder_sync_state` (IMAP UIDVALIDITY/last_uid/modseq tracking per folder), `pending_operations` (offline action queue with retry/backoff), `local_drafts` (offline draft persistence), `writing_style_profiles` (AI writing style per account), `tasks` (full task management with priorities, subtasks, recurrence), `task_tags` (custom task tag colors), `smart_label_rules` (AI auto-labeling rules with optional criteria), `_migrations`.
 

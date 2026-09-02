@@ -861,20 +861,34 @@ pub async fn delta_check_folders(
 ) -> Result<Vec<DeltaCheckResult>, String> {
     let mut results = Vec::with_capacity(folders.len());
 
-    for req in folders {
+    // F-4 REQ-1.2b: a folder that cannot be checked is reported as unchecked,
+    // never dropped. A *timeout* additionally ends the pass: the session is
+    // desynchronised mid-protocol, so every later folder is unchecked too and
+    // nothing further is sent on this connection (the caller's `Err` path
+    // evicts it).
+    let mut idx = 0;
+    while idx < folders.len() {
+        let req = &folders[idx];
+        idx += 1;
+
         let mailbox = match net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {}", req.folder), session.select(&req.folder)).await {
             Ok(Ok(m)) => m,
             Ok(Err(e)) => {
                 log::warn!("delta_check: SELECT {} failed: {e}", req.folder);
+                results.push(DeltaCheckResult::unchecked(&req.folder, req.uidvalidity, format!("SELECT failed: {e}")));
                 continue;
             }
             Err(_) => {
-                log::warn!("delta_check: SELECT {} timed out after {}s", req.folder, IMAP_CMD_TIMEOUT.as_secs());
-                continue;
+                let reason = format!("SELECT timed out after {}s", IMAP_CMD_TIMEOUT.as_secs());
+                log::warn!("delta_check: {} {reason}; abandoning the pass", req.folder);
+                results.push(DeltaCheckResult::unchecked(&req.folder, req.uidvalidity, reason));
+                mark_rest_unchecked(&mut results, &folders[idx..]);
+                return Ok(results);
             }
         };
 
         let current_uidvalidity = mailbox.uid_validity.unwrap_or(0);
+        let exists = mailbox.exists;
         let uidvalidity_changed = req.uidvalidity != 0 && current_uidvalidity != req.uidvalidity;
 
         if uidvalidity_changed {
@@ -883,6 +897,9 @@ pub async fn delta_check_folders(
                 uidvalidity: current_uidvalidity,
                 new_uids: vec![],
                 uidvalidity_changed: true,
+                exists,
+                checked: true,
+                error: None,
             });
             continue;
         }
@@ -897,11 +914,15 @@ pub async fn delta_check_folders(
             }
             Ok(Err(e)) => {
                 log::warn!("delta_check: UID SEARCH {} failed: {e}", req.folder);
-                vec![]
+                results.push(DeltaCheckResult::unchecked(&req.folder, current_uidvalidity, format!("UID SEARCH failed: {e}")));
+                continue;
             }
             Err(_) => {
-                log::warn!("delta_check: UID SEARCH {} timed out after {}s", req.folder, IMAP_SEARCH_TIMEOUT.as_secs());
-                vec![]
+                let reason = format!("UID SEARCH timed out after {}s", IMAP_SEARCH_TIMEOUT.as_secs());
+                log::warn!("delta_check: {} {reason}; abandoning the pass", req.folder);
+                results.push(DeltaCheckResult::unchecked(&req.folder, current_uidvalidity, reason));
+                mark_rest_unchecked(&mut results, &folders[idx..]);
+                return Ok(results);
             }
         };
 
@@ -910,10 +931,24 @@ pub async fn delta_check_folders(
             uidvalidity: current_uidvalidity,
             new_uids,
             uidvalidity_changed: false,
+            exists,
+            checked: true,
+            error: None,
         });
     }
 
     Ok(results)
+}
+
+/// After a timeout, the folders this pass never reached.
+fn mark_rest_unchecked(results: &mut Vec<DeltaCheckResult>, rest: &[DeltaCheckRequest]) {
+    for req in rest {
+        results.push(DeltaCheckResult::unchecked(
+            &req.folder,
+            req.uidvalidity,
+            "not checked: an earlier folder timed out and the session was abandoned".to_string(),
+        ));
+    }
 }
 
 /// Search a folder: SELECT → UID SEARCH, returning UIDs and folder status without fetching bodies.
@@ -2184,5 +2219,30 @@ mod tests {
         assert!(!scrubbed.contains(FAKE_TOKEN), "got {scrubbed}");
         assert!(!scrubbed.contains("user@example.com"), "got {scrubbed}");
         assert!(scrubbed.contains("[redacted]"));
+    }
+
+    // ---------- F-4 REQ-1.2b: every requested folder gets a row ----------
+
+    #[test]
+    fn folders_after_a_timeout_are_reported_unchecked_not_dropped() {
+        let requests = vec![
+            DeltaCheckRequest { folder: "INBOX".into(), last_uid: 10, uidvalidity: 5 },
+            DeltaCheckRequest { folder: "Sent".into(), last_uid: 3, uidvalidity: 6 },
+        ];
+        let mut results = vec![DeltaCheckResult::unchecked("Archive", 4, "SELECT timed out".into())];
+
+        mark_rest_unchecked(&mut results, &requests);
+
+        assert_eq!(results.len(), 3, "one row per folder, including the ones never reached");
+        for r in &results {
+            assert!(!r.checked);
+            assert!(r.new_uids.is_empty(), "an unchecked row carries no observation");
+            assert!(!r.uidvalidity_changed);
+            assert_eq!(r.exists, 0);
+            assert!(r.error.as_deref().is_some_and(|e| !e.is_empty()));
+        }
+        assert_eq!(results[1].folder, "INBOX");
+        assert_eq!(results[1].uidvalidity, 5, "echoes the requested generation, claims nothing new");
+        assert!(results[2].error.as_deref().unwrap().contains("earlier folder timed out"));
     }
 }

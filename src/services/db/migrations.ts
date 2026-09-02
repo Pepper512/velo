@@ -817,6 +817,41 @@ const MIGRATIONS = [
     // were before this migration.
     sql: `ALTER TABLE messages ADD COLUMN moved_to TEXT;`,
   },
+  {
+    version: 26,
+    description:
+      "Vanished-UID reconciliation (F-4): suspect state machine and the flagged-not-expunged counter",
+    // Expand step. `reconcile_suspects` is the two-pass record (SPEC-F-4 rev 5
+    // REQ-1.5): a UID missing from a folder's full server list is `suspect`
+    // on first sight, `confirmed_absent` only after a *later* pass searched
+    // that folder again and still did not list it; the key includes
+    // `uidvalidity` because a regenerated mailbox reuses UIDs and a stale
+    // suspect must not shoot the new tenant. `flagged_not_expunged` is the
+    // per-folder count of `\Deleted`-but-not-expunged mail (#26's no-UIDPLUS
+    // population) that REQ-2.2's gate adds to the local count before
+    // comparing with the server's EXISTS.
+    //
+    // Contract step (not run here): `DROP TABLE reconcile_suspects;` and
+    // `ALTER TABLE folder_sync_state DROP COLUMN flagged_not_expunged;`.
+    // Suspects are advisory state — losing them costs only re-observation.
+    sql: `
+      CREATE TABLE IF NOT EXISTS reconcile_suspects (
+        account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        folder TEXT NOT NULL,
+        uid INTEGER NOT NULL,
+        uidvalidity INTEGER NOT NULL,
+        message_row_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'suspect',
+        first_pass_id TEXT NOT NULL,
+        last_verified_pass_id TEXT,
+        first_seen_at INTEGER DEFAULT (unixepoch()),
+        PRIMARY KEY (account_id, folder, uid, uidvalidity)
+      );
+      CREATE INDEX IF NOT EXISTS idx_reconcile_suspects_status
+        ON reconcile_suspects(account_id, status, last_verified_pass_id);
+      ALTER TABLE folder_sync_state ADD COLUMN flagged_not_expunged INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**

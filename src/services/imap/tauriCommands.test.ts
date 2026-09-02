@@ -17,6 +17,7 @@ import {
   imapSetFlags,
   imapMoveMessages,
   imapDeleteMessages,
+  imapSearchAllUids,
   imapGetFolderStatus,
   imapFetchAttachment,
   smtpSendEmail,
@@ -309,6 +310,34 @@ describe("RemovalResult boundary validation", () => {
     await expect(
       imapMoveMessages('session-abc', "INBOX", [1], "Archive"),
     ).resolves.toMatchObject({ expunged: false, mapping: null });
+  });
+});
+
+describe("imapSearchAllUids boundary validation (F-4)", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("returns a well-formed UID list", async () => {
+    vi.mocked(invoke).mockResolvedValue([1, 5, 9]);
+    await expect(imapSearchAllUids("s", "INBOX")).resolves.toEqual([1, 5, 9]);
+    expect(invoke).toHaveBeenCalledWith("imap_search_all_uids", { sessionId: "s", folder: "INBOX" });
+  });
+
+  it("accepts an empty folder", async () => {
+    vi.mocked(invoke).mockResolvedValue([]);
+    await expect(imapSearchAllUids("s", "INBOX")).resolves.toEqual([]);
+  });
+
+  it.each([
+    ["null", null],
+    ["a non-array", "1,2"],
+    ["a zero UID", [0]],
+    ["a non-integer", [1.5]],
+    ["a string entry", ["5"]],
+  ])("throws rather than returning an empty list for %s (an empty list would read as everything vanished)", async (_label, value) => {
+    vi.mocked(invoke).mockResolvedValue(value);
+    await expect(imapSearchAllUids("s", "INBOX")).rejects.toThrow(/Malformed UID list/);
   });
 });
 

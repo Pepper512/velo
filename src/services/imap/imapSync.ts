@@ -1014,7 +1014,14 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     try {
       const deltaResults = await withSession(accountId, "sync", {}, (id) => imapDeltaCheck(id, deltaRequests));
       deltaResultMap = new Map(deltaResults.map((r) => [r.folder, r]));
-      console.log(`[imapSync] Batch delta check: ${deltaResults.length}/${existingFolders.length} folders checked`);
+      // F-4 REQ-1.2b: the count is of folders actually checked, and each
+      // unchecked one names its reason — a pass missing folders no longer
+      // reads as clean.
+      const checked = deltaResults.filter((r) => r.checked);
+      console.log(`[imapSync] Batch delta check: ${checked.length}/${existingFolders.length} folders checked`);
+      for (const r of deltaResults) {
+        if (!r.checked) console.warn(`[imapSync] Delta check did not cover ${r.folder}: ${r.error ?? "unknown"}`);
+      }
     } catch (err) {
       // Batch check failed — fall back to per-folder checks
       console.warn(`[imapSync] Batch delta check failed, falling back to per-folder:`, err);
@@ -1035,6 +1042,9 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               uidvalidity: currentStatus.uidvalidity,
               new_uids: [],
               uidvalidity_changed: true,
+              exists: currentStatus.exists,
+              checked: true,
+              error: null,
             });
           } else {
             const newUids = await withSession(accountId, "sync", {}, (id) =>
@@ -1045,6 +1055,9 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               uidvalidity: currentStatus.uidvalidity,
               new_uids: newUids,
               uidvalidity_changed: false,
+              exists: currentStatus.exists,
+              checked: true,
+              error: null,
             });
           }
         } catch (folderErr) {
@@ -1058,7 +1071,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
       const savedState = syncStateMap.get(folder.raw_path)!;
       const deltaResult = deltaResultMap.get(folder.raw_path);
 
-      if (!deltaResult) continue;
+      // An unchecked folder carries no observation to act on (F-4 REQ-1.2b).
+      if (!deltaResult || !deltaResult.checked) continue;
 
       try {
         if (deltaResult.uidvalidity_changed) {

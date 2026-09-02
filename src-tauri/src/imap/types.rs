@@ -117,12 +117,43 @@ pub struct DeltaCheckRequest {
     pub uidvalidity: u32,
 }
 
+/// One folder's answer from `delta_check_folders`.
+///
+/// F-4 REQ-1.2b: **every requested folder gets a row.** A folder the check
+/// could not complete comes back with `checked: false` and the reason in
+/// `error`, instead of being silently omitted — a pass that is missing N
+/// folders used to look identical to a clean one, and "no folder reported an
+/// error" is not the same proposition as "every folder was checked". Only the
+/// second is safe to delete on.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DeltaCheckResult {
     pub folder: String,
     pub uidvalidity: u32,
     pub new_uids: Vec<u32>,
     pub uidvalidity_changed: bool,
+    /// The server's `EXISTS` at SELECT — F-4's gate compares it with the local
+    /// count to decide whether a full UID list is worth fetching (REQ-2.1).
+    pub exists: u32,
+    /// `true` only if SELECT and the UID SEARCH both completed for this folder.
+    pub checked: bool,
+    /// Why `checked` is `false`, for the log and the pass report.
+    pub error: Option<String>,
+}
+
+impl DeltaCheckResult {
+    /// The row for a folder this pass could not check. Carries nothing the
+    /// caller could mistake for an observation: no UIDs, no UIDVALIDITY claim.
+    pub fn unchecked(folder: &str, uidvalidity: u32, reason: String) -> Self {
+        Self {
+            folder: folder.to_string(),
+            uidvalidity,
+            new_uids: Vec::new(),
+            uidvalidity_changed: false,
+            exists: 0,
+            checked: false,
+            error: Some(reason),
+        }
+    }
 }
 
 /// What a move or delete actually did to the source folder (brief REQ-4.1).
