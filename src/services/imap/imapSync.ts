@@ -1,8 +1,15 @@
-import type { ImapConfig, ImapMessage, DeltaCheckRequest, DeltaCheckResult } from "./tauriCommands";
+import type {
+  ImapMessage,
+  ImapFetchResult,
+  DeltaCheckRequest,
+  DeltaCheckResult,
+} from "./tauriCommands";
 import {
   imapListFolders,
   imapGetFolderStatus,
   imapFetchMessages,
+  imapRawFetchMessages,
+  isNeedRawFallback,
   imapFetchNewUids,
   imapSearchFolder,
   imapDeltaCheck,
@@ -54,8 +61,18 @@ const CIRCUIT_BREAKER_THRESHOLD = 3;
 const CIRCUIT_BREAKER_DELAY_MS = 15_000;
 /** After this many consecutive failures, skip remaining folders entirely. */
 const CIRCUIT_BREAKER_MAX_FAILURES = 5;
-/** Delay (ms) between folder syncs during initial sync to avoid connection bursts. */
-const INTER_FOLDER_DELAY_MS = 1_000;
+/**
+ * Delay (ms) between folder syncs during initial sync.
+ *
+ * It existed to avoid connection bursts: every folder used to open its own
+ * TCP+TLS session and log out again, and a server watching a client open twenty
+ * connections in twenty seconds may well throttle it. Under pooling the whole
+ * initial sync runs on ONE session, so there is no burst left to space out and
+ * the delay is now only politeness between commands — reduced rather than
+ * removed, because a server's per-command rate limits are its own business
+ * (Done-when 3).
+ */
+const INTER_FOLDER_DELAY_MS = 200;
 
 export function isConnectionError(err: unknown): boolean {
   const msg = String(err).toLowerCase();
@@ -363,8 +380,39 @@ async function storeThreadsAndMessages(
 /**
  * Fetch messages from a folder in batches of BATCH_SIZE.
  */
+/**
+ * Fetch one batch through the pooled `sync` session, with Decision 4(a)'s
+ * escape hatch.
+ *
+ * `imap_fetch_messages` answers `NeedRawFallback` when `async-imap` yielded
+ * nothing for a folder the server did have data in. The raw-TCP retry needs a
+ * credential and the pool deliberately holds none, so it is re-issued here
+ * through the one command that still carries a config. The pooled session has
+ * already been evicted by then — its protocol state is exactly what is in
+ * doubt — so the next batch opens a fresh one.
+ */
+async function fetchMessagesPooled(
+  accountId: string,
+  folder: string,
+  uids: number[],
+): Promise<ImapFetchResult> {
+  try {
+    return await withSession(accountId, "sync", {}, (id) =>
+      imapFetchMessages(id, folder, uids),
+    );
+  } catch (err) {
+    if (!isNeedRawFallback(err)) throw err;
+
+    console.log(`[imapSync] Raw-fetch fallback for folder ${folder}`);
+    const account = await getAccount(accountId);
+    if (!account) throw new Error(`Account ${accountId} not found`);
+    const config = await buildImapConfigWithFreshToken(account);
+    return imapRawFetchMessages(config, folder, uids);
+  }
+}
+
 async function fetchMessagesInBatches(
-  config: ImapConfig,
+  accountId: string,
   folder: string,
   uids: number[],
   onBatch?: (fetched: number, total: number) => void,
@@ -375,7 +423,7 @@ async function fetchMessagesInBatches(
 
   for (let i = 0; i < uids.length; i += BATCH_SIZE) {
     const batch = uids.slice(i, i + BATCH_SIZE);
-    const result = await imapFetchMessages(config, folder, batch);
+    const result = await fetchMessagesPooled(accountId, folder, batch);
 
     allMessages.push(...result.messages);
     uidvalidity = result.folder_status.uidvalidity;
@@ -409,7 +457,6 @@ export async function imapInitialSync(
   }
   const ownAddresses = await getOwnAddresses(accountId);
 
-  const config = await buildImapConfigWithFreshToken(account);
 
   // Phase 1: List and sync folders
   onProgress?.({ phase: "folders", current: 0, total: 1 });
@@ -493,7 +540,9 @@ export async function imapInitialSync(
     try {
       // Phase 2a: Lightweight search — get UIDs only (no message bodies over IPC)
       const sinceDate = computeSinceDate(daysBack);
-      const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
+      const searchResult = await withSession(accountId, "sync", {}, (id) =>
+        imapSearchFolder(id, folder.raw_path, sinceDate),
+      );
       const uidsToFetch = searchResult.uids;
 
       // Reset circuit breaker on success
@@ -515,14 +564,14 @@ export async function imapInitialSync(
         const chunkUids = uidsToFetch.slice(chunkStart, chunkStart + CHUNK_SIZE);
         let chunkResult;
         try {
-          chunkResult = await imapFetchMessages(config, folder.raw_path, chunkUids);
+          chunkResult = await fetchMessagesPooled(accountId, folder.raw_path, chunkUids);
         } catch (chunkErr) {
           // Retry once for transient connection errors
           if (isConnectionError(chunkErr)) {
             console.warn(`[imapSync] Chunk fetch failed in ${folder.path}, retrying in 2s:`, chunkErr);
             await delay(2_000);
             try {
-              chunkResult = await imapFetchMessages(config, folder.raw_path, chunkUids);
+              chunkResult = await fetchMessagesPooled(accountId, folder.raw_path, chunkUids);
             } catch (retryErr) {
               console.error(`[imapSync] Chunk retry failed in ${folder.path}:`, retryErr);
               continue;
@@ -853,7 +902,6 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     throw new Error(`Account ${accountId} not found`);
   }
 
-  const config = await buildImapConfigWithFreshToken(account);
 
   // Get all folders we've synced before
   const syncStates = await getAllFolderSyncStates(accountId);
@@ -892,13 +940,15 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     const folderMapping = mapFolderToLabel(folder);
     try {
       const sinceDate = computeSinceDate(daysBack);
-      const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
+      const searchResult = await withSession(accountId, "sync", {}, (id) =>
+        imapSearchFolder(id, folder.raw_path, sinceDate),
+      );
       consecutiveFailures = 0;
 
       if (searchResult.uids.length === 0) continue;
 
       const { messages, lastUid } = await fetchMessagesInBatches(
-        config,
+        accountId,
         folder.raw_path,
         searchResult.uids,
       );
@@ -946,7 +996,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
     let deltaResultMap: Map<string, DeltaCheckResult>;
     try {
-      const deltaResults = await imapDeltaCheck(config, deltaRequests);
+      const deltaResults = await withSession(accountId, "sync", {}, (id) => imapDeltaCheck(id, deltaRequests));
       deltaResultMap = new Map(deltaResults.map((r) => [r.folder, r]));
       console.log(`[imapSync] Batch delta check: ${deltaResults.length}/${existingFolders.length} folders checked`);
     } catch (err) {
@@ -956,7 +1006,9 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
       for (const folder of existingFolders) {
         const savedState = syncStateMap.get(folder.raw_path)!;
         try {
-          const currentStatus = await imapGetFolderStatus(config, folder.raw_path);
+          const currentStatus = await withSession(accountId, "sync", {}, (id) =>
+            imapGetFolderStatus(id, folder.raw_path),
+          );
           const uidvalidityChanged =
             savedState.uidvalidity !== null &&
             currentStatus.uidvalidity !== savedState.uidvalidity;
@@ -969,7 +1021,9 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               uidvalidity_changed: true,
             });
           } else {
-            const newUids = await imapFetchNewUids(config, folder.raw_path, savedState.last_uid);
+            const newUids = await withSession(accountId, "sync", {}, (id) =>
+              imapFetchNewUids(id, folder.raw_path, savedState.last_uid),
+            );
             deltaResultMap.set(folder.raw_path, {
               folder: folder.raw_path,
               uidvalidity: currentStatus.uidvalidity,
@@ -999,11 +1053,13 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               `Doing full resync of this folder.`,
           );
           const sinceDate = computeSinceDate(daysBack);
-          const searchResult = await imapSearchFolder(config, folder.raw_path, sinceDate);
+          const searchResult = await withSession(accountId, "sync", {}, (id) =>
+        imapSearchFolder(id, folder.raw_path, sinceDate),
+      );
           if (searchResult.uids.length === 0) continue;
 
           const { messages, lastUid } = await fetchMessagesInBatches(
-            config,
+            accountId,
             folder.raw_path,
             searchResult.uids,
           );
@@ -1034,7 +1090,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         if (deltaResult.new_uids.length === 0) continue;
 
         const { messages, lastUid, uidvalidity } = await fetchMessagesInBatches(
-          config,
+          accountId,
           folder.raw_path,
           deltaResult.new_uids,
         );

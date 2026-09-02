@@ -232,10 +232,13 @@ impl<S> SessionPool<S> {
         let session = entry.session.take().ok_or(PoolError::SessionBusy)?;
         entry.last_used = Instant::now();
 
+        let account = entry.account_key.ident.clone();
+
         Ok(SessionGuard {
             pool: self,
             id: id.to_string(),
             session: Some(session),
+            account,
         })
     }
 
@@ -331,6 +334,12 @@ pub struct SessionGuard<'a, S> {
     pool: &'a SessionPool<S>,
     id: String,
     session: Option<Arc<tokio::sync::Mutex<S>>>,
+    /// Who this session belongs to.
+    ///
+    /// Carried on the guard because commands that used to read `config.username`
+    /// and `config.host` no longer receive a config — the pool holds the only
+    /// copy of the account's identity, and the UIDPLUS warning still needs it.
+    account: AccountIdent,
 }
 
 /// Manual, and never renders the session.
@@ -348,6 +357,11 @@ impl<S> std::fmt::Debug for SessionGuard<'_, S> {
 }
 
 impl<S> SessionGuard<'_, S> {
+    /// The account this session is authenticated as.
+    pub fn account(&self) -> &AccountIdent {
+        &self.account
+    }
+
     /// The session to run the operation against.
     pub fn session(&self) -> &Arc<tokio::sync::Mutex<S>> {
         self.session

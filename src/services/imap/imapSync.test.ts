@@ -103,6 +103,7 @@ import {
 } from "@/test/mocks";
 import { imapListFolders, imapSearchFolder, imapFetchMessages } from "./tauriCommands";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
+import { withSession } from "./sessionManager";
 import { getAccount } from "../db/accounts";
 import { withTransaction } from "../db/connection";
 import { upsertMessage, updateMessageThreadIds } from "../db/messages";
@@ -474,10 +475,11 @@ describe("imapInitialSync", () => {
 
     await imapInitialSync("acc-1");
 
-    // Should use imapSearchFolder (lightweight search) with SINCE date filter
+    // Should use imapSearchFolder (lightweight search) with SINCE date filter.
+    // First argument is a pooled session id now, not a config (E2/P15).
     expect(mockImapSearchFolder).toHaveBeenCalledTimes(1);
     expect(mockImapSearchFolder).toHaveBeenCalledWith(
-      expect.objectContaining({ host: "imap.example.com" }),
+      "test-session",
       "INBOX",
       expect.stringMatching(/^\d{1,2}-[A-Z][a-z]{2}-\d{4}$/), // sinceDate in DD-Mon-YYYY format
     );
@@ -485,7 +487,7 @@ describe("imapInitialSync", () => {
     // Then fetch the messages by UID
     expect(mockImapFetchMessages).toHaveBeenCalledTimes(1);
     expect(mockImapFetchMessages).toHaveBeenCalledWith(
-      expect.objectContaining({ host: "imap.example.com" }),
+      "test-session",
       "INBOX",
       [1], // UIDs from search
     );
@@ -795,6 +797,7 @@ describe("sync credential wiring for OAuth accounts", () => {
   const mockGetAccount = vi.mocked(getAccount);
   const mockImapListFolders = vi.mocked(imapListFolders);
   const mockBuildImapConfigWithFreshToken = vi.mocked(buildImapConfigWithFreshToken);
+  const mockWithSession = vi.mocked(withSession);
   const mockGetAllFolderSyncStates = vi.mocked(getAllFolderSyncStates);
 
   beforeEach(() => {
@@ -807,48 +810,53 @@ describe("sync credential wiring for OAuth accounts", () => {
     mockImapListFolders.mockReset();
   });
 
-  // E2/P15 moved the *destination* of these configs: folder listing now takes a
-  // pooled session id, and the credential reaches Rust through
-  // `imap_session_open` instead. The guard is split rather than dropped — the
-  // half imapSync still owns is "always the token-aware builder", asserted
-  // here; the half about the fresh token actually reaching the wire is asserted
-  // end-to-end in sessionManager.test.ts, where that code now lives.
-  it("imapInitialSync builds its config with the token-aware builder", async () => {
+  // This guard has now moved twice, so the trail is written down rather than
+  // left to look like erosion.
+  //
+  // Originally: assert the fresh OAuth token reached `imapListFolders`'s config.
+  // Part 1: folder listing took a session id, so the assertion split — imapSync
+  // still built a config, and that half was asserted here.
+  // Part 2: imapSync builds NO config at all. Every command takes a session id,
+  // and the credential is built exactly once, by `sessionManager` at session
+  // open. So what imapSync owns is now "delegates to the pool", asserted here;
+  // the fresh-token guarantee itself is asserted end to end in
+  // sessionManager.test.ts. Total coverage is unchanged — it just follows the
+  // code.
+  it("imapInitialSync runs its IMAP work through a pooled session", async () => {
     mockGetAccount.mockResolvedValue(
       createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
     );
 
     await imapInitialSync("acc-1");
 
-    expect(mockBuildImapConfigWithFreshToken).toHaveBeenCalled();
-    const config = await mockBuildImapConfigWithFreshToken.mock.results[0]!.value;
-    expect(config.password).toBe("fresh-oauth-token");
-    expect(config.password).not.toBe("");
+    expect(mockWithSession).toHaveBeenCalled();
+    expect(mockWithSession.mock.calls[0]![0]).toBe("acc-1");
+    expect(mockWithSession.mock.calls[0]![1]).toBe("sync");
   });
 
-  it("imapDeltaSync builds its config with the token-aware builder", async () => {
+  it("imapDeltaSync runs its IMAP work through a pooled session", async () => {
     mockGetAccount.mockResolvedValue(
       createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
     );
 
     await imapDeltaSync("acc-1");
 
-    expect(mockBuildImapConfigWithFreshToken).toHaveBeenCalled();
-    const config = await mockBuildImapConfigWithFreshToken.mock.results[0]!.value;
-    expect(config.password).toBe("fresh-oauth-token");
-    expect(config.password).not.toBe("");
+    expect(mockWithSession).toHaveBeenCalled();
+    expect(mockWithSession.mock.calls[0]![0]).toBe("acc-1");
   });
 
-  it("leaves password accounts on their stored password", async () => {
+  it("builds no credential of its own — that is the pool's job now", async () => {
+    // The security half of the change: a sync no longer constructs a password
+    // anywhere. If this fails, a credential has crept back into the sync path.
     mockGetAccount.mockResolvedValue(
-      createMockImapAccount({ id: "acc-1", auth_method: "password" }),
+      createMockImapAccount({ id: "acc-1", auth_method: "oauth2", imap_password: null }),
     );
 
     await imapInitialSync("acc-1");
 
-    const config = await mockBuildImapConfigWithFreshToken.mock.results[0]!.value;
-    expect(config.password).toBe("secret");
+    expect(mockBuildImapConfigWithFreshToken).not.toHaveBeenCalled();
   });
+
 });
 
 /** SPEC-F-1 REQ-1.3 — the IMAP thread-store path consults the snooze rule before upserting. */

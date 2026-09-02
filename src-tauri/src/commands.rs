@@ -109,38 +109,86 @@ pub async fn logout_arc(session: std::sync::Arc<tokio::sync::Mutex<ImapSession>>
     }
 }
 
-#[tauri::command]
-pub async fn imap_list_folders(
-    pool: tauri::State<'_, ImapPool>,
-    session_id: String,
-) -> Result<Vec<ImapFolder>, String> {
-    let guard = pool.acquire(&session_id).map_err(|e| e.to_string())?;
+/// Run one IMAP operation against a pooled session.
+///
+/// The guard is held across the `await`, deliberately: if this future is
+/// dropped mid-operation — cancellation — the guard's `Drop` runs and the entry
+/// stays out of the map. That is the whole point of checkout-removes-entry, and
+/// it only works while the guard and the await share a scope.
+///
+/// `Ok` puts the session back. Anything else leaves it evicted: an `Err` by way
+/// of `release_err`, a panic or a cancellation by way of `Drop`.
+async fn with_pooled_session<T, F, Fut>(
+    pool: &ImapPool,
+    session_id: &str,
+    op: F,
+) -> Result<T, String>
+where
+    F: FnOnce(std::sync::Arc<tokio::sync::Mutex<ImapSession>>) -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let guard = pool.acquire(session_id).map_err(|e| e.to_string())?;
+    let session = guard.session().clone();
 
-    // Checkout has already removed the entry from the map. If this future is
-    // dropped, or the operation panics, the guard's `Drop` leaves it removed and
-    // the connection closes — no `Err` has to reach anyone for that to happen.
-    let result = {
-        let session = guard.session().clone();
-        let mut session = session.lock().await;
-        imap_client::list_folders(&mut session).await
-    };
-
-    match result {
-        Ok(folders) => {
+    match op(session).await {
+        Ok(value) => {
             guard.release_ok();
-            Ok(folders)
+            Ok(value)
         }
-        Err(e) => {
-            // Eviction-on-error (Blocker 1): any Err leaves the session out.
+        Err(err) => {
+            // Eviction-on-error (Blocker 1): the connection may be mid-protocol.
             guard.release_err();
-            Err(e)
+            Err(err)
+        }
+    }
+}
+
+/// `with_pooled_session`, plus the account identity the operation needs.
+///
+/// Only the removal commands want this — they warn once per account when the
+/// server has no UIDPLUS — and they used to read it off the `ImapConfig` they no
+/// longer receive.
+async fn with_pooled_session_for<T, F, Fut>(
+    pool: &ImapPool,
+    session_id: &str,
+    op: F,
+) -> Result<T, String>
+where
+    F: FnOnce(std::sync::Arc<tokio::sync::Mutex<ImapSession>>, AccountIdent) -> Fut,
+    Fut: std::future::Future<Output = Result<T, String>>,
+{
+    let guard = pool.acquire(session_id).map_err(|e| e.to_string())?;
+    let session = guard.session().clone();
+    let account = guard.account().clone();
+
+    match op(session, account).await {
+        Ok(value) => {
+            guard.release_ok();
+            Ok(value)
+        }
+        Err(err) => {
+            guard.release_err();
+            Err(err)
         }
     }
 }
 
 #[tauri::command]
+pub async fn imap_list_folders(
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
+) -> Result<Vec<ImapFolder>, String> {
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::list_folders(&mut session).await
+    })
+    .await
+}
+
+#[tauri::command]
 pub async fn imap_fetch_messages(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uids: Vec<u32>,
 ) -> Result<ImapFetchResult, String> {
@@ -148,79 +196,126 @@ pub async fn imap_fetch_messages(
         return Err("No UIDs provided".to_string());
     }
 
-    // Build a UID set string like "1,5,10,20"
-    let uid_set: String = uids
-        .iter()
+    let uid_set = uid_set(&uids);
+
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        match imap_client::fetch_messages(&mut session, &folder, &uid_set).await {
+            Ok(r) => Ok(r),
+            // Decision 4(a): the raw fallback needs a credential, and the pool
+            // deliberately holds none. Rather than keep a password on this
+            // command just for the fallback, tell the frontend to re-issue the
+            // fetch through `imap_raw_fetch_messages`, which carries a config.
+            //
+            // Returned as an `Err` so the pooled session is evicted: the
+            // fallback exists precisely because `async-imap` returned an empty
+            // result where the server sent data, and that session's protocol
+            // state is not worth trusting afterwards.
+            Err(imap_client::FetchError::AsyncImapEmpty { folder: f }) => {
+                log::info!("Raw-fetch fallback needed for folder {f}");
+                Err(NEED_RAW_FALLBACK.to_string())
+            }
+            Err(imap_client::FetchError::Other(msg)) => Err(msg),
+        }
+    })
+    .await
+}
+
+/// `[1, 5, 10]` -> `"1,5,10"`.
+///
+/// Was written out five times; the pooled rewrite touched every one of them, so
+/// it is one function now.
+fn uid_set(uids: &[u32]) -> String {
+    uids.iter()
         .map(|u| u.to_string())
         .collect::<Vec<_>>()
-        .join(",");
+        .join(",")
+}
 
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::fetch_messages(&mut session, &folder, &uid_set).await;
-    let _ = session.logout().await;
+/// Sentinel the frontend matches to re-issue a fetch outside the pool.
+///
+/// A bare marker rather than a typed error because `Other(String)` is the
+/// established shape across this boundary (brief §Not doing) and the frontend
+/// already matches on message content.
+pub const NEED_RAW_FALLBACK: &str = "NeedRawFallback";
 
-    match result {
-        Ok(r) => Ok(r),
-        // Typed, not a string prefix (audit P15): the compiler now enforces that
-        // this arm and the value `fetch_messages` returns stay in agreement.
-        Err(imap_client::FetchError::AsyncImapEmpty { folder: f }) => {
-            log::info!("Falling back to raw TCP fetch for folder {f}");
-            imap_client::raw_fetch_messages(&config, &folder, &uid_set).await
-        }
-        Err(imap_client::FetchError::Other(msg)) => Err(msg),
+/// Decision 4(a)'s escape hatch: a raw-TCP fetch that carries its own
+/// credential because the pooled session cannot.
+///
+/// One of only two commands that receives a password, and named explicitly in
+/// Done-when 5's exemption list so the "no credential crosses this boundary"
+/// test stays honest rather than being quietly weakened.
+#[tauri::command]
+pub async fn imap_raw_fetch_messages(
+    config: ImapConfig,
+    folder: String,
+    uids: Vec<u32>,
+) -> Result<ImapFetchResult, String> {
+    if uids.is_empty() {
+        return Err("No UIDs provided".to_string());
     }
+    imap_client::raw_fetch_messages(&config, &folder, &uid_set(&uids)).await
 }
 
 #[tauri::command]
 pub async fn imap_fetch_new_uids(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     since_uid: u32,
 ) -> Result<Vec<u32>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let uids = imap_client::fetch_new_uids(&mut session, &folder, since_uid).await?;
-    let _ = session.logout().await;
-    Ok(uids)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::fetch_new_uids(&mut session, &folder, since_uid).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_search_all_uids(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
 ) -> Result<Vec<u32>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let uids = imap_client::search_all_uids(&mut session, &folder).await?;
-    let _ = session.logout().await;
-    Ok(uids)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::search_all_uids(&mut session, &folder).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_fetch_message_body(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uid: u32,
 ) -> Result<ImapMessage, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let message = imap_client::fetch_message_body(&mut session, &folder, uid).await?;
-    let _ = session.logout().await;
-    Ok(message)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::fetch_message_body(&mut session, &folder, uid).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_fetch_raw_message(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uid: u32,
 ) -> Result<String, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let raw = imap_client::fetch_raw_message(&mut session, &folder, uid).await?;
-    let _ = session.logout().await;
-    Ok(raw)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::fetch_raw_message(&mut session, &folder, uid).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_set_flags(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uids: Vec<u32>,
     flags: Vec<String>,
@@ -230,28 +325,26 @@ pub async fn imap_set_flags(
         return Ok(());
     }
 
-    // Validate before connecting: a rejected flag should not cost a TCP+TLS session.
-    // Rendering happens inside `set_flags`, against an allowlist — previously this
-    // built the flag list by string concatenation, so a flag containing CRLF became
-    // a second IMAP command running in the user's authenticated session (audit P1).
+    // Validate BEFORE checkout, which is where it was before pooling too: a
+    // rejected flag should not take a session out of the map, and rendering
+    // happens inside `set_flags` against an allowlist — this once built the flag
+    // list by concatenation, so a flag containing CRLF became a second IMAP
+    // command in the user's authenticated session (audit P1).
     crate::imap::wire::build_flag_list(&flags)?;
 
-    let mut session = imap_client::connect(&config).await?;
+    let uid_set = uid_set(&uids);
 
-    let uid_set: String = uids
-        .iter()
-        .map(|u| u.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
-
-    imap_client::set_flags(&mut session, &folder, &uid_set, add, &flags).await?;
-    let _ = session.logout().await;
-    Ok(())
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::set_flags(&mut session, &folder, &uid_set, add, &flags).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_move_messages(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uids: Vec<u32>,
     destination: String,
@@ -261,27 +354,29 @@ pub async fn imap_move_messages(
         return Ok(RemovalResult { expunged: true });
     }
 
-    let mut session = imap_client::connect(&config).await?;
+    let uid_set = uid_set(&uids);
 
-    let uid_set: String = uids
-        .iter()
-        .map(|u| u.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    with_pooled_session_for(&pool, &session_id, |session, account| async move {
+        let result = {
+            let mut session = session.lock().await;
+            imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?
+        };
 
-    let result = imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?;
-    let _ = session.logout().await;
+        // The identity comes off the guard now: this command no longer receives
+        // an `ImapConfig` to read it from.
+        if !result.expunged {
+            imap::caps::warn_uidplus_missing_once(&account.username, &account.host);
+        }
 
-    if !result.expunged {
-        imap::caps::warn_uidplus_missing_once(&config.username, &config.host);
-    }
-
-    Ok(result)
+        Ok(result)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_delete_messages(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uids: Vec<u32>,
 ) -> Result<RemovalResult, String> {
@@ -290,51 +385,55 @@ pub async fn imap_delete_messages(
         return Ok(RemovalResult { expunged: true });
     }
 
-    let mut session = imap_client::connect(&config).await?;
+    let uid_set = uid_set(&uids);
 
-    let uid_set: String = uids
-        .iter()
-        .map(|u| u.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+    with_pooled_session_for(&pool, &session_id, |session, account| async move {
+        let result = {
+            let mut session = session.lock().await;
+            imap_client::delete_messages(&mut session, &folder, &uid_set).await?
+        };
 
-    let result = imap_client::delete_messages(&mut session, &folder, &uid_set).await?;
-    let _ = session.logout().await;
+        if !result.expunged {
+            imap::caps::warn_uidplus_missing_once(&account.username, &account.host);
+        }
 
-    if !result.expunged {
-        imap::caps::warn_uidplus_missing_once(&config.username, &config.host);
-    }
-
-    Ok(result)
+        Ok(result)
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_get_folder_status(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
 ) -> Result<ImapFolderStatus, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let status = imap_client::get_folder_status(&mut session, &folder).await?;
-    let _ = session.logout().await;
-    Ok(status)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::get_folder_status(&mut session, &folder).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_fetch_attachment(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     uid: u32,
     part_id: String,
 ) -> Result<String, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let data = imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await?;
-    let _ = session.logout().await;
-    Ok(data)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_append_message(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     flags: Option<Vec<String>>,
     raw_message: String,
@@ -353,11 +452,11 @@ pub async fn imap_append_message(
     // raw_message is base64url-encoded; decode it
     let raw_bytes = base64url_decode(&raw_message)?;
 
-    let mut session = imap_client::connect(&config).await?;
-
-    imap_client::append_message(&mut session, &folder, flags.as_deref(), &raw_bytes).await?;
-    let _ = session.logout().await;
-    Ok(())
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::append_message(&mut session, &folder, flags.as_deref(), &raw_bytes).await
+    })
+    .await
 }
 
 fn base64url_decode(input: &str) -> Result<Vec<u8>, String> {
@@ -370,27 +469,31 @@ fn base64url_decode(input: &str) -> Result<Vec<u8>, String> {
 
 #[tauri::command]
 pub async fn imap_search_folder(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     since_date: Option<String>,
 ) -> Result<ImapFolderSearchResult, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::search_folder(&mut session, &folder, since_date).await;
-    let _ = session.logout().await;
-    result
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::search_folder(&mut session, &folder, since_date).await
+    })
+    .await
 }
 
 #[tauri::command]
 pub async fn imap_sync_folder(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folder: String,
     batch_size: u32,
     since_date: Option<String>,
 ) -> Result<ImapFolderSyncResult, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let result = imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await;
-    let _ = session.logout().await;
-    result
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await
+    })
+    .await
 }
 
 /// Developer-only IMAP session transcript. **Not compiled into release builds**
@@ -408,13 +511,15 @@ pub async fn imap_raw_fetch_diagnostic(
 
 #[tauri::command]
 pub async fn imap_delta_check(
-    config: ImapConfig,
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
     folders: Vec<DeltaCheckRequest>,
 ) -> Result<Vec<DeltaCheckResult>, String> {
-    let mut session = imap_client::connect(&config).await?;
-    let results = imap_client::delta_check_folders(&mut session, &folders).await?;
-    let _ = session.logout().await;
-    Ok(results)
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::delta_check_folders(&mut session, &folders).await
+    })
+    .await
 }
 
 // ---------- SMTP commands ----------
