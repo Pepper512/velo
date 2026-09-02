@@ -4,7 +4,8 @@ import { useUIStore } from "@/stores/uiStore";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
-import { PROVIDER_MODELS } from "@/services/ai/types";
+import { PROVIDER_MODELS, type AiProvider } from "@/services/ai/types";
+import { isAllowedAiUrl } from "@/services/ai/rustFetch";
 import { deleteAccount } from "@/services/db/accounts";
 import { closeAccountSessions } from "@/services/imap/sessionManager";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
@@ -113,7 +114,12 @@ export function SettingsPage() {
   const [phishingDetectionEnabled, setPhishingDetectionEnabled] = useState(true);
   const [phishingSensitivity, setPhishingSensitivity] = useState<"low" | "default" | "high">("default");
   const [autostartEnabled, setAutostartEnabled] = useState(false);
-  const [aiProvider, setAiProvider] = useState<"claude" | "openai" | "gemini" | "ollama" | "copilot" | "xai">("claude");
+  const [aiProvider, setAiProvider] = useState<AiProvider>("claude");
+  const [customBaseUrl, setCustomBaseUrl] = useState("");
+  const [customApiKey, setCustomApiKey] = useState("");
+  const [customModel, setCustomModel] = useState("");
+  // SPEC-209 REQ-2.5: the Rust rule, shown before the URL is saved.
+  const customUrlAllowed = customBaseUrl.trim() === "" || isAllowedAiUrl(customBaseUrl);
   const [claudeApiKey, setClaudeApiKey] = useState("");
   const [openaiApiKey, setOpenaiApiKey] = useState("");
   const [geminiApiKey, setGeminiApiKey] = useState("");
@@ -179,7 +185,13 @@ export function SettingsPage() {
 
       // Load AI settings
       const provider = await getSetting("ai_provider");
-      if (provider === "openai" || provider === "gemini" || provider === "ollama" || provider === "copilot" || provider === "xai") setAiProvider(provider);
+      if (provider === "openai" || provider === "gemini" || provider === "ollama" || provider === "copilot" || provider === "xai" || provider === "custom") setAiProvider(provider);
+      const customUrl = await getSetting("custom_base_url");
+      if (customUrl) setCustomBaseUrl(customUrl);
+      const customModelVal = await getSetting("custom_model");
+      if (customModelVal) setCustomModel(customModelVal);
+      const customKey = await getSecureSetting("custom_api_key");
+      if (customKey) setCustomApiKey(customKey);
       const ollamaUrl = await getSetting("ollama_server_url");
       if (ollamaUrl) setOllamaServerUrl(ollamaUrl);
       const ollamaModelVal = await getSetting("ollama_model");
@@ -1065,7 +1077,7 @@ export function SettingsPage() {
                       <select
                         value={aiProvider}
                         onChange={async (e) => {
-                          const val = e.target.value as "claude" | "openai" | "gemini" | "ollama" | "copilot" | "xai";
+                          const val = e.target.value as AiProvider;
                           setAiProvider(val);
                           setAiTestResult(null);
                           await setSetting("ai_provider", val);
@@ -1080,6 +1092,7 @@ export function SettingsPage() {
                         <option value="ollama">Local AI (Ollama / LMStudio)</option>
                         <option value="copilot">GitHub Copilot</option>
                         <option value="xai">xAI (Grok)</option>
+                        <option value="custom">Custom (OpenAI-compatible)</option>
                       </select>
                     </SettingRow>
                     <p className="text-xs text-text-tertiary">
@@ -1089,6 +1102,7 @@ export function SettingsPage() {
                       {aiProvider === "ollama" && "Connect to a local Ollama or LMStudio server. No API key required."}
                       {aiProvider === "copilot" && `Uses ${PROVIDER_MODELS.copilot.find((m) => m.id === copilotModel)?.label ?? copilotModel}. Requires a GitHub PAT with models:read permission.`}
                       {aiProvider === "xai" && `Uses ${PROVIDER_MODELS.xai.find((m) => m.id === xaiModel)?.label ?? xaiModel}. Get a key at console.x.ai.`}
+                      {aiProvider === "custom" && "Any OpenAI-compatible endpoint — OpenRouter (https://openrouter.ai/api/v1), DeepSeek (https://api.deepseek.com/v1), or a gateway on your network. Requests go through Velo's own fetch: https, or http to this machine only; redirects are never followed."}
                     </p>
                   </Section>
 
@@ -1161,6 +1175,94 @@ export function SettingsPage() {
                             </span>
                           )}
                         </div>
+                      </div>
+                    </Section>
+                  ) : aiProvider === "custom" ? (
+                    <Section title="Custom Endpoint">
+                      <div className="space-y-3">
+                        <TextField
+                          label="Base URL"
+                          size="md"
+                          value={customBaseUrl}
+                          onChange={(e) => setCustomBaseUrl(e.target.value)}
+                          placeholder="https://openrouter.ai/api/v1"
+                        />
+                        {!customUrlAllowed && (
+                          <p className="text-xs text-danger" role="alert">
+                            Use an https:// URL, or http:// for a server on this machine (localhost) only.
+                          </p>
+                        )}
+                        <TextField
+                          label="API Key (optional)"
+                          size="md"
+                          type="password"
+                          value={customApiKey}
+                          onChange={(e) => setCustomApiKey(e.target.value)}
+                          placeholder="Leave blank if the endpoint needs none"
+                        />
+                        <TextField
+                          label="Model Name"
+                          size="md"
+                          value={customModel}
+                          onChange={(e) => setCustomModel(e.target.value)}
+                          placeholder="e.g. openai/gpt-4o-mini or deepseek-chat"
+                        />
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="primary"
+                            size="md"
+                            onClick={async () => {
+                              await setSetting("custom_base_url", customBaseUrl.trim());
+                              await setSetting("custom_model", customModel.trim());
+                              await setSecureSetting("custom_api_key", customApiKey.trim());
+                              const { clearProviderClients } = await import("@/services/ai/providerManager");
+                              clearProviderClients();
+                              setAiKeySaved(true);
+                              setTimeout(() => setAiKeySaved(false), 2000);
+                            }}
+                            disabled={!customBaseUrl.trim() || !customUrlAllowed || !customModel.trim()}
+                          >
+                            {aiKeySaved ? "Saved!" : "Save"}
+                          </Button>
+                          <Button
+                            variant="secondary"
+                            size="md"
+                            onClick={async () => {
+                              setAiTesting(true);
+                              setAiTestResult(null);
+                              setAiTestError(null);
+                              try {
+                                const { testConnection } = await import("@/services/ai/aiService");
+                                const result = await testConnection();
+                                setAiTestResult(result.ok ? "success" : "fail");
+                                setAiTestError(result.ok ? null : result.error);
+                              } catch (err) {
+                                setAiTestResult("fail");
+                                setAiTestError(err instanceof Error ? err.message : String(err));
+                              } finally {
+                                setAiTesting(false);
+                              }
+                            }}
+                            disabled={!customBaseUrl.trim() || !customUrlAllowed || !customModel.trim() || aiTesting}
+                            className="bg-bg-tertiary text-text-primary border border-border-primary"
+                          >
+                            {aiTesting ? "Testing..." : "Test Connection"}
+                          </Button>
+                          {aiTestResult === "success" && (
+                            <span className="text-xs text-success">Connected!</span>
+                          )}
+                          {aiTestResult === "fail" && (
+                            <span
+                              className="text-xs text-danger inline-block max-w-md truncate align-bottom"
+                              title={aiTestError ?? undefined}
+                            >
+                              Connection failed{aiTestError ? `: ${aiTestError.replace(/\s+/g, " ")}` : ""}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-text-tertiary">
+                          Test Connection uses the saved values — save first.
+                        </p>
                       </div>
                     </Section>
                   ) : (

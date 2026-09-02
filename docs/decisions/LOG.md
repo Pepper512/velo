@@ -982,3 +982,35 @@
   thread without `INBOX` and with `SNOOZED` (`applySnoozeOverride`), so the count is exact;
   bulk actions loop over `executeEmailAction`, N events collapse into one debounced query.
   Raw output in `docs/reviews/2026-09-03-pr63-gemini-raw.md`.
+- **2026-09-03 — #209/#265 built (custom OpenAI-compatible endpoint through a validated Rust
+  fetch)** on Jim's instruction, bug-fix queue item 9, **Tier 2** (a new `#[tauri::command]`
+  taking a user-controlled URL; credentials in flight; the AI output boundary). Jim's decision 2
+  applied: **`ai_fetch` in Rust** (`src-tauri/src/ai_fetch.rs`) — `https:` to any host or
+  `http:` to loopback only (`localhost`, `127.0.0.0/8`, `::1`), no user-info, GET/POST only,
+  four request headers forwarded (`authorization`, `content-type`, `accept`, `user-agent`),
+  `redirect::Policy::none()` with a 3xx refused *without* its `Location`, three response
+  headers returned, 8 MiB body cap, 120 s timeout; errors and the log line carry the host and
+  status, never the URL's query (`reqwest::Error::without_url`). Verified first: every cloud
+  provider uses the OpenAI SDK through the webview's `fetch`, gated by the static CSP
+  `connect-src` — a user-typed host cannot be added at runtime; only Ollama uses the http
+  plugin, whose scope is `https://*` + loopback, checked on the given URL only, redirects
+  followed. Upstream PR #242 (`custom-provider`) reviewed: its provider/settings shape and key
+  names adopted; its transport (the plugin, redirects followed, no validation), its default
+  base URL `http://localhost:11434/v1` (a silent duplicate of Ollama — unset now means
+  `NOT_CONFIGURED`) and its interface change across every provider rejected; the API key made
+  optional (a LAN gateway; a placeholder is sent, the SDK refuses an empty string).
+  TypeScript: `rustFetch` (a `fetch`-shaped wrapper over `invoke`; the result is **zod-
+  validated** before a `Response` is built — an `invoke()` result is a boundary; 204/205/304
+  built with a null body), `customProvider` (SDK with `fetch: rustFetch`), `custom` in
+  `AiProvider`/settings keys/provider manager, a settings card mirroring Ollama's with an
+  inline pre-check of the same rule, help text naming OpenRouter (#265) and DeepSeek.
+  **No dependency added** (reqwest 0.12, serde, tokio, zod already direct). **No capability
+  entry** (app commands ride `core:default`, like `db_tx_*`); `tauri.conf.json` and
+  `capabilities/default.json` byte-identical. TDD: Rust — the URL table (accepts/refuses,
+  including `localhost.example.com` and the AWS metadata address) and five socket tests
+  against a `TcpListener` on 127.0.0.1 (302 refused and not disclosed, header allow-lists in
+  both directions, body cap, 401 relayed, connection error without the URL); TS — the
+  mirrored URL table, `rustFetch` shape/response/malformed/abort, the provider's config and
+  cache, the manager's six `custom` cases. Threat pass and rollback in the brief. Gates:
+  cargo test 143 (+10), clippy `-D warnings`, 168 files / 2,165 tests, tsc, graph, docs.
+  Both review legs to follow.

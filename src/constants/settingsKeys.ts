@@ -32,6 +32,9 @@ export const SETTING_KEYS = [
   "color_theme",
   "contact_sidebar_visible",
   "copilot_model",
+  // SPEC-209: the user-typed OpenAI-compatible endpoint and its model name.
+  "custom_base_url",
+  "custom_model",
   // Found by the compiler, not by grep: written via a variable, so the
   // string-literal search that produced this list missed it.
   "custom_shortcuts",
@@ -77,6 +80,7 @@ export const SETTING_KEYS = [
 export const SECURE_SETTING_KEYS = [
   "claude_api_key",
   "copilot_api_key",
+  "custom_api_key",
   "gemini_api_key",
   "google_client_secret",
   "openai_api_key",

@@ -6,6 +6,7 @@ use tauri::{
 use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
+mod ai_fetch;
 mod commands;
 mod db;
 mod imap;
@@ -95,6 +96,7 @@ pub fn run() {
         oauth::start_oauth_server,
         oauth::oauth_exchange_token,
         oauth::oauth_refresh_token,
+        ai_fetch::ai_fetch,
         set_tray_tooltip,
         close_splashscreen,
         open_devtools,
@@ -135,6 +137,7 @@ pub fn run() {
         oauth::start_oauth_server,
         oauth::oauth_exchange_token,
         oauth::oauth_refresh_token,
+        ai_fetch::ai_fetch,
         set_tray_tooltip,
         close_splashscreen,
         commands::imap_test_connection,
