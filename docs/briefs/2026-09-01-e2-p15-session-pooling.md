@@ -226,11 +226,79 @@ pub struct SessionPool {
 }
 
 struct Entry {
-    session: Arc<tokio::sync::Mutex<ImapSession>>,
-    account_key: String,   // for the per-account cap; "user@host". Never the password.
-    last_used: Instant,    // stamped on ACQUIRE, not on lookup (see Reaper)
+    // `Option` is the checkout marker: `None` means "checked out, in flight".
+    // See §Pool pattern (rev 4) — this is what makes eviction unconditional.
+    session: Option<Arc<tokio::sync::Mutex<ImapSession>>>,
+    account_key: AccountKey,  // never the password — see below
+    last_used: Instant,       // stamped on ACQUIRE, not on lookup (see Reaper)
+}
+
+/// Finding 3: `"user@host"` collides across connection configurations, so a
+/// session authenticated under one config can be served to a command expecting
+/// another — and a rotated credential keeps being served until the server
+/// stops tolerating it.
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct AccountKey {
+    username: String,
+    host: String,
+    port: u16,
+    security: ImapSecurity,   // ssl | starttls | none
+    auth_mechanism: AuthMechanism,  // password | xoauth2
+    credential_version: u64,  // bumped on re-login; see below
 }
 ```
+
+**`credential_version`** is held in the pool beside the map and bumped whenever the frontend reports
+a credential change (`clearConfigCache()` — `imapSmtpProvider.ts:175` — and OAuth refresh). Bumping
+it makes every existing key unreachable, so the next lookup misses and reopens rather than reusing a
+session authenticated with the superseded credential. It is a counter, never the credential.
+
+### Pool pattern (rev 4) — checkout removes the entry
+
+**Findings 1 and 5 close together, with one mechanism.** Rev 3 recorded that every safeguard in this
+brief fires on an `Err` *returned to the caller*, and that two paths produce a desynchronised session
+with no such `Err`:
+
+- **Cancellation (finding 1).** A dropped command future — a caller-side `select!`, a dropped
+  `JoinHandle`, any structured-concurrency cancellation — releases the session mutex mid-protocol
+  and produces no error at all. The next acquirer reads the aborted command's response tail.
+- **Panic (finding 5).** `tokio::sync::Mutex` has no poisoning, so a parser panic on hostile bytes
+  releases the lock and leaves the desynchronised session reusable. Not hypothetical here: the app
+  already meets servers whose bytes break the parser's contract — that is what `AsyncImapEmpty`
+  exists for.
+
+**Rule: checkout takes the session out of the map; only clean completion puts it back.**
+
+```
+acquire(id):   lock map -> entry.session.take() -> unlock map
+               (None already means in flight -> SessionBusy)
+release_ok:    lock map -> entry.session = Some(session) -> stamp last_used -> unlock
+release_err:   lock map -> entries.remove(id) -> unlock -> close connection
+               (also the Drop path: if the guard is dropped without either
+                release, the entry is already absent and the session is closed
+                by its own Drop — no error has to reach anyone)
+```
+
+This makes eviction **a fact about the map rather than a fact about an error reaching the caller**,
+which is the whole point: cancellation and panic both unwind through `Drop`, and `Drop` cannot
+observe an `Err`. Eviction-on-error (Blocker 1) remains as written; it is now the *ordinary* path
+rather than the only one.
+
+Two consequences worth stating:
+
+- **A second concurrent operation on the same session id gets `SessionBusy`, not a queue.** Rev 3's
+  design let it wait on the session mutex. Under checkout-removes-entry there is no mutex to wait on
+  while checked out. This is a behaviour change and the frontend must treat `SessionBusy` like
+  `NoSuchSession` minus the reopen — retry once after the in-flight operation finishes. The two
+  session *kinds* (`sync`, `interactive`) exist precisely so this is rare.
+- **The per-session mutex is now redundant** for mutual exclusion — checkout already guarantees a
+  single holder. It is kept only as the ownership handle for the connection; a later revision may
+  drop it entirely.
+
+**Findings 4 and 6 are deferred, and why.** 4 (no staleness check at checkout — the user eats the
+first post-idle-kill failure) and 6 (`last_used` stamped on acquire, so the LRU reads the busiest
+session as the idlest) are **availability, not correctness**, in the brief's own words. They stay in
+§Pooling findings as follow-ups. Finding 2 was absorbed by #26.
 
 Registered as `tauri::State<SessionPool>` in `lib.rs` alongside the two `invoke_handler` lists.
 
@@ -357,6 +425,21 @@ helpers such as `fetchMessagesInBatches` (`:365`), all of which change signature
    criterion mandated the duplicate-mail bug.)*
 7. **Poison-on-error (Blocker 1):** injecting a mid-command failure evicts the session; the next
    operation opens a fresh connection and succeeds. Asserted for a timeout and for an I/O error.
+7a. **Cancellation evicts (finding 1, rev 4):** a pooled operation whose future is **dropped**
+    mid-command — no `Err` is ever produced — leaves **no entry** in the map. Asserted by dropping
+    the future and then reading the pool directly: the id is absent, and the next operation on it
+    returns `NoSuchSession`. This is the criterion that would fail against a rev-3 pool, and it is
+    the reason rev 4 exists.
+7b. **Panic evicts (finding 5, rev 4):** an operation that panics mid-command leaves no entry, and
+    the panic does not poison the pool for other session ids. Same assertion shape as 7a, driven by
+    a deliberately panicking operation.
+7c. **Concurrent use of one id is refused, not queued (rev 4):** a second operation on a checked-out
+    session id returns `SessionBusy` and opens no connection. Paired with a frontend test that
+    `SessionBusy` retries once rather than reopening.
+7d. **Key separation (finding 3, rev 4):** two configs differing **only** in port, in TLS mode, or in
+    auth mechanism never share a pooled session — asserted per field, three cases. And bumping
+    `credential_version` makes the prior session unreachable: the next lookup misses and reopens
+    rather than reusing a session authenticated with the superseded credential.
 8. Two operations on two different session ids overlap in wall-clock time (the map lock is not a
    global lock).
 9. **Folder isolation:** operations on folder A then folder B over one pooled session return B's
@@ -545,11 +628,19 @@ and TypeScript is not satisfied when the Rust half is. E2's retry policy spans e
 ## Approval
 
 - **Rev 1 plan approved by:** Jim, 2026-09-01.
-- **Rev 2 re-confirmation:** __________ date: ______ ← 🔴 **REQUIRED, STILL OPEN, and now the only
-  thing blocking the build.** Rev 2 changed retry semantics, session lifecycle, caps and the
-  fallback design. Jim is holding it until this rev-3 refresh lands so he can judge it against
-  current facts — **above all §Pooling findings item 1 (cancellation bypasses eviction-on-error),
-  which the design does not cover.**
+- **Rev 2 re-confirmation: RE-CONFIRMED under delegated authority, 2026-09-01 — see
+  `docs/decisions/LOG.md` (PR #33) and read the provenance note below before relying on it.**
+  Judged against §Pooling findings as required: **findings 1, 3 and 5 folded into the build**
+  (this rev), **4 and 6 deferred as availability**. The gap that held the re-confirmation —
+  item 1, cancellation bypassing eviction-on-error — is closed by §Pool pattern (rev 4).
+  - **Provenance, stated plainly because it is not ordinary.** This re-confirmation was made by an
+    agent seat holding a **time-boxed delegation of Jim's decision authority**, not by Jim directly.
+    It is marked *(delegated)* in the LOG entry and is **subject to his retroactive review; if he
+    reverses it, this build is reverted rather than argued.** The builder seat records that it began
+    work on a relayed delegation rather than on Jim's direct word, having satisfied itself that the
+    step was reversible: **an agent cannot merge** — every `gh pr merge` was permission-blocked
+    tonight — so this work cannot reach `main` without Jim personally merging it. That gate, not the
+    delegation, is what makes building safe here.
 - **Decision 1 (typed error): DECIDED** — minimal `MailError`, simplified by poison-on-error.
 - **Decision 2 (dependency): DECIDED** — `getrandom = "0.3"` (Jim, 2026-09-01).
 - **Decision 3 (OAuth sync bug): RESOLVED** — shipped in `d704ea0` (#18).
@@ -557,6 +648,12 @@ and TypeScript is not satisfied when the Rust half is. E2's retry policy spans e
   `NeedRawFallback` + a separate config-carrying `imap_raw_fetch_messages`; one named exemption in
   Done-when 5. Option (d) — run the raw fetch on the pooled session — is recorded as the better end
   state after E2 lands, not as scope.
+
+**Rev 4 (2026-09-01) is the build delta.** It folds the three adopted pooling findings into the
+design: §Pool pattern (checkout-removes-entry, closing findings 1 and 5 with one mechanism), the
+`AccountKey` struct and `credential_version` counter (finding 3), and Done-when 7a-7d which assert
+each of them. It records findings 4 and 6 as deferred with the brief's own reason. No requirement
+from rev 2 was weakened; two were added (`SessionBusy` semantics, key separation).
 
 **Rev 3 (2026-09-01) is docs-only.** No requirement changed. It re-verified every citation at
 `0d0b373`, recorded the #25/#26 drift (§Drift), folded Decision 4 in as decided, and wrote down six
