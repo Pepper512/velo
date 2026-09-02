@@ -22,7 +22,6 @@ vi.mock("./providers/openaiProvider", () => ({
 
 vi.mock("./providers/geminiProvider", () => ({
   createGeminiProvider: vi.fn(() => createMockAiProvider("gemini response")),
-  clearGeminiProvider: vi.fn(),
 }));
 
 vi.mock("./providers/ollamaProvider", () => ({
