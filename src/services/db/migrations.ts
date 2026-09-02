@@ -876,6 +876,24 @@ const MIGRATIONS = [
       ALTER TABLE folder_sync_state ADD COLUMN missing_passes INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 28,
+    description: "Separate SMTP credentials (SPEC-252): smtp_username and encrypted smtp_password on accounts",
+    // Expand step. Both columns are NULL for every existing account, and
+    // `buildSmtpConfig` falls back to the IMAP credentials when they are, so
+    // nothing changes for accounts saved before this migration. `smtp_password`
+    // is stored through the same AES-256-GCM path as `imap_password` and is
+    // listed in `ENCRYPTED_FIELDS`, so the fail-closed decrypt covers it.
+    //
+    // Contract step (not run here, per the pairing gate): `ALTER TABLE accounts
+    // DROP COLUMN smtp_username; ALTER TABLE accounts DROP COLUMN smtp_password;`
+    // — reverted code ignores the columns, and SMTP falls back to the IMAP
+    // password, which is the pre-fix behaviour.
+    sql: `
+      ALTER TABLE accounts ADD COLUMN smtp_username TEXT;
+      ALTER TABLE accounts ADD COLUMN smtp_password TEXT;
+    `,
+  },
 ];
 
 /**

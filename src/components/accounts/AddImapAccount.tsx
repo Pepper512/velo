@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { insertImapAccount, insertOAuthImapAccount } from "@/services/db/accounts";
+import { resolveSmtpCredentials, type SmtpCredentialInputs } from "@/services/imap/smtpCredentials";
 import { useAccountStore } from "@/stores/accountStore";
 import {
   discoverSettings,
@@ -44,6 +45,7 @@ interface FormState {
   smtpPort: number;
   smtpSecurity: SecurityType;
   password: string;
+  smtpUsername: string;
   smtpPassword: string;
   samePassword: boolean;
   acceptInvalidCerts: boolean;
@@ -69,6 +71,7 @@ const initialFormState: FormState = {
   smtpPort: 465,
   smtpSecurity: "ssl",
   password: "",
+  smtpUsername: "",
   smtpPassword: "",
   samePassword: true,
   acceptInvalidCerts: false,
@@ -110,6 +113,19 @@ const selectClass =
   "w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent transition-colors appearance-none";
 
 /** Map UI security value ("ssl") to Rust config value ("tls") */
+/** The form fields the SMTP credential resolver reads (SPEC-252 REQ-1.3). */
+function smtpCredentialInputs(form: FormState, isOAuth: boolean): SmtpCredentialInputs {
+  return {
+    isOAuth,
+    oauthAccessToken: form.oauthAccessToken,
+    sameCredentials: form.samePassword,
+    imapUsername: form.imapUsername,
+    password: form.password,
+    smtpUsername: form.smtpUsername,
+    smtpPassword: form.smtpPassword,
+  };
+}
+
 function mapSecurity(security: string): string {
   if (security === "ssl") return "tls";
   return security;
@@ -308,11 +324,9 @@ export function AddImapAccount({
   const testSmtpConnection = async () => {
     setSmtpTest({ state: "testing" });
     try {
-      const smtpPassword = isOAuth
-        ? (form.oauthAccessToken ?? "")
-        : form.samePassword
-          ? form.password
-          : form.smtpPassword;
+      // SPEC-252 REQ-1.3: the same resolver the save uses, so the test can
+      // never pass with credentials the account will not keep.
+      const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, isOAuth));
       const result = await invoke<{ success: boolean; message: string }>(
         "smtp_test_connection",
         {
@@ -320,8 +334,8 @@ export function AddImapAccount({
             host: form.smtpHost,
             port: form.smtpPort,
             security: mapSecurity(form.smtpSecurity),
-            username: form.imapUsername || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
-            password: smtpPassword,
+            username: smtp.username || form.imapUsername || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
+            password: smtp.password,
             auth_method: isOAuth ? "oauth2" : "password",
             accept_invalid_certs: form.acceptInvalidCerts,
           },
@@ -384,9 +398,17 @@ export function AddImapAccount({
           smtpPort: form.smtpPort,
           smtpSecurity: form.smtpSecurity,
           authMethod: "password",
-          password: form.samePassword ? form.password : form.password,
+          password: form.password,
           imapUsername,
           acceptInvalidCerts: form.acceptInvalidCerts,
+          // SPEC-252: what the SMTP test used is what gets saved (#252's
+          // identical ternary discarded the SMTP password here).
+          ...(form.samePassword
+            ? {}
+            : (() => {
+                const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, false));
+                return { smtpUsername: smtp.username, smtpPassword: smtp.password };
+              })()),
         });
       }
 
@@ -795,11 +817,23 @@ export function AddImapAccount({
               htmlFor="smtp-same-password"
               className="text-sm text-text-secondary"
             >
-              Use same password as IMAP
+              Use same credentials as IMAP
             </label>
           </div>
           {!form.samePassword && (
             <div>
+              <label htmlFor="smtp-username" className={labelClass}>
+                SMTP Username
+              </label>
+              <input
+                id="smtp-username"
+                type="text"
+                value={form.smtpUsername}
+                onChange={(e) => updateForm("smtpUsername", e.target.value)}
+                placeholder="Same as IMAP username if left empty"
+                className={inputClass}
+                autoComplete="off"
+              />
               <label htmlFor="smtp-password" className={labelClass}>
                 SMTP Password
               </label>

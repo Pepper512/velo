@@ -149,6 +149,17 @@ describe("runMigrations against real SQLite", () => {
     expect(tables).toContain("settings");
   });
 
+  it("adds the separate SMTP credential columns (SPEC-252, migration 28)", async () => {
+    await runMigrations();
+    const columns = harness.raw
+      .prepare<{ name: string }>("PRAGMA table_info(accounts)")
+      .all()
+      .map((c) => c.name);
+    expect(columns).toContain("smtp_username");
+    expect(columns).toContain("smtp_password");
+    expect(appliedVersions()).toContain(28);
+  });
+
   it("is idempotent — a second run applies nothing", async () => {
     await runMigrations();
     const first = appliedVersions();

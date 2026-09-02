@@ -112,6 +112,41 @@ describe("buildSmtpConfig", () => {
     expect(config.port).toBe(587);
   });
 
+  // SPEC-252 REQ-1.4 / REQ-2.1 — separate SMTP credentials with IMAP fallback.
+  it("uses the account's own SMTP username and password when they are set (SPEC-252 REQ-1.4)", () => {
+    const smtpSecret = ["smtp", "only"].join("-");
+    const account = createMockDbAccount({
+      imap_username: "imap-login",
+      smtp_username: "relay-login",
+      smtp_password: smtpSecret,
+    });
+    const config = buildSmtpConfig(account);
+    expect(config.username).toBe("relay-login");
+    expect(config.password).toBe(smtpSecret);
+  });
+
+  it("falls back to the IMAP username and password when the SMTP columns are null (REQ-2.1)", () => {
+    const account = createMockDbAccount({ imap_username: "imap-login", smtp_username: null, smtp_password: null });
+    const config = buildSmtpConfig(account);
+    expect(config.username).toBe("imap-login");
+    expect(config.password).toBe("secret123");
+  });
+
+  it("falls back per field: an SMTP password with no SMTP username keeps the IMAP username", () => {
+    const smtpSecret = ["smtp", "only"].join("-");
+    const account = createMockDbAccount({ imap_username: null, smtp_username: null, smtp_password: smtpSecret });
+    const config = buildSmtpConfig(account);
+    expect(config.username).toBe("user@example.com");
+    expect(config.password).toBe(smtpSecret);
+  });
+
+  it("ignores a stored SMTP password for OAuth accounts — the access token authenticates SMTP", () => {
+    const account = createMockDbAccount({ auth_method: "oauth2", smtp_password: ["smtp", "only"].join("-") });
+    const config = buildSmtpConfig(account, "fresh-token");
+    expect(config.password).toBe("fresh-token");
+    expect(config.auth_method).toBe("oauth2");
+  });
+
   it("throws when smtp_host is missing", () => {
     const account = createMockDbAccount({ smtp_host: null });
     expect(() => buildSmtpConfig(account)).toThrow("no SMTP host configured");

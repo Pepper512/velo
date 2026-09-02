@@ -816,6 +816,22 @@
   `async-imap` sends the query verbatim) and a full-attribute response-parser fixture (the
   parser is unchanged; belongs with the reporter's re-test). Raw outputs in
   `docs/reviews/2026-09-02-pr57-{gemini,grok}-raw.md`. Rust 132 tests.
+- **2026-09-03 — #252/#253 built (separate encrypted SMTP credentials)** on Jim's instruction.
+  Verified first: `AddImapAccount.tsx:387` `password: form.samePassword ? form.password :
+  form.password` (identical arms), no SMTP credential column, `buildSmtpConfig` reading
+  `imap_password`, the form's SMTP *test* already using the typed SMTP password — the test and
+  the save disagreed, which is #252 exactly. Plan committed first
+  (`docs/briefs/2026-09-02-252-smtp-credentials.md`, Tier 2 — `accounts.ts` + migration + a
+  new encrypted column). **Decisions:** both #252 and #253 in one change — the username is the
+  same seam and the same fallback rule; migration 28 adds `smtp_username` and `smtp_password`
+  (NULL for every existing row), `smtp_password` joins `ENCRYPTED_FIELDS` so the fail-closed
+  decrypt and the re-auth banner cover it with no other change; `buildSmtpConfig` falls back
+  **per field** to the IMAP username/password so every pre-28 account produces the identical
+  config (pinned by the existing exact-object test plus a null-columns test); one pure
+  resolver (`services/imap/smtpCredentials.ts`) feeds both the form's SMTP test and its save,
+  which is the structural fix for the disagreement; no edit-account UI (none exists for IMAP
+  settings — a separate item). TDD: six tests red across four suites, then green; fixtures
+  assemble fake secrets at runtime (the secret scan reads commit history).
 - **2026-09-02 ~22:30 UTC — #280 built (http scope for local AI; connection-test reason)** on
   Jim's instruction. Verified first: the Ollama client uses `@tauri-apps/plugin-http`'s `fetch`
   (`ollamaProvider.ts:2`), the plugin matches its scope with the `urlpattern` crate, and under

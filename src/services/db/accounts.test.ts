@@ -81,6 +81,18 @@ describe("accounts", () => {
       expect(result!.imap_password).toBe("secret-password");
     });
 
+    it("decrypts a stored SMTP password like the other credentials (SPEC-252 REQ-1.1)", async () => {
+      const smtpSecret = ["relay", "secret"].join("-");
+      mockSelectFirstBy.mockResolvedValue(
+        createMockImapAccount({ id: "split-imap", smtp_username: "relay-user", smtp_password: `enc:${smtpSecret}` }),
+      );
+
+      const account = await getAccount("split-imap");
+
+      expect(account?.smtp_username).toBe("relay-user");
+      expect(account?.smtp_password).toBe(smtpSecret);
+    });
+
     it("handles IMAP account with null imap_password gracefully", async () => {
       mockSelectFirstBy.mockResolvedValue(
         createMockImapAccount({ imap_password: null }),
@@ -179,7 +191,37 @@ describe("accounts", () => {
         "enc:my-app-password", // encrypted
         null, // imap_username
         0, // accept_invalid_certs
+        null, // smtp_username (SPEC-252: same credentials as IMAP)
+        null, // smtp_password
       ]);
+    });
+
+    it("stores separate SMTP credentials with the password encrypted (SPEC-252 REQ-1.1/1.2)", async () => {
+      mockExecute.mockResolvedValue(undefined);
+      const smtpSecret = ["relay", "secret"].join("-");
+
+      await insertImapAccount({
+        id: "split-imap",
+        email: "user@corp.test",
+        displayName: null,
+        avatarUrl: null,
+        imapHost: "imap.corp.test",
+        imapPort: 993,
+        imapSecurity: "ssl",
+        smtpHost: "relay.corp.test",
+        smtpPort: 587,
+        smtpSecurity: "starttls",
+        authMethod: "password",
+        password: "imap-app-password",
+        smtpUsername: "relay-user",
+        smtpPassword: smtpSecret,
+      });
+
+      const [sql, params] = mockExecute.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain("smtp_username, smtp_password");
+      expect(params.slice(-2)).toEqual(["relay-user", `enc:${smtpSecret}`]);
+      // The plain SMTP secret never reaches the statement.
+      expect(params).not.toContain(smtpSecret);
     });
 
     it("inserts IMAP account with custom username", async () => {
