@@ -45,25 +45,35 @@ pub fn discard_pending<I: Iterator<Item = UnsolicitedResponse>>(pending: I) -> u
     pending.count()
 }
 
+/// A validated `COPYUID`: the destination's UIDVALIDITY and the positional
+/// source → destination pairs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CopyUid {
+    pub dest_uidvalidity: u32,
+    pub mapping: Vec<UidMapping>,
+}
+
 /// Drain the unsolicited channel after a successful `UID MOVE` and return the
-/// `COPYUID` mapping if exactly one usable mapping arrived.
+/// `COPYUID` if exactly one usable one arrived.
 ///
 /// Everything that is not a `COPYUID` is dropped, as before. If more than one
 /// `COPYUID` arrives (a server that reports per-message, or a stale one that
 /// survived [`discard_pending`] because it landed between the discard and the
 /// command), the result is `None`: two mappings cannot be reconciled to the one
 /// command that was issued, and the safe reading is "no mapping".
-pub fn drain_copyuid<I: Iterator<Item = UnsolicitedResponse>>(
-    responses: I,
-) -> Option<Vec<UidMapping>> {
-    let mut found: Option<Vec<UidMapping>> = None;
+///
+/// Pooled sessions must not grow another consumer of `unsolicited_responses`:
+/// this drain assumes it is the only reader, and a second one (an IDLE loop,
+/// say) would race it for the `COPYUID`.
+pub fn drain_copyuid<I: Iterator<Item = UnsolicitedResponse>>(responses: I) -> Option<CopyUid> {
+    let mut found: Option<CopyUid> = None;
     let mut count = 0usize;
 
     for response in responses {
         if let UnsolicitedResponse::Other(data) = response {
-            if let Some(mapping) = mapping_from_response(data.parsed()) {
+            if let Some(copyuid) = mapping_from_response(data.parsed()) {
                 count += 1;
-                found = Some(mapping);
+                found = Some(copyuid);
             }
         }
     }
@@ -75,17 +85,17 @@ pub fn drain_copyuid<I: Iterator<Item = UnsolicitedResponse>>(
     }
 }
 
-/// Extract and validate a `COPYUID` mapping from one parsed response.
+/// Extract and validate a `COPYUID` from one parsed response.
 ///
 /// Returns `None` unless the response is an `OK` carrying `COPYUID` whose two
 /// UID sets expand to the same non-empty length within
-/// [`MAX_COPYUID_MEMBERS`], with no source UID repeated. RFC 4315 §3 defines
-/// the sets as positionally corresponding, which is the only reading under
-/// which a mapping exists at all.
-pub fn mapping_from_response(response: &Response<'_>) -> Option<Vec<UidMapping>> {
+/// [`MAX_COPYUID_MEMBERS`], with no UID repeated on either side. RFC 4315 §3
+/// defines the sets as positionally corresponding, which is the only reading
+/// under which a mapping exists at all.
+pub fn mapping_from_response(response: &Response<'_>) -> Option<CopyUid> {
     let Response::Data {
         status: Status::Ok,
-        code: Some(ResponseCode::CopyUid(_uidvalidity, source, dest)),
+        code: Some(ResponseCode::CopyUid(uidvalidity, source, dest)),
         ..
     } = response
     else {
@@ -111,8 +121,9 @@ pub fn mapping_from_response(response: &Response<'_>) -> Option<Vec<UidMapping>>
         return None;
     }
 
-    Some(
-        source
+    Some(CopyUid {
+        dest_uidvalidity: *uidvalidity,
+        mapping: source
             .into_iter()
             .zip(dest)
             .map(|(source_uid, dest_uid)| UidMapping {
@@ -120,7 +131,7 @@ pub fn mapping_from_response(response: &Response<'_>) -> Option<Vec<UidMapping>>
                 dest_uid,
             })
             .collect(),
-    )
+    })
 }
 
 /// Expand a UID set to its members, in order, or `None` if it would exceed the
@@ -176,8 +187,12 @@ mod tests {
         ok_with_code(Some(ResponseCode::CopyUid(1, source, dest)))
     }
 
-    fn pairs(mapping: &[UidMapping]) -> Vec<(u32, u32)> {
-        mapping.iter().map(|m| (m.source_uid, m.dest_uid)).collect()
+    fn pairs(copyuid: &CopyUid) -> Vec<(u32, u32)> {
+        copyuid
+            .mapping
+            .iter()
+            .map(|m| (m.source_uid, m.dest_uid))
+            .collect()
     }
 
     // ---------- Done-when 3, case 1: mapping present ----------
@@ -185,10 +200,9 @@ mod tests {
     #[test]
     fn a_single_uid_maps_to_a_single_uid() {
         let response = copyuid(vec![UidSetMember::Uid(5)], vec![UidSetMember::Uid(3)]);
-        assert_eq!(
-            pairs(&mapping_from_response(&response).unwrap()),
-            vec![(5, 3)]
-        );
+        let parsed = mapping_from_response(&response).unwrap();
+        assert_eq!(pairs(&parsed), vec![(5, 3)]);
+        assert_eq!(parsed.dest_uidvalidity, 1, "the destination generation travels with the pairs");
     }
 
     #[test]
@@ -328,7 +342,7 @@ mod tests {
             vec![UidSetMember::UidRange(1..=at_cap)],
         );
         assert_eq!(
-            mapping_from_response(&response).unwrap().len(),
+            mapping_from_response(&response).unwrap().mapping.len(),
             MAX_COPYUID_MEMBERS
         );
 
@@ -412,6 +426,12 @@ mod tests {
                 // MOVE path: source removed by the server, COPYUID on the channel.
                 assert!(result.expunged, ":{port}: MOVE reports the source copy removed");
                 assert!(!inbox_after.contains(&source_uid), ":{port}: gone from INBOX");
+                let dest_status = client::get_folder_status(&mut session, &dest).await.unwrap();
+                assert_eq!(
+                    result.dest_uidvalidity,
+                    Some(dest_status.uidvalidity),
+                    ":{port}: COPYUID carries the destination's UIDVALIDITY"
+                );
                 let mapping = result.mapping.expect(":11143 must yield a COPYUID mapping");
                 assert_eq!(mapping.len(), 1);
                 assert_eq!(mapping[0].source_uid, source_uid);

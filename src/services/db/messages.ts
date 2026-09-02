@@ -234,6 +234,43 @@ export async function rekeyMovedMessages(
       }
       taken.add(pair.newId);
 
+      // One savepoint per pair: a collision the pre-check could not see (a
+      // destination sync racing this transaction) rejects *this* row and
+      // leaves it as it was, instead of aborting every other re-key in the
+      // batch (Grok M6). Anything that is not a constraint failure still
+      // propagates and rolls the whole transaction back.
+      await db.execute("SAVEPOINT rekey_pair", []);
+      try {
+        await rekeyOnePair(db, accountId, pair);
+        await db.execute("RELEASE SAVEPOINT rekey_pair", []);
+        outcome.rekeyed.push(pair.oldId);
+      } catch (err) {
+        await db.execute("ROLLBACK TO SAVEPOINT rekey_pair", []);
+        await db.execute("RELEASE SAVEPOINT rekey_pair", []);
+        if (!isConstraintFailure(err)) throw err;
+        console.warn(`[messages] Re-key of ${pair.oldId} -> ${pair.newId} collided; leaving it as it was:`, err);
+        outcome.skipped.push(pair.oldId);
+      }
+    }
+
+    if (fallback !== undefined) {
+      await tombstoneWithin(db, accountId, [...fallback.ids, ...outcome.skipped], fallback.movedTo);
+    }
+  });
+
+  return outcome;
+}
+
+function isConstraintFailure(err: unknown): boolean {
+  const text = err instanceof Error ? err.message : String(err);
+  return /constraint|UNIQUE|PRIMARY KEY|FOREIGN KEY/i.test(text);
+}
+
+async function rekeyOnePair(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  pair: RekeyPair,
+): Promise<void> {
       await db.execute(
         `UPDATE messages SET id = $1, imap_folder = $2, imap_uid = $3, moved_to = NULL
          WHERE account_id = $4 AND id = $5`,
@@ -266,15 +303,6 @@ export async function rekeyMovedMessages(
         "UPDATE local_drafts SET reply_to_message_id = $1 WHERE account_id = $2 AND reply_to_message_id = $3",
         [pair.newId, accountId, pair.oldId],
       );
-      outcome.rekeyed.push(pair.oldId);
-    }
-
-    if (fallback !== undefined) {
-      await tombstoneWithin(db, accountId, [...fallback.ids, ...outcome.skipped], fallback.movedTo);
-    }
-  });
-
-  return outcome;
 }
 
 /**

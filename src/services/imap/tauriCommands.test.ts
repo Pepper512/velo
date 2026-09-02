@@ -286,7 +286,7 @@ describe("RemovalResult boundary validation", () => {
     vi.mocked(invoke).mockResolvedValue({ expunged: true });
     await expect(
       imapDeleteMessages('session-abc', "INBOX", [1]),
-    ).resolves.toEqual({ expunged: true });
+    ).resolves.toMatchObject({ expunged: true });
   });
 
   it.each([
@@ -299,7 +299,7 @@ describe("RemovalResult boundary validation", () => {
     vi.mocked(invoke).mockResolvedValue(value);
     await expect(
       imapDeleteMessages('session-abc', "INBOX", [1]),
-    ).resolves.toEqual({ expunged: false });
+    ).resolves.toMatchObject({ expunged: false });
   });
 
   it("does not throw on a null result", async () => {
@@ -308,7 +308,7 @@ describe("RemovalResult boundary validation", () => {
     vi.mocked(invoke).mockResolvedValue(null);
     await expect(
       imapMoveMessages('session-abc', "INBOX", [1], "Archive"),
-    ).resolves.toEqual({ expunged: false, mapping: null });
+    ).resolves.toMatchObject({ expunged: false, mapping: null });
   });
 });
 
@@ -328,7 +328,7 @@ describe("MoveResult boundary validation (F-5)", () => {
         { source_uid: 6, dest_uid: 4 },
       ],
     });
-    await expect(imapMoveMessages("s", "INBOX", [5, 6], "Archive")).resolves.toEqual({
+    await expect(imapMoveMessages("s", "INBOX", [5, 6], "Archive")).resolves.toMatchObject({
       expunged: true,
       mapping: [
         { source_uid: 5, dest_uid: 3 },
@@ -339,13 +339,13 @@ describe("MoveResult boundary validation (F-5)", () => {
 
   it("keeps an explicit null mapping and an empty mapping distinct", async () => {
     vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping: null });
-    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toMatchObject({
       expunged: true,
       mapping: null,
     });
 
     vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping: [] });
-    await expect(imapMoveMessages("s", "INBOX", [], "Archive")).resolves.toEqual({
+    await expect(imapMoveMessages("s", "INBOX", [], "Archive")).resolves.toMatchObject({
       expunged: true,
       mapping: [],
     });
@@ -364,15 +364,48 @@ describe("MoveResult boundary validation (F-5)", () => {
     ["a repeated destination UID", [{ source_uid: 5, dest_uid: 3 }, { source_uid: 6, dest_uid: 3 }]],
   ])("degrades the whole mapping to null for %s", async (_label, mapping) => {
     vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping });
-    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toMatchObject({
       expunged: true,
       mapping: null,
     });
   });
 
+  it("carries the destination UIDVALIDITY only alongside a valid mapping", async () => {
+    vi.mocked(invoke).mockResolvedValue({
+      expunged: true,
+      mapping: [{ source_uid: 5, dest_uid: 3 }],
+      dest_uidvalidity: 4242,
+    });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: [{ source_uid: 5, dest_uid: 3 }],
+      dest_uidvalidity: 4242,
+    });
+
+    // Malformed generation → unknown; the caller then refuses the mapping.
+    vi.mocked(invoke).mockResolvedValue({
+      expunged: true,
+      mapping: [{ source_uid: 5, dest_uid: 3 }],
+      dest_uidvalidity: "4242",
+    });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: [{ source_uid: 5, dest_uid: 3 }],
+      dest_uidvalidity: null,
+    });
+
+    // No mapping → no generation, whatever Rust sent.
+    vi.mocked(invoke).mockResolvedValue({ expunged: true, mapping: null, dest_uidvalidity: 4242 });
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+      expunged: true,
+      mapping: null,
+      dest_uidvalidity: null,
+    });
+  });
+
   it("does not let a malformed mapping disturb the expunged flag", async () => {
     vi.mocked(invoke).mockResolvedValue({ expunged: false, mapping: "bad" });
-    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toMatchObject({
       expunged: false,
       mapping: null,
     });
@@ -383,7 +416,7 @@ describe("MoveResult boundary validation (F-5)", () => {
       expunged: true,
       mapping: [{ source_uid: 5, dest_uid: 3, extra: "ignored" }],
     });
-    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toEqual({
+    await expect(imapMoveMessages("s", "INBOX", [5], "Archive")).resolves.toMatchObject({
       expunged: true,
       mapping: [{ source_uid: 5, dest_uid: 3 }],
     });

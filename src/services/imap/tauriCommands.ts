@@ -162,6 +162,13 @@ export interface UidMapping {
  */
 export interface MoveResult extends RemovalResult {
   mapping: UidMapping[] | null;
+  /**
+   * The destination folder's UIDVALIDITY as the server reported it alongside
+   * the mapping. Destination UIDs mean nothing outside that generation; the
+   * caller refuses the mapping when this disagrees with the folder's last
+   * synced UIDVALIDITY. `null` whenever `mapping` is, or when malformed.
+   */
+  dest_uidvalidity: number | null;
 }
 
 const UID_MAX = 0xffff_ffff;
@@ -215,11 +222,16 @@ function parseUidMapping(value: unknown): UidMapping[] | null {
 
 function parseMoveResult(value: unknown): MoveResult {
   const { expunged } = parseRemovalResult(value);
-  const mapping =
-    typeof value === "object" && value !== null
-      ? parseUidMapping((value as { mapping?: unknown }).mapping)
-      : null;
-  return { expunged, mapping };
+  if (typeof value !== "object" || value === null) {
+    return { expunged, mapping: null, dest_uidvalidity: null };
+  }
+  const raw = value as { mapping?: unknown; dest_uidvalidity?: unknown };
+  const mapping = parseUidMapping(raw.mapping);
+  // UIDVALIDITY is a u32 too; anything else is treated as unknown, and an
+  // unknown generation is not enough to re-key on.
+  const dest_uidvalidity =
+    mapping !== null && isUid(raw.dest_uidvalidity) ? raw.dest_uidvalidity : null;
+  return { expunged, mapping, dest_uidvalidity };
 }
 
 export interface SmtpConfig {

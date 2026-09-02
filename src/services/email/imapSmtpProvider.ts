@@ -17,6 +17,7 @@ import {
   smtpSendEmail,
   smtpTestConnection,
   type ImapConfig,
+  type MoveResult,
   type SmtpConfig,
 } from "../imap/tauriCommands";
 import { withSession, invalidateAccountCredentials } from "../imap/sessionManager";
@@ -331,8 +332,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === archiveFolder) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, archiveFolder));
-      noticeIfNotExpunged(result, folder);
-      await settleMovedRows(this.accountId, folder, archiveFolder, uids, result.mapping);
+      await this.settle(folder, archiveFolder, uids, result);
     }
   }
 
@@ -347,8 +347,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === trashFolder) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, trashFolder));
-      noticeIfNotExpunged(result, folder);
-      await settleMovedRows(this.accountId, folder, trashFolder, uids, result.mapping);
+      await this.settle(folder, trashFolder, uids, result);
     }
   }
 
@@ -401,8 +400,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === destination) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, destination));
-      noticeIfNotExpunged(result, folder);
-      await settleMovedRows(this.accountId, folder, destination, uids, result.mapping);
+      await this.settle(folder, destination, uids, result);
     }
   }
 
@@ -416,8 +414,7 @@ export class ImapSmtpProvider implements EmailProvider {
     for (const [folder, uids] of grouped) {
       if (folder === folderPath) continue;
       const result = await this.withImapSession((id) => imapMoveMessages(id, folder, uids, folderPath));
-      noticeIfNotExpunged(result, folder);
-      await settleMovedRows(this.accountId, folder, folderPath, uids, result.mapping);
+      await this.settle(folder, folderPath, uids, result);
     }
   }
 
@@ -660,6 +657,32 @@ export class ImapSmtpProvider implements EmailProvider {
   /** `groupByFolder` over only the ids that still name a live local row. */
   private async groupLiveByFolder(messageIds: string[]): Promise<Map<string, number[]>> {
     return this.groupByFolder(await keepLiveMessageIds(this.accountId, messageIds));
+  }
+
+  /**
+   * After the server completed a move: settle the local rows first, then
+   * raise the not-expunged notice. The rows are the part that must not be
+   * skipped — the notice is a toast, and the settle must not depend on it
+   * (Grok M7).
+   */
+  private async settle(
+    sourceFolder: string,
+    destFolder: string,
+    uids: number[],
+    result: MoveResult,
+  ): Promise<void> {
+    try {
+      await settleMovedRows(
+        this.accountId,
+        sourceFolder,
+        destFolder,
+        uids,
+        result.mapping,
+        result.dest_uidvalidity ?? null,
+      );
+    } finally {
+      noticeIfNotExpunged(result, sourceFolder);
+    }
   }
 
   /**

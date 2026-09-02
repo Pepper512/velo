@@ -255,27 +255,67 @@ describe("ImapSmtpProvider", () => {
 
       await provider.archive("thread-1", ["imap-acc-1-INBOX-100", "imap-acc-1-INBOX-200"]);
 
-      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Archive", [100, 200], mapping);
+      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Archive", [100, 200], mapping, null);
+    });
+
+    it("passes the destination UIDVALIDITY through with the mapping", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({
+        expunged: true,
+        mapping: [{ source_uid: 100, dest_uid: 7 }],
+        dest_uidvalidity: 4242,
+      });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100"]);
+
+      expect(settleMovedRows).toHaveBeenCalledWith(
+        "acc-1",
+        "INBOX",
+        "Archive",
+        [100],
+        [{ source_uid: 100, dest_uid: 7 }],
+        4242,
+      );
     });
 
     it("settles with a null mapping when the server gave none, so the rows are hidden rather than left stale", async () => {
-      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null });
+      vi.mocked(findSpecialFolder).mockResolvedValue("Trash");
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null, dest_uidvalidity: null });
 
       await provider.trash("thread-1", ["imap-acc-1-INBOX-100"]);
 
       expect(findSpecialFolder).toHaveBeenCalledWith("acc-1", "\\Trash");
-      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Archive", [100], null);
+      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", "Trash", [100], null, null);
+    });
+
+    it("settles the rows even if raising the not-expunged notice throws, and still raises it after settling", async () => {
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: false, mapping: null, dest_uidvalidity: null });
+      const order: string[] = [];
+      vi.mocked(settleMovedRows).mockImplementation(async () => {
+        order.push("settle");
+      });
+      const addNotice = useUIStore.getState().addNotice;
+      useUIStore.setState({
+        addNotice: (n) => {
+          order.push("notice");
+          addNotice(n);
+        },
+      });
+
+      await provider.archive("thread-1", ["imap-acc-1-INBOX-100"]);
+
+      expect(order).toEqual(["settle", "notice"]);
+      useUIStore.setState({ addNotice });
     });
 
     it.each([
       ["spam", (ids: string[]) => provider.spam("t", ids, true), "Archive"],
       ["moveToFolder", (ids: string[]) => provider.moveToFolder("t", ids, "Projects"), "Projects"],
     ])("settles after %s", async (_name, run, destination) => {
-      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [] });
+      vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [], dest_uidvalidity: null });
 
       await run(["imap-acc-1-INBOX-5"]);
 
-      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", destination, [5], []);
+      expect(settleMovedRows).toHaveBeenCalledWith("acc-1", "INBOX", destination, [5], [], null);
     });
 
     it("does not settle a folder it skipped because the mail was already there", async () => {

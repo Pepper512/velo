@@ -355,7 +355,7 @@ pub async fn imap_move_messages(
     if uids.is_empty() {
         // Nothing was flagged, so nothing is pending removal — and nothing moved,
         // so the (empty) mapping is complete rather than absent.
-        return Ok(MoveResult { expunged: true, mapping: Some(Vec::new()) });
+        return Ok(MoveResult { expunged: true, mapping: Some(Vec::new()), dest_uidvalidity: None });
     }
 
     let uid_set = uid_set(&uids);

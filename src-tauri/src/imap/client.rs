@@ -588,16 +588,20 @@ pub async fn move_messages(
             // OK is what the Dovecot harness run in the PR confirms; the code
             // treats "it did not" as ordinary (brief F-5 rev 2, item 3).
             MoveOutcome::Moved => {
-                let mapping = copyuid::drain_copyuid(std::iter::from_fn(|| {
+                let copyuid = copyuid::drain_copyuid(std::iter::from_fn(|| {
                     session.unsolicited_responses.try_recv().ok()
                 }));
-                if mapping.is_none() {
+                if copyuid.is_none() {
                     log::info!(
                         "UID MOVE {source_folder} -> {dest_folder} completed without a usable COPYUID; \
                          rows will be hidden until the destination syncs"
                     );
                 }
-                return Ok(MoveResult { expunged: true, mapping });
+                let (mapping, dest_uidvalidity) = match copyuid {
+                    Some(c) => (Some(c.mapping), Some(c.dest_uidvalidity)),
+                    None => (None, None),
+                };
+                return Ok(MoveResult { expunged: true, mapping, dest_uidvalidity });
             }
             // The server advertised MOVE and still rejected the command. This
             // is the only outcome the COPY fallback was ever written for.
@@ -657,7 +661,7 @@ pub async fn move_messages(
         )
     })?;
 
-    Ok(MoveResult { expunged, mapping: None })
+    Ok(MoveResult { expunged, mapping: None, dest_uidvalidity: None })
 }
 
 /// Flag messages as deleted and remove them from the server.

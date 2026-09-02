@@ -24,11 +24,34 @@
  * logged and the next sync corrects the rows.
  */
 import { rekeyMovedMessages, tombstoneMovedMessages, type RekeyPair } from "../db/messages";
+import { getFolderSyncState } from "../db/folderSyncState";
 import type { UidMapping } from "./tauriCommands";
 
 /** The id format sync assigns (`imapSync.ts`) and `groupByFolder` parses. */
 function imapMessageId(accountId: string, folder: string, uid: number): string {
   return `imap-${accountId}-${folder}-${uid}`;
+}
+
+/**
+ * Is the mapping's destination generation the one this account has synced?
+ *
+ * Destination UIDs are only meaningful for the UIDVALIDITY they were issued
+ * under (RFC 4315 §3). If the folder has been synced before and its recorded
+ * UIDVALIDITY differs from the one in the `COPYUID`, the ids the re-key would
+ * produce belong to a different generation of that mailbox: they might be
+ * free, or they might be someone else's. Either way the mapping is refused
+ * and the rows fall back to tombstones (Grok L9). A folder never synced has
+ * no recorded generation to disagree with; sync will record this one.
+ */
+async function generationMatches(
+  accountId: string,
+  destFolder: string,
+  destUidvalidity: number | null,
+): Promise<boolean> {
+  if (destUidvalidity === null) return false;
+  const state = await getFolderSyncState(accountId, destFolder);
+  if (state === null || state.uidvalidity === null || state.uidvalidity === 0) return true;
+  return state.uidvalidity === destUidvalidity;
 }
 
 /**
@@ -41,11 +64,19 @@ export async function settleMovedRows(
   destFolder: string,
   uids: number[],
   mapping: UidMapping[] | null,
+  destUidvalidity: number | null,
 ): Promise<void> {
   if (uids.length === 0) return;
 
   const oldIdFor = (uid: number) => imapMessageId(accountId, sourceFolder, uid);
   const toTombstone: string[] = uids.map(oldIdFor);
+
+  if (mapping !== null && !(await generationMatches(accountId, destFolder, destUidvalidity))) {
+    console.warn(
+      `[moveHygiene] COPYUID for ${destFolder} carries UIDVALIDITY ${destUidvalidity}, not the synced one; hiding ${uids.length} row(s) until the folder syncs`,
+    );
+    mapping = null;
+  }
 
   if (mapping !== null) {
     const destUidFor = new Map(mapping.map((m) => [m.source_uid, m.dest_uid]));

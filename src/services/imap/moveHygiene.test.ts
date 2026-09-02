@@ -13,6 +13,8 @@ const harnessRef: { current: ReturnType<typeof createSqliteHarness> | null } = {
 
 vi.mock("@/services/db/connection", () => ({
   getDb: () => Promise.resolve(harnessRef.current!.db),
+  selectFirstBy: async (sql: string, params: unknown[] = []) =>
+    (await harnessRef.current!.db.select<unknown[]>(sql, params))[0] ?? null,
   withTransaction: async (fn: (db: unknown) => Promise<void>) => {
     const db = harnessRef.current!.db;
     await db.execute("BEGIN TRANSACTION", []);
@@ -46,6 +48,8 @@ const A_OLD = `imap-${ACC}-INBOX-5`;
 const B_OLD = `imap-${ACC}-INBOX-6`;
 const A_HEADER = "<a@example.com>";
 const B_HEADER = "<b@example.com>";
+/** The destination UIDVALIDITY the COPYUID reports in these tests. */
+const GEN = 7;
 
 type MessageRow = {
   id: string;
@@ -125,7 +129,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
   // ---------- Done-when 1: re-key on COPYUID ----------
 
   it("re-keys the moved row to the server's UID in one transaction; attachments and soft references follow; thread state is untouched", async () => {
-    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }]);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], GEN);
 
     const A_NEW = `imap-${ACC}-Archive-3`;
     expect(messageRow(A_OLD)).toBeUndefined();
@@ -162,7 +166,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
   });
 
   it("keeps the full-text index consistent through the re-key", async () => {
-    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }]);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], GEN);
 
     const hits = raw()
       .prepare<[string], { subject: string }>(
@@ -175,7 +179,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
   });
 
   it("gives the row the exact id the destination sync will generate, so the upsert hits instead of inserting a second row", async () => {
-    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }]);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], GEN);
 
     // imapSync: `imap-${accountId}-${msg.folder}-${msg.uid}`.
     const syncId = `imap-${ACC}-Archive-3`;
@@ -192,7 +196,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
   // ---------- Done-when 2: no mapping → hidden until the destination syncs ----------
 
   it("tombstones a UID the mapping does not cover and hides it from the thread and from actions", async () => {
-    await settleMovedRows(ACC, "INBOX", "Archive", [5, 6], [{ source_uid: 5, dest_uid: 3 }]);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5, 6], [{ source_uid: 5, dest_uid: 3 }], GEN);
 
     expect(messageRow(B_OLD)).toMatchObject({ imap_folder: "INBOX", imap_uid: 6, moved_to: "Archive" });
 
@@ -206,7 +210,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
   });
 
   it("tombstones everything when no mapping arrived at all (non-UIDPLUS server, COPY fallback, dropped response)", async () => {
-    await settleMovedRows(ACC, "INBOX", "Trash", [5, 6], null);
+    await settleMovedRows(ACC, "INBOX", "Trash", [5, 6], null, null);
 
     expect(messageRow(A_OLD)?.moved_to).toBe("Trash");
     expect(messageRow(B_OLD)?.moved_to).toBe("Trash");
@@ -215,7 +219,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
 
   it("reaps the tombstone when the destination sync inserts the fresh row, cascading its attachments", async () => {
     seedAttachment(B_OLD, "p9");
-    await settleMovedRows(ACC, "INBOX", "Archive", [6], null);
+    await settleMovedRows(ACC, "INBOX", "Archive", [6], null, null);
     expect(messageRow(B_OLD)?.moved_to).toBe("Archive");
 
     // The destination folder syncs the same message in under its new id.
@@ -237,7 +241,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     // The tombstone waits for Archive; a copy arriving in Sent must not take
     // the cached row (and its attachments) away before Archive syncs.
     seedAttachment(B_OLD, "p9");
-    await settleMovedRows(ACC, "INBOX", "Archive", [6], null);
+    await settleMovedRows(ACC, "INBOX", "Archive", [6], null, null);
 
     const elsewhere = `imap-${ACC}-Sent-4`;
     seedMessage(elsewhere, "Sent", 4, B_HEADER, "Re: Quarterly numbers");
@@ -256,18 +260,18 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     const arrived = `imap-${ACC}-Archive-11`;
     seedMessage(arrived, "Archive", 11, B_HEADER, "Re: Quarterly numbers");
 
-    await settleMovedRows(ACC, "INBOX", "Archive", [6], null);
+    await settleMovedRows(ACC, "INBOX", "Archive", [6], null, null);
 
     expect(messageRow(B_OLD)).toBeUndefined();
     expect(messageRow(arrived)).toMatchObject({ moved_to: null });
     // A row with no header match is still tombstoned, not deleted.
-    await settleMovedRows(ACC, "INBOX", "Archive", [5], null);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], null, null);
     expect(messageRow(A_OLD)).toMatchObject({ moved_to: "Archive" });
   });
 
   it("re-keys unmapped rows' tombstones in the same transaction as the re-keys", async () => {
     const start = harnessRef.current!.statements.length; // after migrations
-    await settleMovedRows(ACC, "INBOX", "Archive", [5, 6], [{ source_uid: 5, dest_uid: 3 }]);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5, 6], [{ source_uid: 5, dest_uid: 3 }], GEN);
 
     // One BEGIN … COMMIT around both the UPDATE … SET id and the tombstone.
     const s = harnessRef.current!.statements.slice(start);
@@ -306,7 +310,7 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     const occupied = `imap-${ACC}-Archive-3`;
     seedMessage(occupied, "Archive", 3, "<other@example.com>", "Unrelated");
 
-    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }]);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], GEN);
 
     expect(messageRow(occupied)).toMatchObject({ imap_folder: "Archive", imap_uid: 3, moved_to: null });
     expect(messageRow(A_OLD)).toMatchObject({ imap_folder: "INBOX", imap_uid: 5, moved_to: "Archive" });
@@ -316,25 +320,29 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     ).toEqual([{ message_id: A_OLD }]);
   });
 
-  it("rolls the whole transaction back when a collision reaches the UPDATE, leaving every row untouched", async () => {
+  it("rolls back only the colliding pair when a collision reaches the UPDATE, leaving that row untouched and the rest re-keyed", async () => {
     // The pre-check covers `messages`; a collision the pre-check cannot see is
     // an attachment whose id already equals the rewritten `{newId}_{part}` —
     // the shape a racing destination sync would leave. The attachments UPDATE
-    // hits that PK after the messages UPDATE has already run.
+    // hits that PK after the messages UPDATE has already run; the savepoint
+    // undoes both for this pair, and B's re-key in the same batch still lands.
     const clash = `imap-${ACC}-Archive-9`;
     const bystander = `imap-${ACC}-Sent-1`;
     seedMessage(bystander, "Sent", 1, "<sent@example.com>", "Unrelated");
     raw()
       .prepare("INSERT INTO attachments (id, message_id, account_id) VALUES (?, ?, ?)")
       .run(`${clash}_p1`, bystander, ACC);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await expect(
-      rekeyMovedMessages(ACC, [{ oldId: A_OLD, newId: clash, folder: "Archive", uid: 9 }]),
-    ).rejects.toThrow();
+    const outcome = await rekeyMovedMessages(ACC, [
+      { oldId: A_OLD, newId: clash, folder: "Archive", uid: 9 },
+      { oldId: B_OLD, newId: `imap-${ACC}-Archive-10`, folder: "Archive", uid: 10 },
+    ]);
 
+    expect(outcome).toEqual({ rekeyed: [B_OLD], skipped: [A_OLD] });
+    expect(messageRow(`imap-${ACC}-Archive-10`)).toMatchObject({ imap_uid: 10 });
     expect(messageRow(clash)).toBeUndefined();
     expect(messageRow(A_OLD)).toMatchObject({ imap_folder: "INBOX", imap_uid: 5, moved_to: null });
-    expect(messageRow(B_OLD)).toMatchObject({ imap_folder: "INBOX", imap_uid: 6, moved_to: null });
     expect(
       raw()
         .prepare<[string], { id: string; message_id: string }>(
@@ -365,7 +373,38 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
 
   it("does nothing for an empty UID list", async () => {
     const before = harnessRef.current!.statements.length;
-    await settleMovedRows(ACC, "INBOX", "Archive", [], []);
+    await settleMovedRows(ACC, "INBOX", "Archive", [], [], GEN);
     expect(harnessRef.current!.statements).toHaveLength(before);
+  });
+
+  // ---------- Threat pass: the mapping's generation ----------
+
+  function seedSyncState(folder: string, uidvalidity: number) {
+    raw()
+      .prepare(
+        "INSERT INTO folder_sync_state (account_id, folder_path, uidvalidity, last_uid) VALUES (?, ?, ?, 0)",
+      )
+      .run(ACC, folder, uidvalidity);
+  }
+
+  it("re-keys when the COPYUID's UIDVALIDITY matches the destination's synced generation", async () => {
+    seedSyncState("Archive", GEN);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], GEN);
+    expect(messageRow(`imap-${ACC}-Archive-3`)).toBeDefined();
+  });
+
+  it("refuses a mapping whose UIDVALIDITY is not the destination's synced generation, and tombstones instead", async () => {
+    // A recreated mailbox reuses UIDs: ids from the old generation would name
+    // other messages (or none) in the new one.
+    seedSyncState("Archive", 99);
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], GEN);
+
+    expect(messageRow(`imap-${ACC}-Archive-3`)).toBeUndefined();
+    expect(messageRow(A_OLD)).toMatchObject({ imap_uid: 5, moved_to: "Archive" });
+  });
+
+  it("refuses a mapping that arrived without a UIDVALIDITY at all", async () => {
+    await settleMovedRows(ACC, "INBOX", "Archive", [5], [{ source_uid: 5, dest_uid: 3 }], null);
+    expect(messageRow(A_OLD)).toMatchObject({ imap_uid: 5, moved_to: "Archive" });
   });
 });

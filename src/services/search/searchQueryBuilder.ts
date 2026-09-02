@@ -54,6 +54,10 @@ export function buildSearchQuery(
     paramIdx++;
   }
 
+  // F-5: a row moved without a COPYUID mapping is hidden until the destination
+  // folder syncs it in under its new id; search must not surface the ghost.
+  whereClauses.push("m.moved_to IS NULL");
+
   // Account filter
   if (accountId) {
     whereClauses.push(`m.account_id = $${paramIdx}`);

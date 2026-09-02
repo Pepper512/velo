@@ -158,6 +158,11 @@ pub struct UidMapping {
 pub struct MoveResult {
     pub expunged: bool,
     pub mapping: Option<Vec<UidMapping>>,
+    /// The destination mailbox's UIDVALIDITY as reported in the same `COPYUID`.
+    /// Destination UIDs mean nothing outside that generation, so the frontend
+    /// refuses the mapping when this disagrees with the UIDVALIDITY it last
+    /// synced for the folder (Grok L9). `None` whenever `mapping` is.
+    pub dest_uidvalidity: Option<u32>,
 }
 
 #[cfg(test)]
