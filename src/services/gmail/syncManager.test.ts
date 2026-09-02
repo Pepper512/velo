@@ -58,7 +58,8 @@ import { getAccount } from "../db/accounts";
 import { getGmailClient } from "./tokenManager";
 import { initialSync, deltaSync } from "./sync";
 import { getSetting } from "../db/settings";
-import { imapInitialSync } from "../imap/imapSync";
+import { getThreadCountForAccount } from "../db/threads";
+import { imapInitialSync, imapDeltaSync } from "../imap/imapSync";
 
 const mockGetAccount = vi.mocked(getAccount);
 const mockGetGmailClient = vi.mocked(getGmailClient);
@@ -329,6 +330,23 @@ describe("syncManager", () => {
       await syncAccount("i1");
 
       expect(mockImapInitialSync).toHaveBeenCalledWith("i1", 0, expect.any(Function));
+    });
+
+    it("passes a stored 0 through to the IMAP delta sync as all time", async () => {
+      mockGetSetting.mockResolvedValueOnce("0");
+      mockGetAccount.mockResolvedValue({
+        ...makeGmailAccount("i1", "imap-synced"),
+        provider: "imap" as const,
+        auth_method: "password",
+        imap_host: "imap.example.com",
+      } as unknown as Awaited<ReturnType<typeof getAccount>>);
+      vi.mocked(imapDeltaSync).mockResolvedValue({ messages: [], threads: [] } as unknown as Awaited<ReturnType<typeof imapDeltaSync>>);
+      vi.mocked(getThreadCountForAccount).mockResolvedValue(5);
+
+      await syncAccount("i1");
+
+      expect(vi.mocked(imapDeltaSync)).toHaveBeenCalledWith("i1", 0);
+      expect(mockImapInitialSync).not.toHaveBeenCalled();
     });
 
     it("falls back to 365 for an unreadable setting", async () => {

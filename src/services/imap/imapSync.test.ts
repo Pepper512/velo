@@ -1177,6 +1177,37 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     expect(shouldListFolder).not.toHaveBeenCalled();
     expect(attestPass).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining(["INBOX"]), new Set(), 0);
   });
+
+  // SPEC-276 REQ-1.2 (Gemini L1 on #62): both delta-sync search sites — a folder
+  // with no saved state, and a UIDVALIDITY resync — search without SINCE for all time.
+  it("all time (daysBack 0) searches a new folder and a UIDVALIDITY resync without SINCE", async () => {
+    mockImapListFolders.mockResolvedValue([
+      inbox(),
+      createMockImapFolder({ path: "Archive", raw_path: "Archive", exists: 3 }),
+    ]);
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), uidvalidity: 8, uidvalidity_changed: true }]);
+    vi.mocked(imapSearchFolder).mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ exists: 0 }) });
+
+    await imapDeltaSync("acc-1", 0);
+
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "Archive", null);
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "INBOX", null);
+  });
+
+  it("a positive period keeps the SINCE date on both delta-sync search sites", async () => {
+    mockImapListFolders.mockResolvedValue([
+      inbox(),
+      createMockImapFolder({ path: "Archive", raw_path: "Archive", exists: 3 }),
+    ]);
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), uidvalidity: 8, uidvalidity_changed: true }]);
+    vi.mocked(imapSearchFolder).mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ exists: 0 }) });
+
+    await imapDeltaSync("acc-1", 365);
+
+    const since = expect.stringMatching(/^\d{1,2}-[A-Z][a-z]{2}-\d{4}$/);
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "Archive", since);
+    expect(vi.mocked(imapSearchFolder)).toHaveBeenCalledWith("test-session", "INBOX", since);
+  });
 });
 
 /** SPEC-F-1 REQ-1.3 — the IMAP thread-store path consults the snooze rule before upserting. */

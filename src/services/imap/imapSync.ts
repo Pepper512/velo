@@ -134,6 +134,10 @@ export function formatImapDate(date: Date): string {
  * Compute a `DD-Mon-YYYY` SINCE date string for the given `daysBack` value.
  * Subtracts an extra day as a safety margin for timezone differences
  * (IMAP SINCE has date-only granularity, no time component).
+ *
+ * Not a sync-period reader: `0` here means "since yesterday", not "all time".
+ * Search sites take the period through `sinceDateForDaysBack`, which maps
+ * all time to `null` before this runs (SPEC-276).
  */
 export function computeSinceDate(daysBack: number): string {
   const date = new Date();

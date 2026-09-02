@@ -915,3 +915,30 @@
   worktrees themselves and their branches are untouched, still Jim's to remove). The main
   checkout's and this worktree's caches were kept. No source was lost; two edits that failed
   with ENOSPC were re-applied and verified.
+- **2026-09-03 — #276 built ("All time" sync period)** on Jim's instruction, bug-fix queue
+  item 7, **Tier 1** (no Tier-2 file touched; no Rust change). The triage said *review upstream
+  PR #275, don't rewrite*: reviewed (`gh pr diff 275`, 4 files) and **adopted its design** —
+  `0` means no date filter, Gmail omits `after:`, IMAP passes `null` so the existing Rust
+  `None → UID SEARCH ALL` branch fires, the per-message cutoff is off, dropdown gains 2 y / 5 y /
+  All time. **Tightened:** upstream's `Number.isNaN(parsed) ? 365 : parsed` (copied at both
+  sync-manager sites, "0 or negative = all time") became one parser, `services/syncPeriod.ts`,
+  accepting exactly `0` or a positive integer and falling back to 365 for negative, fractional,
+  hex or non-numeric strings — a negative period is not a meaning anyone chose, and one reader
+  cannot drift like #252's duplicated ternary did. The latent bug it also fixes: both sites read
+  `parseInt(raw) || 365`, which silently turned a stored `0` into 365. The fork's three IMAP
+  search sites differ from upstream's (session-pooled since E2), so the change was re-made by
+  hand. TDD: parser cases, both sync-manager sites receiving `0` (and `365` for junk), IMAP
+  all-time search with `null` and two 400-day/12-year-old messages kept, Gmail `q` omitted /
+  kept. Spec `docs/briefs/2026-09-03-276-sync-all-time.md`, committed before the code.
+  Gates: 164 files / 2,101 tests, tsc, graph, docs. One review leg (Tier 1): Gemini 3.7.
+- **2026-09-03 — PR #62 (#276) review, one leg (Tier 1).** Gemini 3.7: APPROVE WITH NITS
+  (2L 1N). **Adopted all three:** L1 — a delta-sync test that both search sites (a folder with
+  no saved state, a UIDVALIDITY resync) pass `null` for all time, plus the mirror case that a
+  positive period keeps the SINCE string; L2 — a sync-manager test that an IMAP account with
+  a history id hands `0` to `imapDeltaSync` (not only the initial-sync branch); N3 — a doc
+  note on `computeSinceDate` that `0` there means "since yesterday" and the period must come
+  through `sinceDateForDaysBack`. **Questions answered:** no `SettingsPage` component test
+  exists in the repo and the option is a plain `<option value="0">` — not added (the parser
+  test pins what `"0"` means); an interrupted all-time initial sync resumes the way any
+  initial sync does today (per-folder `folder_sync_state`, `history_id` set at the end) —
+  unchanged by this PR, recorded. Raw output in `docs/reviews/2026-09-03-pr62-gemini-raw.md`.
