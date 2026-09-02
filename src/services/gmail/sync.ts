@@ -12,6 +12,7 @@ import { getMutedThreadIds } from "../db/threads";
 import { getThreadCategory } from "../db/threadCategories";
 import { getVipSenders } from "../db/notificationVips";
 import { getPendingOpsForResource } from "../db/pendingOperations";
+import { isAllTime } from "../syncPeriod";
 import { getOwnAddresses, clearSnoozeForNewExternalMessages } from "@/services/snooze/snoozeSync";
 
 async function loadAutoArchiveCategories(): Promise<Set<string>> {
@@ -196,10 +197,14 @@ export async function initialSync(
   await syncLabels(client, accountId);
   onProgress?.({ phase: "labels", current: 1, total: 1 });
 
-  // Phase 2: Fetch thread list
-  const afterDate = new Date();
-  afterDate.setDate(afterDate.getDate() - daysBack);
-  const afterStr = `${afterDate.getFullYear()}/${afterDate.getMonth() + 1}/${afterDate.getDate()}`;
+  // Phase 2: Fetch thread list. "All time" (SPEC-276) is no query at all —
+  // the client omits `q` when it is undefined.
+  let query: string | undefined;
+  if (!isAllTime(daysBack)) {
+    const afterDate = new Date();
+    afterDate.setDate(afterDate.getDate() - daysBack);
+    query = `after:${afterDate.getFullYear()}/${afterDate.getMonth() + 1}/${afterDate.getDate()}`;
+  }
 
   const threadStubs: { id: string }[] = [];
   let pageToken: string | undefined;
@@ -210,7 +215,7 @@ export async function initialSync(
     const response = await client.listThreads({
       maxResults: 100,
       pageToken,
-      q: `after:${afterStr}`,
+      q: query,
     });
 
     if (response.threads) {

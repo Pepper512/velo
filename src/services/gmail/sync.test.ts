@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { deltaSync } from "./sync";
+import { deltaSync, initialSync } from "./sync";
 import { GmailClient } from "./client";
+
+vi.mock("../db/labels", () => ({
+  upsertLabel: vi.fn(),
+}));
 
 // Mock all DB modules
 vi.mock("../db/threads", () => ({
@@ -211,5 +215,39 @@ describe("deltaSync snooze handling (SPEC-F-1)", () => {
     const clearOrder = vi.mocked(clearSnoozeForNewExternalMessages).mock.invocationCallOrder[0]!;
     const upsertOrder = vi.mocked(upsertThread).mock.invocationCallOrder[0]!;
     expect(clearOrder).toBeLessThan(upsertOrder);
+  });
+});
+
+// SPEC-276 REQ-1.1: "All time" (daysBack 0) lists threads with no `after:`
+// filter; a positive period keeps the filter.
+describe("initialSync sync period (SPEC-276)", () => {
+  function createListingClient() {
+    return {
+      listLabels: vi.fn().mockResolvedValue({ labels: [] }),
+      listThreads: vi.fn().mockResolvedValue({}),
+      getThread: vi.fn(),
+    } as unknown as GmailClient;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("omits the query for all time", async () => {
+    const client = createListingClient();
+
+    await initialSync(client, "acc-1", 0);
+
+    const call = vi.mocked(client.listThreads).mock.calls[0]![0]!;
+    expect(call.q).toBeUndefined();
+  });
+
+  it("keeps the after: filter for a positive period", async () => {
+    const client = createListingClient();
+
+    await initialSync(client, "acc-1", 365);
+
+    const call = vi.mocked(client.listThreads).mock.calls[0]![0]!;
+    expect(call.q).toMatch(/^after:\d{4}\/\d{1,2}\/\d{1,2}$/);
   });
 });

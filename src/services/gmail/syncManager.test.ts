@@ -57,6 +57,8 @@ import {
 import { getAccount } from "../db/accounts";
 import { getGmailClient } from "./tokenManager";
 import { initialSync, deltaSync } from "./sync";
+import { getSetting } from "../db/settings";
+import { imapInitialSync } from "../imap/imapSync";
 
 const mockGetAccount = vi.mocked(getAccount);
 const mockGetGmailClient = vi.mocked(getGmailClient);
@@ -296,6 +298,46 @@ describe("syncManager", () => {
 
       expect(errors).toHaveLength(1);
       expect(errors[0]).toBe("Unknown error");
+    });
+  });
+
+  // SPEC-276: the stored setting reaches the sync as a number. `"0"` is "all
+  // time" and must arrive as 0 — `parseInt(x) || 365` turned it into 365.
+  describe("sync period (SPEC-276)", () => {
+    const mockGetSetting = vi.mocked(getSetting);
+    const mockImapInitialSync = vi.mocked(imapInitialSync);
+
+    it("passes a stored 0 through to the Gmail initial sync as all time", async () => {
+      mockGetSetting.mockResolvedValueOnce("0");
+      mockGetAccount.mockResolvedValue(makeGmailAccount("a1"));
+
+      await syncAccount("a1");
+
+      expect(mockInitialSync).toHaveBeenCalledWith(expect.anything(), "a1", 0, expect.any(Function));
+    });
+
+    it("passes a stored 0 through to the IMAP initial sync as all time", async () => {
+      mockGetSetting.mockResolvedValueOnce("0");
+      mockGetAccount.mockResolvedValue({
+        ...makeGmailAccount("i1"),
+        provider: "imap" as const,
+        auth_method: "password",
+        imap_host: "imap.example.com",
+      } as unknown as Awaited<ReturnType<typeof getAccount>>);
+      mockImapInitialSync.mockResolvedValue({ messages: [], threads: [] } as unknown as Awaited<ReturnType<typeof imapInitialSync>>);
+
+      await syncAccount("i1");
+
+      expect(mockImapInitialSync).toHaveBeenCalledWith("i1", 0, expect.any(Function));
+    });
+
+    it("falls back to 365 for an unreadable setting", async () => {
+      mockGetSetting.mockResolvedValueOnce("abc");
+      mockGetAccount.mockResolvedValue(makeGmailAccount("a1"));
+
+      await syncAccount("a1");
+
+      expect(mockInitialSync).toHaveBeenCalledWith(expect.anything(), "a1", 365, expect.any(Function));
     });
   });
 });
