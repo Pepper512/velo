@@ -25,6 +25,16 @@ vi.mock("./AuthWarningBanner", () => ({
   AuthWarningBanner: () => null,
 }));
 
+// SPEC-F-3 REQ-2: the phishing scan is mocked at the service; the banner is real.
+const mockScan = vi.fn().mockResolvedValue(null);
+vi.mock("@/services/phishing/phishingScanner", () => ({
+  scanMessageLinks: (...args: unknown[]) => mockScan(...args),
+}));
+const mockAllowlist = vi.fn().mockResolvedValue(undefined);
+vi.mock("@/services/db/phishingAllowlist", () => ({
+  addToPhishingAllowlist: (...args: unknown[]) => mockAllowlist(...args),
+}));
+
 function makeMessage(overrides: Partial<DbMessage> = {}): DbMessage {
   return {
     id: "m1",
@@ -128,5 +138,67 @@ describe("MessageItem", () => {
       <MessageItem ref={ref} message={makeMessage()} isLast={true} blockImages={false} />,
     );
     expect(ref.current).toBeInstanceOf(HTMLDivElement);
+  });
+});
+
+/** SPEC-F-3 REQ-2 — the phishing banner, wired for the first time (audit P19). */
+describe("MessageItem phishing banner (SPEC-F-3)", () => {
+  const flagged = {
+    messageId: "m1",
+    links: [],
+    maxRiskScore: 55,
+    suspiciousLinkCount: 2,
+    showBanner: true,
+    scannedAt: 1,
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockScan.mockResolvedValue(null);
+    mockAllowlist.mockResolvedValue(undefined);
+  });
+
+  it("scans the message and shows the banner when the scan says so (REQ-2.1)", async () => {
+    mockScan.mockResolvedValue(flagged);
+    render(<MessageItem message={makeMessage()} isLast={true} blockImages={false} />);
+
+    expect(await screen.findByText(/2 suspicious links found/)).toBeInTheDocument();
+    expect(mockScan).toHaveBeenCalledWith("a1", "m1", "<p>Hello</p>", "bob@example.com");
+  });
+
+  it("shows no banner when the scan is clean or disabled", async () => {
+    mockScan.mockResolvedValue({ ...flagged, showBanner: false });
+    render(<MessageItem message={makeMessage()} isLast={true} blockImages={false} />);
+    await act(async () => {});
+    expect(screen.queryByText(/suspicious link/)).toBeNull();
+
+    mockScan.mockResolvedValue(null); // detection off or sender allowlisted
+    render(<MessageItem message={makeMessage({ id: "m2" })} isLast={true} blockImages={false} />);
+    await act(async () => {});
+    expect(screen.queryByText(/suspicious link/)).toBeNull();
+  });
+
+  it("Trust this sender allowlists the sender and hides the banner (REQ-2.2)", async () => {
+    mockScan.mockResolvedValue(flagged);
+    render(<MessageItem message={makeMessage()} isLast={true} blockImages={false} />);
+    await screen.findByText(/2 suspicious links found/);
+
+    await act(async () => {
+      screen.getByText("Trust this sender").click();
+    });
+
+    expect(mockAllowlist).toHaveBeenCalledWith("a1", "bob@example.com");
+    expect(screen.queryByText(/suspicious link/)).toBeNull();
+  });
+
+  it("a scan that rejects leaves the message rendered without a banner", async () => {
+    mockScan.mockRejectedValue(new Error("db closed"));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(<MessageItem message={makeMessage()} isLast={true} blockImages={false} />);
+    await act(async () => {});
+
+    expect(screen.getByText("Bob")).toBeInTheDocument();
+    expect(screen.queryByText(/suspicious link/)).toBeNull();
+    warn.mockRestore();
   });
 });

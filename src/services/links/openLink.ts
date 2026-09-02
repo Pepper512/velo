@@ -26,6 +26,23 @@ function defaultLog(message: string): void {
   console.error(message);
 }
 
+/**
+ * Would `openEmailLink` do anything with this href? False for no href, an
+ * unparseable one, and fragment-only / same-document links — the silent
+ * no-ops of REQ-2.4. The phishing gate (SPEC-F-3) asks this first so an
+ * in-page anchor is never analysed or confirmed.
+ */
+export function isOpenableHref(href: string | null | undefined, frameOrigin: string): boolean {
+  if (!href) return false;
+  let url: URL;
+  try {
+    url = new URL(href);
+  } catch {
+    return false;
+  }
+  return url.protocol !== "about:" && url.origin !== frameOrigin;
+}
+
 export async function openEmailLink(
   href: string | null | undefined,
   frameOrigin: string,
@@ -43,7 +60,7 @@ export async function openEmailLink(
 
   // Fragment-only and same-document links: the DOM resolved them against the
   // iframe's own document. Nothing to open, nothing to say.
-  if (url.protocol === "about:" || url.origin === frameOrigin) return "ignored";
+  if (!isOpenableHref(href, frameOrigin)) return "ignored";
 
   const { addNotice } = useUIStore.getState();
 

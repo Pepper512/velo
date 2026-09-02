@@ -1206,3 +1206,24 @@
   default paste on purpose (attachments have their own button and drop path); Velo has no
   toast system — hence the local notice. Raw output in
   `docs/reviews/2026-09-03-pr69-gemini-raw.md`.
+- **2026-09-03 — F-3 / P19 built (phishing interstitial and banner wired)** on Jim's
+  instruction and decision 5, **Tier 1** (email components, the link seam, a pure detector
+  helper; no Rust, CSP, capability or dependency). Verified first: every anchor click already
+  funnels through `openEmailLink` (F-2), while `LinkConfirmDialog`, `PhishingBanner` and
+  `scanMessageLinks` had no caller — the help page promised a confirmation on *every* click
+  and `SECURITY.md` said the feature was not surfaced. **Decisions:** the gate analyses the
+  exact `href` the DOM resolved with the detector's own `analyzeLink` (plain-text linkified
+  anchors included) and asks only when the score crosses the *same* per-sensitivity line the
+  banner uses (`linkNeedsConfirmation`, 60/40/20) — not on every click; detection-off and an
+  allowlisted sender open directly; a setting or allowlist read that fails **fails closed**
+  (gate on, sender unknown); in-page anchors keep F-2's silent no-op and are never analysed
+  (`isOpenableHref` extracted from the seam). The banner is wired too, because the scan
+  result exists once the gate reads the same settings and audit P19's acceptance names it —
+  Jim can strike it. "Trust this sender" allowlists and hides. TDD: `linkGuard.test.ts`
+  (thresholds, fixtures pinned against the detector's rule scores, sensitivity moves the
+  line, disabled, allowlisted, no-context, fail-closed), renderer click tests (flagged →
+  dialog and no opener; Go Back / Open Anyway; safe → opens; `#top` never analysed), banner
+  tests (shown, clean, trust, scan error). Two F-2 click tests now `waitFor` the opener,
+  since the gate awaits its settings first. Help card and `SECURITY.md` rewritten to what is
+  true. Spec `docs/briefs/2026-09-03-f3-link-confirm.md`, committed before the code.
+  One review leg (Tier 1): Gemini 3.7.

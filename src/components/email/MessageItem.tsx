@@ -8,6 +8,10 @@ import type { DbAttachment } from "@/services/db/attachments";
 import { MailMinus } from "lucide-react";
 import { AuthBadge } from "./AuthBadge";
 import { AuthWarningBanner } from "./AuthWarningBanner";
+import { PhishingBanner } from "./PhishingBanner";
+import { scanMessageLinks } from "@/services/phishing/phishingScanner";
+import { addToPhishingAllowlist } from "@/services/db/phishingAllowlist";
+import type { MessageScanResult } from "@/utils/phishingDetector";
 
 interface MessageItemProps {
   message: DbMessage;
@@ -25,6 +29,22 @@ export const MessageItem = memo(forwardRef<HTMLDivElement, MessageItemProps>(fun
   const [expanded, setExpanded] = useState(isLast);
   const [attachments, setAttachments] = useState<DbAttachment[]>([]);
   const [authBannerDismissed, setAuthBannerDismissed] = useState(false);
+  // SPEC-F-3 REQ-2: the phishing scan the help page promised, finally rendered.
+  const [phishingScan, setPhishingScan] = useState<MessageScanResult | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setPhishingScan(null);
+    scanMessageLinks(message.account_id, message.id, message.body_html, message.from_address)
+      .then((result) => {
+        if (!cancelled) setPhishingScan(result);
+      })
+      .catch((err: unknown) => {
+        console.warn("[MessageItem] phishing scan failed:", err instanceof Error ? err.message : String(err));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [message.account_id, message.id, message.body_html, message.from_address]);
   const attachmentsLoadedRef = useRef(false);
 
   const loadAttachments = async () => {
@@ -120,6 +140,20 @@ export const MessageItem = memo(forwardRef<HTMLDivElement, MessageItemProps>(fun
               authResults={message.auth_results}
               senderAddress={message.from_address}
               onDismiss={() => setAuthBannerDismissed(true)}
+            />
+          )}
+
+          {phishingScan?.showBanner && (
+            <PhishingBanner
+              scanResult={phishingScan}
+              onTrustSender={() => {
+                if (message.from_address) {
+                  void addToPhishingAllowlist(message.account_id, message.from_address).catch((err: unknown) => {
+                    console.warn("[MessageItem] could not allowlist sender:", err instanceof Error ? err.message : String(err));
+                  });
+                }
+                setPhishingScan(null);
+              }}
             />
           )}
 

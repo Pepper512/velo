@@ -457,6 +457,14 @@ const SENSITIVITY_THRESHOLDS: Record<PhishingSensitivity, { scoreThreshold: numb
   high: { scoreThreshold: 20, countThreshold: 1 },
 };
 
+/**
+ * Should a click on this link stop at the interstitial (SPEC-F-3 REQ-1.1)?
+ * The same per-sensitivity score line the banner uses, applied to one link.
+ */
+export function linkNeedsConfirmation(analysis: LinkAnalysis, sensitivity: PhishingSensitivity = "default"): boolean {
+  return analysis.riskScore >= SENSITIVITY_THRESHOLDS[sensitivity].scoreThreshold;
+}
+
 export function scanMessage(messageId: string, html: string | null, sensitivity: PhishingSensitivity = "default"): MessageScanResult {
   if (!html) {
     return {
