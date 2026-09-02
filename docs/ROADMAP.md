@@ -74,18 +74,17 @@ Deferred, deliberately (≈163 days if all done): Auto Drafts 2.0, Ask AI over c
 contact stats, Daily Brief, autocorrect, #208 SSO, #152/#153, #257 Graph/shared mailboxes (15),
 #292 S/MIME (25, ADR), team features (~40), mobile (~60). Non-goals: read statuses, auto-send.
 
-## Decisions only Jim can make (each gates work)
-1. **#197** image CSP: widen `img-src https:` on opt-in (¼ day) or a Rust image proxy (3 days).
-2. **#209/#265** custom LLM URL: widen CSP or a validated Rust fetch command.
-3. **List-virtualization dependency** (speed budget) — dependency approval before day one.
-4. **MCP server** — ADR (runtime, tool access, dependency).
-5. **P19/F-3** — wire the phishing link dialog or delete it.
-6. **#278** macOS signing — $99/yr.
-7. **Rules raised by the Opus 5 review:** whether Grok 4.6 stays a Tier-2 reviewer (roster says
-   panel-only; used twice by instruction) — move the row with an ADR or expire the exception.
-   The Tier-2 human-merge carve-out was **not** adopted (Jim, 2026-09-02).
-8. **Distribution:** EX-007 — the fork cannot cut a release; deciding to ship is an ADR (release +
-   signing model).
+## Decisions — made by Jim, 2026-09-02 (LOG.md has the record)
+1. **#197** image CSP → **widen `img-src https:` behind the opt-in** (¼ day). Rust proxy queued as a later privacy enhancement.
+2. **#209/#265** custom LLM URL → **validated Rust fetch command** (https/loopback only, no off-host redirects). CSP stays tight.
+3. **Speed budget** → **`@tanstack/react-virtual` approved** as the virtualization dependency.
+4. **MCP server** → **write the ADR now**, build in wave 3.
+5. **P19/F-3** → **wire** `LinkConfirmDialog` (~1 day, Tier 1). Now a queued item, not a decision.
+6. **#278** macOS signing → **not yet**, tied to 8.
+7. **Grok 4.6** → **standing second cross-vendor leg on Tier 2** (ADR-004; roster row moved). The Tier-2 human-merge carve-out is not adopted.
+8. **EX-007** distribution → **not yet**; revisit with an ADR after #297 and #240 land.
+
+Decisions still gating nothing today: none. Open ADRs to write: MCP server (item 4), release + signing (item 8, later).
 
 ## Standing Jim-only chores
 - `rust MSRV` required check: `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`.
