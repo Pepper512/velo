@@ -91,12 +91,23 @@ pub enum PoolError {
     TooManySessions,
 }
 
+/// Reserved prefix for control-flow sentinels crossing the IPC boundary.
+///
+/// Pool errors and operation errors share one `Result<T, String>` channel, and
+/// the operation half carries **server-supplied text** — mailbox names, `NO`
+/// responses, anything the remote end put in an error. The frontend decides
+/// whether to retry based on which kind it got, so if that decision is a loose
+/// substring match, a server can spell a sentinel and steer it. A namespaced
+/// prefix plus exact matching on the frontend closes that: an IMAP error is
+/// always `"<operation> failed: <detail>"`, never exactly one of these.
+pub const SENTINEL_PREFIX: &str = "velo:pool:";
+
 impl std::fmt::Display for PoolError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::NoSuchSession => write!(f, "NoSuchSession"),
-            Self::SessionBusy => write!(f, "SessionBusy"),
-            Self::TooManySessions => write!(f, "TooManySessions"),
+            Self::NoSuchSession => write!(f, "{SENTINEL_PREFIX}NoSuchSession"),
+            Self::SessionBusy => write!(f, "{SENTINEL_PREFIX}SessionBusy"),
+            Self::TooManySessions => write!(f, "{SENTINEL_PREFIX}TooManySessions"),
         }
     }
 }

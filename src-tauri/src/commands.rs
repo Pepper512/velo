@@ -234,10 +234,13 @@ fn uid_set(uids: &[u32]) -> String {
 
 /// Sentinel the frontend matches to re-issue a fetch outside the pool.
 ///
-/// A bare marker rather than a typed error because `Other(String)` is the
-/// established shape across this boundary (brief §Not doing) and the frontend
-/// already matches on message content.
-pub const NEED_RAW_FALLBACK: &str = "NeedRawFallback";
+/// Namespaced, and the frontend matches it **exactly**, because this shares a
+/// `Result<T, String>` channel with `FetchError::Other(msg)` — where `msg` is
+/// server-supplied. A loose `includes()` would let a server holding a mailbox
+/// named after the sentinel (or emitting it in a `NO` response) push the
+/// frontend down the credential-carrying fallback path. Cross-vendor review
+/// finding 1 on PR #39.
+pub const NEED_RAW_FALLBACK: &str = "velo:fetch:NeedRawFallback";
 
 /// Decision 4(a)'s escape hatch: a raw-TCP fetch that carries its own
 /// credential because the pooled session cannot.

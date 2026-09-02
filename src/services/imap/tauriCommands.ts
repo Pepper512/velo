@@ -227,11 +227,17 @@ export async function imapFetchMessages(
  * none, so the frontend re-issues the fetch through `imapRawFetchMessages`
  * rather than the command keeping a password for the rare case.
  */
-export const NEED_RAW_FALLBACK = 'NeedRawFallback';
+export const NEED_RAW_FALLBACK = 'velo:fetch:NeedRawFallback';
 
+/**
+ * Exact match, deliberately. This sentinel shares its channel with
+ * server-supplied IMAP error text, so a substring test would let a server with
+ * a mailbox named after it push Velo down the credential-carrying fallback
+ * path. Cross-vendor review finding 1 on PR #39.
+ */
 export function isNeedRawFallback(err: unknown): boolean {
   const message = err instanceof Error ? err.message : String(err);
-  return message.includes(NEED_RAW_FALLBACK);
+  return message.trim() === NEED_RAW_FALLBACK;
 }
 
 /**

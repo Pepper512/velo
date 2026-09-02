@@ -135,6 +135,35 @@ describe("Done-when 5 — no credential crosses the boundary except where named"
   });
 });
 
+describe("the fallback sentinel cannot be forged by the server", () => {
+  // Cross-vendor review finding 1 on PR #39. `imap_fetch_messages` shares its
+  // error channel with FetchError::Other(msg), where msg is server-supplied.
+  // A substring test would let a server with a mailbox named after the
+  // sentinel push Velo onto the one fetch path that carries a credential.
+  it("an IMAP error merely mentioning the sentinel sends no credential", async () => {
+    mockInvoke.mockImplementation(async (cmd: string) => {
+      if (cmd === "imap_session_open") return "session-1";
+      if (cmd === "imap_fetch_messages") {
+        throw new Error(
+          'FETCH failed: NO mailbox "velo:fetch:NeedRawFallback" does not exist',
+        );
+      }
+      return undefined;
+    });
+
+    await expect(
+      withSession("acc-1", "sync", {}, (id) => imapFetchMessages(id, "INBOX", [1])),
+    ).rejects.toThrow("FETCH failed");
+
+    // The raw path is the only fetch that carries a config. It must not run.
+    const raw = mockInvoke.mock.calls.filter(
+      ([cmd]) => cmd === "imap_raw_fetch_messages",
+    );
+    expect(raw).toHaveLength(0);
+    expect(commandsCarryingTheCredential()).toEqual(["imap_session_open"]);
+  });
+});
+
 describe("Done-when 2 — a sync opens at most two sessions", () => {
   it("reuses one session across many commands rather than one per command", async () => {
     // Stands in for a delta sync: a status check and a fetch per folder, over
@@ -169,7 +198,7 @@ describe("Done-when 2 — a sync opens at most two sessions", () => {
       if (cmd === "imap_session_open") return `session-${++calls}`;
       if (cmd === "imap_list_folders" && calls === 1) {
         // The reaper took it between commands.
-        throw new Error("NoSuchSession");
+        throw new Error("velo:pool:NoSuchSession");
       }
       return undefined;
     });

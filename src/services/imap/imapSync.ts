@@ -395,7 +395,23 @@ async function fetchMessagesPooled(
   accountId: string,
   folder: string,
   uids: number[],
+  fallbackFolders?: Set<string>,
 ): Promise<ImapFetchResult> {
+  const rawFetch = async (): Promise<ImapFetchResult> => {
+    const account = await getAccount(accountId);
+    if (!account) throw new Error(`Account ${accountId} not found`);
+    const config = await buildImapConfigWithFreshToken(account);
+    return imapRawFetchMessages(config, folder, uids);
+  };
+
+  // Once a folder has needed the fallback, every later batch in the same pass
+  // will too — the trigger is a parser-level property of the folder's messages,
+  // not of the batch. Without this each batch would open a session, fail,
+  // evict it, and open a raw connection: two handshakes per batch, fifty
+  // batches, for a folder that was never going to work through the pool.
+  // Cross-vendor review finding 4 on PR #39.
+  if (fallbackFolders?.has(folder)) return rawFetch();
+
   try {
     return await withSession(accountId, "sync", {}, (id) =>
       imapFetchMessages(id, folder, uids),
@@ -404,10 +420,8 @@ async function fetchMessagesPooled(
     if (!isNeedRawFallback(err)) throw err;
 
     console.log(`[imapSync] Raw-fetch fallback for folder ${folder}`);
-    const account = await getAccount(accountId);
-    if (!account) throw new Error(`Account ${accountId} not found`);
-    const config = await buildImapConfigWithFreshToken(account);
-    return imapRawFetchMessages(config, folder, uids);
+    fallbackFolders?.add(folder);
+    return rawFetch();
   }
 }
 
@@ -417,13 +431,15 @@ async function fetchMessagesInBatches(
   uids: number[],
   onBatch?: (fetched: number, total: number) => void,
 ): Promise<{ messages: ImapMessage[]; lastUid: number; uidvalidity: number }> {
+  // Shared across this folder's batches only; a fresh sync re-tests the pool.
+  const fallbackFolders = new Set<string>();
   const allMessages: ImapMessage[] = [];
   let lastUid = 0;
   let uidvalidity = 0;
 
   for (let i = 0; i < uids.length; i += BATCH_SIZE) {
     const batch = uids.slice(i, i + BATCH_SIZE);
-    const result = await fetchMessagesPooled(accountId, folder, batch);
+    const result = await fetchMessagesPooled(accountId, folder, batch, fallbackFolders);
 
     allMessages.push(...result.messages);
     uidvalidity = result.folder_status.uidvalidity;
