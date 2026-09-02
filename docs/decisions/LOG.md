@@ -789,3 +789,30 @@
   toolchain's default, accepted by the MSRV job). Raw outputs in
   `docs/reviews/2026-09-02-pr54-{gemini-round1,gemini,grok}-raw.md`. Gates after all three
   rounds: Rust 123, frontend 2,045, clippy/tsc/docs/graph clean.
+- **2026-09-02 ~23:00 UTC — #241 built (parenthesised `UID FETCH` attribute lists)** on Jim's
+  instruction, on its own branch alongside #280. Verified first: RFC 3501 §6.4.5 requires
+  parentheses around two or more fetch attributes; three `uid_fetch` sites in
+  `imap/client.rs` sent a bare list (initial-sync batch, single-message fetch, delta-sync
+  chunk), two sent a single attribute (valid), and the raw diagnostic already used the RFC form.
+  Plan committed first (`docs/briefs/2026-09-02-241-uid-fetch-parenthesised.md`, Tier 2 —
+  Rust IMAP). **Decisions:** the two lists become `FETCH_FULL` / `FETCH_UID_FLAGS_BODY`
+  constants (plus `FETCH_BODY`) and the diagnostic uses the same constant; a **guard test scans
+  the client source** for every `.uid_fetch(` site and fails on a bare multi-attribute list —
+  and refuses to pass by finding fewer than the five known sites. TDD: the guard red on the
+  first bare list (line 289), then green. No live Stalwart to run against; the reporter's
+  re-test is recorded as open.
+- **2026-09-02 ~23:45 UTC — PR #57 (#241) cross-vendor review, both legs.** Gemini 3.7 and Grok
+  4.6 both APPROVE WITH NITS and both found the same real weakness: the guard was line-based
+  (a wrapped call was skipped, `.await` on the call line made it panic, `>= 5` let it pass by
+  omission, "contains a space" was not RFC `fetch-att`, `.fetch(` and raw command strings were
+  unchecked). **Adopted as a rewrite:** the guard moved to `imap/fetch_guard.rs` — a
+  bracket-and-string-aware scanner over the client's production source (its own test module
+  excluded), covering `.uid_fetch(`/`.fetch(` calls across lines and every tagged
+  `… FETCH <set> <attrs>\r\n` command string with `{FETCH_*}` placeholders resolved and any other
+  placeholder failing closed; "multi" is two or more top-level tokens; exact site counts (5
+  method, 2 raw — the scan found a second, already-correct raw command); nine scanner fixtures.
+  `FETCH_FULL` renamed `FETCH_UID_FLAGS_INTERNALDATE_BODY` (Grok N5: RFC 3501's `FULL` is a
+  different macro). **Recorded, not adopted:** a wire-bytes test (needs a recording session;
+  `async-imap` sends the query verbatim) and a full-attribute response-parser fixture (the
+  parser is unchanged; belongs with the reporter's re-test). Raw outputs in
+  `docs/reviews/2026-09-02-pr57-{gemini,grok}-raw.md`. Rust 132 tests.
