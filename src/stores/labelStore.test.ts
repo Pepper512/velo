@@ -12,6 +12,12 @@ vi.mock("@/services/gmail/tokenManager", () => ({
   getGmailClient: vi.fn(),
 }));
 
+vi.mock("@/services/db/threads", () => ({
+  getUnreadCountsByLabel: vi.fn(),
+}));
+
+import { getUnreadCountsByLabel } from "@/services/db/threads";
+
 import { getLabelsForAccount, deleteLabel as dbDeleteLabel, updateLabelSortOrder, upsertLabel } from "@/services/db/labels";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 
@@ -195,5 +201,72 @@ describe("isSystemLabel", () => {
     expect(isSystemLabel("Label_1")).toBe(false);
     expect(isSystemLabel("Label_2")).toBe(false);
     expect(isSystemLabel("Work")).toBe(false);
+  });
+});
+
+// SPEC-243 REQ-2.3 — the sidebar's unread counts live beside the labels.
+describe("labelStore unread counts (SPEC-243)", () => {
+  const mockCounts = vi.mocked(getUnreadCountsByLabel);
+
+  beforeEach(() => {
+    useLabelStore.setState({ labels: [], isLoading: false, unreadCounts: {} });
+    vi.clearAllMocks();
+  });
+
+  it("starts empty", () => {
+    expect(useLabelStore.getState().unreadCounts).toEqual({});
+  });
+
+  it("refreshUnreadCounts replaces the map with the account's counts", async () => {
+    mockCounts.mockResolvedValue({ INBOX: 3, Label_1: 1 });
+
+    await useLabelStore.getState().refreshUnreadCounts("acc1");
+
+    expect(mockCounts).toHaveBeenCalledWith("acc1");
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 3, Label_1: 1 });
+  });
+
+  it("a later refresh drops labels that no longer have unread mail (no stale keys)", async () => {
+    useLabelStore.setState({ unreadCounts: { INBOX: 3, Label_1: 1 } });
+    mockCounts.mockResolvedValue({ INBOX: 1 });
+
+    await useLabelStore.getState().refreshUnreadCounts("acc1");
+
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 1 });
+  });
+
+  it("keeps the previous map and logs when the query fails", async () => {
+    useLabelStore.setState({ unreadCounts: { INBOX: 2 } });
+    mockCounts.mockRejectedValue(new Error("db closed"));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await useLabelStore.getState().refreshUnreadCounts("acc1");
+
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 2 });
+    expect(errorSpy).toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it("a refresh that resolves after a newer one is discarded (account switch race, #63 M2)", async () => {
+    let resolveOld: (v: Record<string, number>) => void = () => {};
+    mockCounts.mockImplementationOnce(() => new Promise((r) => { resolveOld = r; }));
+    const oldRefresh = useLabelStore.getState().refreshUnreadCounts("acc1");
+
+    mockCounts.mockResolvedValueOnce({ INBOX: 7 });
+    await useLabelStore.getState().refreshUnreadCounts("acc2");
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 7 });
+
+    resolveOld({ INBOX: 3, Label_1: 1 });
+    await oldRefresh;
+
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 7 });
+  });
+
+  it("clearLabels clears the counts too, so a switched account never shows the old ones", () => {
+    useLabelStore.setState({ unreadCounts: { INBOX: 2 } });
+
+    useLabelStore.getState().clearLabels();
+
+    expect(useLabelStore.getState().unreadCounts).toEqual({});
   });
 });

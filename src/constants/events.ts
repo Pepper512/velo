@@ -25,6 +25,14 @@ export interface VeloEventMap {
    * The load-bearing one: services write, then fire this, and the UI re-reads.
    */
   "velo-sync-done": void;
+  /**
+   * A user action changed threads in the local database — read state, star,
+   * archive, trash, move, label, snooze, spam (SPEC-243). Fired by
+   * `executeEmailAction` after its local update, whatever the server then
+   * says, so counts derived from the database can refresh at once instead of
+   * waiting for the next sync.
+   */
+  "velo-threads-changed": void;
   "velo-toggle-command-palette": void;
   "velo-toggle-shortcuts-help": void;
   "velo-toggle-ask-inbox": void;

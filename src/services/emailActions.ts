@@ -5,6 +5,7 @@ import { enqueuePendingOperation } from "@/services/db/pendingOperations";
 import { RECONCILE_OP, enqueueReconcileOps, runReconcileOp } from "@/services/imap/reconcileOp";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
+import { dispatchVeloEvent } from "@/constants/events";
 
 // ---------------------------------------------------------------------------
 // Action types
@@ -335,6 +336,10 @@ export async function executeEmailAction(
   } catch (err) {
     console.warn("Local DB update failed:", err);
   }
+  // Counts read from the database (sidebar unread pills, SPEC-243) refresh on
+  // this rather than on the next sync. Fired whatever happens below: the
+  // optimistic store and the local rows have already changed.
+  dispatchVeloEvent("velo-threads-changed");
 
   // 3. If offline, queue
   if (!useUIStore.getState().isOnline) {

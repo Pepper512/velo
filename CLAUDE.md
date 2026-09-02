@@ -170,7 +170,7 @@ Thread pop-out windows via `ThreadWindow.tsx`. Entry point in `main.tsx` checks 
 
 ### Cross-component communication
 
-Custom window events: `velo-sync-done`, `velo-toggle-command-palette`, `velo-toggle-shortcuts-help`, `velo-toggle-ask-inbox`, `velo-move-to-folder`. Tray emits `tray-check-mail` via Tauri event system. `single-instance-args` event for deep link forwarding.
+Custom window events: `velo-sync-done`, `velo-threads-changed` (fired by `executeEmailAction` after its local DB update — the sidebar's unread counts refresh on it, SPEC-243), `velo-toggle-command-palette`, `velo-toggle-shortcuts-help`, `velo-toggle-ask-inbox`, `velo-move-to-folder`. Typed map and helpers in `src/constants/events.ts`. Tray emits `tray-check-mail` via Tauri event system. `single-instance-args` event for deep link forwarding.
 
 ### Keyboard shortcuts
 
@@ -232,7 +232,7 @@ Tailwind CSS v4 — uses `@import "tailwindcss"`, `@theme {}` for custom propert
 
 Vitest + jsdom. Setup file: `src/test/setup.ts` (imports `@testing-library/jest-dom/vitest`). Config: `globals: true` (no imports needed for `describe`, `it`, `expect`). Tests are colocated with source files (e.g., `uiStore.test.ts` next to `uiStore.ts`). Zustand test pattern: `useStore.setState()` in beforeEach, assert via `.getState()`.
 
-164 test files across services (91), components (35), utils (17), stores (9), constants (4), hooks (3), config (2), router (2), test (1). Both numbers are measured by `npm run docs:check`, not maintained by hand.
+166 test files across services (92), components (36), utils (17), stores (9), constants (4), hooks (3), config (2), router (2), test (1). Both numbers are measured by `npm run docs:check`, not maintained by hand.
 
 ## Database
 

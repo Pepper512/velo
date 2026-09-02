@@ -65,6 +65,26 @@ export const ALL_NAV_ITEMS: { id: string; label: string; icon: LucideIcon }[] = 
   { id: "labels", label: "Labels", icon: Tag },
 ];
 
+/**
+ * Nav items that show an unread pill, and the label whose count they show
+ * (SPEC-243). Drafts would want a total, Starred/Snoozed/Sent/Trash/All Mail
+ * are not "to do" folders — deliberately absent.
+ */
+const NAV_UNREAD_LABEL: Record<string, string> = { inbox: "INBOX", spam: "SPAM" };
+
+/** The count pill smart folders and Tasks already use; hidden at zero by the caller. */
+function UnreadPill({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="text-[0.625rem] bg-accent/15 text-accent px-1.5 rounded-full leading-normal"
+      aria-label={`${count} unread`}
+    >
+      {count}
+    </span>
+  );
+}
+
 const CATEGORY_ITEMS: { id: string; label: string; icon: LucideIcon }[] = [
   { id: "Primary", label: "Primary", icon: Inbox },
   { id: "Updates", label: "Updates", icon: Bell },
@@ -117,6 +137,7 @@ function DroppableLabelItem({
   label,
   isActive,
   collapsed,
+  count,
   onClick,
   onContextMenu,
   onEditClick,
@@ -124,6 +145,8 @@ function DroppableLabelItem({
   label: Label;
   isActive: boolean;
   collapsed: boolean;
+  /** Unread threads carrying this label (SPEC-243); 0 shows nothing. */
+  count: number;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
   onEditClick: () => void;
@@ -172,6 +195,7 @@ function DroppableLabelItem({
             <Tag size={14} className="shrink-0" />
           )}
           <span className="flex-1 truncate">{label.name}</span>
+          <UnreadPill count={count} />
           <span
             role="button"
             tabIndex={0}
@@ -218,6 +242,8 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
   const labels = useLabelStore((s) => s.labels);
   const loadLabels = useLabelStore((s) => s.loadLabels);
   const deleteLabel = useLabelStore((s) => s.deleteLabel);
+  const unreadCounts = useLabelStore((s) => s.unreadCounts);
+  const refreshUnreadCounts = useLabelStore((s) => s.refreshUnreadCounts);
   const smartFolders = useSmartFolderStore((s) => s.folders);
   const smartFolderCounts = useSmartFolderStore((s) => s.unreadCounts);
   const loadSmartFolders = useSmartFolderStore((s) => s.loadFolders);
@@ -264,12 +290,13 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
     openMenu("sidebarNav", { x: e.clientX, y: e.clientY }, { navId });
   }, [openMenu]);
 
-  // Load labels when active account changes
+  // Load labels (and their unread counts, SPEC-243) when active account changes
   useEffect(() => {
     if (activeAccountId) {
       loadLabels(activeAccountId);
+      refreshUnreadCounts(activeAccountId);
     }
-  }, [activeAccountId, loadLabels]);
+  }, [activeAccountId, loadLabels, refreshUnreadCounts]);
 
   // Load smart folders when active account changes
   useEffect(() => {
@@ -279,25 +306,38 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
     }
   }, [activeAccountId, loadSmartFolders, refreshSmartFolderCounts]);
 
-  // Reload labels and smart folder counts on sync completion (debounced to avoid waterfall from multiple emitters)
+  // Refresh on sync completion and after the user's own actions (SPEC-243),
+  // debounced to avoid a waterfall from multiple emitters. A sync can change
+  // the label list itself; a user action only changes counts, so it skips the
+  // label reload (#63 review, Gemini L4). Both share one timer: whichever
+  // fired inside the window, the label reload happens if a sync asked for it.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    let reloadLabels = false;
+    const schedule = (labelsToo: boolean) => {
+      reloadLabels = reloadLabels || labelsToo;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
+        const withLabels = reloadLabels;
+        reloadLabels = false;
         if (activeAccountId) {
-          loadLabels(activeAccountId);
+          if (withLabels) loadLabels(activeAccountId);
           refreshSmartFolderCounts(activeAccountId);
+          refreshUnreadCounts(activeAccountId);
         }
         useUIStore.getState().setSyncingFolder(null);
       }, 500);
     };
-    window.addEventListener("velo-sync-done", handler);
+    const onSyncDone = () => schedule(true);
+    const onThreadsChanged = () => schedule(false);
+    window.addEventListener("velo-sync-done", onSyncDone);
+    window.addEventListener("velo-threads-changed", onThreadsChanged);
     return () => {
-      window.removeEventListener("velo-sync-done", handler);
+      window.removeEventListener("velo-sync-done", onSyncDone);
+      window.removeEventListener("velo-threads-changed", onThreadsChanged);
       if (timer) clearTimeout(timer);
     };
-  }, [activeAccountId, loadLabels, refreshSmartFolderCounts]);
+  }, [activeAccountId, loadLabels, refreshSmartFolderCounts, refreshUnreadCounts]);
 
   const handleDeleteLabel = useCallback(async (labelId: string) => {
     if (!activeAccountId) return;
@@ -393,6 +433,9 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                       <span className="text-[0.625rem] bg-accent/15 text-accent px-1.5 rounded-full leading-normal">
                         {taskIncompleteCount}
                       </span>
+                    )}
+                    {!collapsed && NAV_UNREAD_LABEL[item.id] !== undefined && (
+                      <UnreadPill count={unreadCounts[NAV_UNREAD_LABEL[item.id]!] ?? 0} />
                     )}
                     {isInbox && !collapsed && (
                       <span
@@ -530,6 +573,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                   label={label}
                   isActive={activeLabel === label.id}
                   collapsed={collapsed}
+                  count={unreadCounts[label.id] ?? 0}
                   onClick={() => navigateToLabel(label.id)}
                   onContextMenu={(e) => handleLabelContextMenu(e, label.id)}
                   onEditClick={() => handleEditLabel(label.id)}
@@ -554,6 +598,7 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
                         label={label}
                         isActive={activeLabel === label.id}
                         collapsed={collapsed}
+                        count={unreadCounts[label.id] ?? 0}
                         onClick={() => navigateToLabel(label.id)}
                         onContextMenu={(e) => handleLabelContextMenu(e, label.id)}
                         onEditClick={() => handleEditLabel(label.id)}

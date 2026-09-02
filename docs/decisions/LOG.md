@@ -942,3 +942,43 @@
   test pins what `"0"` means); an interrupted all-time initial sync resumes the way any
   initial sync does today (per-folder `folder_sync_state`, `history_id` set at the end) —
   unchanged by this PR, recorded. Raw output in `docs/reviews/2026-09-03-pr62-gemini-raw.md`.
+- **2026-09-03 — #243 built (unread counts in the sidebar)** on Jim's instruction, bug-fix
+  queue item 8, **Tier 1** (no Tier-2 file; no schema). Verified first: no label had a count
+  (only smart folders and Tasks render the pill), the badge's Inbox count is cross-account,
+  and no user action fires an event — only `sendMessage` does — so a count refreshed on
+  `velo-sync-done` alone would lag the user's own reads and archives by up to 60 s.
+  **Decisions:** one grouped query (`getUnreadCountsByLabel`, the folder list's own
+  `threads ⋈ thread_labels` join, so the pill equals what the folder shows) into `labelStore`
+  rather than smart-folder-style per-label queries; a typed **`velo-threads-changed`** event
+  fired by `executeEmailAction` after its local update, whatever the server then says (online,
+  queued, or permanently failed — the local rows changed either way), with the sidebar's
+  existing 500 ms debounce listening to both events; pills on **Inbox, Spam and user labels**
+  only (Drafts would want a total; Starred/Snoozed/Sent/Trash/All Mail are not to-do folders),
+  hidden at zero and when collapsed. Not done, recorded in the brief: per-category counts,
+  refreshing the taskbar badge on the new event, replacing the inline `velo-sync-done`
+  literals. TDD: SQLite-harness test for the query (per-label, per-account, agrees with the
+  folder list), store tests (refresh, stale keys dropped, failure keeps the map, clear), the
+  three event cases in `emailActions`, and a **`Sidebar` render test** (first one for that
+  component: pills at 4/2/1, none at 0, none on uncounted folders, none collapsed, one query
+  for both events through the debounce). Spec `docs/briefs/2026-09-03-243-sidebar-unread-counts.md`,
+  committed before the code. Gates: 166 files / 2,119 tests, tsc, graph, docs. One review leg
+  (Tier 1): Gemini 3.7.
+- **2026-09-03 — PR #63 (#243) review, one leg (Tier 1).** Gemini 3.7: CHANGES REQUESTED
+  (2M 2L 1N). **Adopted:** M1 — the sidebar test dispatched both events in one block, so an
+  unwired `velo-threads-changed` listener would have passed on the strength of sync-done;
+  split into one test per event (plus one for a sync-done inside a user action's window).
+  M2 — `refreshUnreadCounts` for the previous account could resolve after the new account's
+  and overwrite its map; a module-level sequence makes the newest request the only one that
+  sets state (a test races two refreshes and resolves the old one last). L4 — the shared
+  handler re-queried the label list and the smart-folder searches on every user action; the
+  debounce now takes a flag: a sync reloads labels, a user action refreshes counts only
+  (smart-folder counts included — they are unread counts too and had the same lag), with
+  the flag OR-ed across the window. N5 — the folder-list agreement test now seeds a second
+  account. **Declined with reason:** L3 — "fire again after the optimistic revert": the
+  revert changes the store, not the database (`revertOptimisticUpdate`), so a re-query
+  would return the same map; the real gap is pre-existing — on a permanent provider error
+  the local rows keep the change while the store reverts — and belongs to `emailActions`,
+  not to this PR (recorded here as a carry). **Questions answered:** snoozing stores the
+  thread without `INBOX` and with `SNOOZED` (`applySnoozeOverride`), so the count is exact;
+  bulk actions loop over `executeEmailAction`, N events collapse into one debounced query.
+  Raw output in `docs/reviews/2026-09-03-pr63-gemini-raw.md`.

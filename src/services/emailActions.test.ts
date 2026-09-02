@@ -392,4 +392,45 @@ describe("emailActions", () => {
       expect(mockProvider.createDraft).toHaveBeenCalledWith("base64data", undefined);
     });
   });
+
+  // SPEC-243 REQ-2.2 — every action that changed the local database tells the
+  // UI so, whether it then ran online, queued, or failed on the server. The
+  // sidebar's unread counts refresh on it; without it they lag until the next sync.
+  describe("velo-threads-changed (SPEC-243)", () => {
+    function listen(): { handler: ReturnType<typeof vi.fn>; stop: () => void } {
+      const handler = vi.fn();
+      window.addEventListener("velo-threads-changed", handler);
+      return { handler, stop: () => window.removeEventListener("velo-threads-changed", handler) };
+    }
+
+    it("fires once after the local update when the action runs online", async () => {
+      const { handler, stop } = listen();
+
+      await executeEmailAction("acct-1", { type: "markRead", threadId: "t1", messageIds: ["m1"], read: true });
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      stop();
+    });
+
+    it("fires when the action is queued offline", async () => {
+      vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: false }) as never);
+      const { handler, stop } = listen();
+
+      await executeEmailAction("acct-1", { type: "archive", threadId: "t1", messageIds: ["m1"] });
+
+      expect(handler).toHaveBeenCalledTimes(1);
+      stop();
+    });
+
+    it("fires even when the provider then fails permanently — the local database did change", async () => {
+      mockProvider.archive.mockRejectedValueOnce(new Error("Invalid request"));
+      const { handler, stop } = listen();
+
+      const result = await executeEmailAction("acct-1", { type: "archive", threadId: "t1", messageIds: ["m1"] });
+
+      expect(result.success).toBe(false);
+      expect(handler).toHaveBeenCalledTimes(1);
+      stop();
+    });
+  });
 });

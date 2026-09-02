@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { getLabelsForAccount, deleteLabel as dbDeleteLabel, updateLabelSortOrder } from "@/services/db/labels";
 import { upsertLabel } from "@/services/db/labels";
+import { getUnreadCountsByLabel } from "@/services/db/threads";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 
 export interface Label {
@@ -36,7 +37,11 @@ export function isSystemLabel(id: string): boolean {
 interface LabelState {
   labels: Label[];
   isLoading: boolean;
+  /** Unread threads by label id for the active account (SPEC-243); absent = 0. */
+  unreadCounts: Record<string, number>;
   loadLabels: (accountId: string) => Promise<void>;
+  /** Re-query every label's unread count in one statement. Keeps the old map on failure. */
+  refreshUnreadCounts: (accountId: string) => Promise<void>;
   clearLabels: () => void;
   createLabel: (accountId: string, name: string, color?: { textColor: string; backgroundColor: string }) => Promise<void>;
   updateLabel: (accountId: string, labelId: string, updates: { name?: string; color?: { textColor: string; backgroundColor: string } | null }) => Promise<void>;
@@ -44,9 +49,27 @@ interface LabelState {
   reorderLabels: (accountId: string, labelIds: string[]) => Promise<void>;
 }
 
+/** Sequence of `refreshUnreadCounts` calls; only the newest may set state. */
+let unreadRefreshSeq = 0;
+
 export const useLabelStore = create<LabelState>((set, get) => ({
   labels: [],
   isLoading: false,
+  unreadCounts: {},
+
+  refreshUnreadCounts: async (accountId: string) => {
+    // Latest request wins: a refresh for the previous account (or an earlier
+    // one for this account) that resolves late must not overwrite a newer map
+    // (#63 review, Gemini M2).
+    const seq = ++unreadRefreshSeq;
+    try {
+      const unreadCounts = await getUnreadCountsByLabel(accountId);
+      if (seq !== unreadRefreshSeq) return;
+      set({ unreadCounts });
+    } catch (err) {
+      console.error("Failed to refresh label unread counts:", err);
+    }
+  },
 
   loadLabels: async (accountId: string) => {
     set({ isLoading: true });
@@ -70,7 +93,7 @@ export const useLabelStore = create<LabelState>((set, get) => ({
     }
   },
 
-  clearLabels: () => set({ labels: [], isLoading: false }),
+  clearLabels: () => set({ labels: [], isLoading: false, unreadCounts: {} }),
 
   createLabel: async (accountId: string, name: string, color?: { textColor: string; backgroundColor: string }) => {
     const client = await getGmailClient(accountId);
