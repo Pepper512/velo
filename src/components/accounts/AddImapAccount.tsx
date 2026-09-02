@@ -126,11 +126,24 @@ function smtpCredentialInputs(form: FormState, isOAuth: boolean): SmtpCredential
   };
 }
 
-/** Map UI security value ("ssl") to Rust config value ("tls") */
-function mapSecurity(security: string): ImapConfig["security"] {
-  if (security === "ssl") return "tls";
-  if (security === "starttls") return "starttls";
-  return "none";
+/**
+ * Map the UI security value ("ssl") to the Rust config value ("tls").
+ * Exhaustive on purpose: an unknown value must never fall through to "none"
+ * and put a password on a plaintext socket (#68 review, Grok 3).
+ */
+function mapSecurity(security: SecurityType): ImapConfig["security"] {
+  switch (security) {
+    case "ssl":
+      return "tls";
+    case "starttls":
+      return "starttls";
+    case "none":
+      return "none";
+    default: {
+      const unknown: never = security;
+      throw new Error(`Unknown security setting: ${String(unknown)}`);
+    }
+  }
 }
 
 export function AddImapAccount({
@@ -331,7 +344,15 @@ export function AddImapAccount({
   const runOf = () => testRun.current!;
   useEffect(() => () => { void runOf().cancel(); }, []);
 
+  // Closing the sheet by any path stops the tests too, not only unmount
+  // (#68 review, Grok 7).
+  const handleClose = () => {
+    void runOf().cancel();
+    onClose();
+  };
+
   const testBothConnections = async () => {
+    if (runOf().isRunning()) return; // a second click before the row repaints
     setImapTest({ state: "testing" });
     setSmtpTest({ state: "testing" });
     await runOf().start(imapTestConfig(), smtpTestConfig(), {
@@ -945,7 +966,7 @@ export function AddImapAccount({
   return (
     <Modal
       isOpen={true}
-      onClose={onClose}
+      onClose={handleClose}
       title="Add IMAP/SMTP Account"
       width="w-full max-w-lg"
     >
@@ -964,7 +985,7 @@ export function AddImapAccount({
 
           <div className="flex gap-2">
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="px-4 py-2 text-sm text-text-secondary hover:text-text-primary transition-colors"
             >
               Cancel

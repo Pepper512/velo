@@ -172,6 +172,27 @@ describe("connectionTestRun (SPEC-204)", () => {
     await second;
   });
 
+  it("a cancel whose IPC fails still resolves and still drops the late results", async () => {
+    const pending = deferredInvoke();
+    mockInvoke.mockImplementation((cmd: string, args?: Record<string, unknown>) => {
+      if (cmd === "connection_test_cancel") return Promise.reject(new Error("ipc down"));
+      return new Promise((resolve, reject) => pending.set(cmd, { resolve, reject, args: args ?? {} }));
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const onImap = vi.fn();
+    const run = createConnectionTestRun();
+    const started = run.start(imap, smtp, { onImap, onSmtp: vi.fn() });
+
+    await expect(run.cancel()).resolves.toBeUndefined();
+    expect(warn).toHaveBeenCalled();
+
+    pending.get("imap_test_connection")!.resolve("late");
+    pending.get("smtp_test_connection")!.resolve({ success: true, message: "late" });
+    await started;
+    expect(onImap).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
   it("a cancel with nothing in flight invokes nothing", async () => {
     deferredInvoke();
     const run = createConnectionTestRun();

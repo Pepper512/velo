@@ -58,7 +58,10 @@ successful test still reads "Connected successfully. Found N folder(s)."
     `testId`; when present the work runs as an abortable task registered under that id and
     is removed from the registry when it finishes, however it finishes.
   - REQ-2.2 `connection_test_cancel(testId)` SHALL abort the registered task and return
-    `true`; for an unknown or already-finished id it SHALL return `false` and do nothing.
+    `true`. A cancel that arrives before the test command has registered (the sync cancel
+    can be polled first) SHALL leave a tombstone so the test never starts, also `true`;
+    tombstones expire after 60 s. Only a test that already finished has nothing to cancel
+    or prevent (amended after review — Grok 1, Gemini 3.8 M3).
   - REQ-2.3 A cancelled test SHALL reject with the message `cancelled` within a second,
     not after its timeouts — proven against a socket that accepts and never answers.
   - REQ-2.4 A call without `testId` SHALL behave exactly as today (other callers, if any).

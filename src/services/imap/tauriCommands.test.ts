@@ -263,6 +263,14 @@ describe('SMTP Tauri commands', () => {
     expect(result).toEqual(sendResult);
   });
 
+  it('smtpTestConnection passes the testId through (SPEC-204)', async () => {
+    mockInvoke.mockResolvedValue({ success: true, message: 'Connection successful' });
+
+    await smtpTestConnection(testSmtpConfig, 777);
+
+    expect(mockInvoke).toHaveBeenCalledWith('smtp_test_connection', { config: testSmtpConfig, testId: 777 });
+  });
+
   it('smtpTestConnection invokes with correct command and params', async () => {
     const testResult = { success: true, message: 'Connection successful' };
     mockInvoke.mockResolvedValue(testResult);

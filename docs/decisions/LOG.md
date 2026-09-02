@@ -1142,3 +1142,33 @@
   the tested `cancel()`. A failed cancel IPC is now warned, still swallowed. The first
   push failed CI's Rust job on `in_flight` being unused outside tests — `#[cfg(test)]` now.
   Raw output in `docs/reviews/2026-09-03-pr68-gemini-raw.md`.
+- **2026-09-03 — PR #68 (#204) review, legs 2 and 3.** Grok 4.6 (twelve minutes again, run
+  in parallel with the fallback): CHANGES REQUESTED (4M 4L 1N). Gemini 3.8 Flash (Jim's
+  fallback rule): CHANGES REQUESTED (1H 2M 2L 1N). Both reviewed the diff at `25ee8e0`.
+  **Real defects, all adopted:** (1) **cancel-before-register** — the sync cancel command
+  can be polled before the async test command's first poll; a lock around spawn+register
+  (Gemini 3.7 N3) does not cover that. `cancel` now leaves a **tombstone** for an id it has
+  not seen; the test command finds it and never spawns; tombstones expire after 60 s and
+  are swept on every registry write (Grok 1 = Gemini 3.8 M3; test with no sleep at all).
+  (2) **`mapSecurity` fail-open** — my rewrite defaulted an unknown value to `"none"`, i.e.
+  a password on a plaintext socket; the form's union is `ssl|starttls|none` so no live
+  path hit it, but it is exactly the wrong default on a credential path. Now an exhaustive
+  `switch` over `SecurityType` with a `never` arm (Grok 3 = Gemini 3.8 H1). (3) a `start`
+  over a running run orphaned the old tasks (Grok 2 = Gemini 3.8 M2 = Gemini 3.7 L1) —
+  adopted earlier. (4) SMTP abort unproven (Grok 4) — the silent-socket SMTP test, and
+  now both socket tests assert the **server saw EOF**, i.e. the abort really closed the
+  socket (Gemini 3.8 L4). **Grok's LOWs, adopted:** a **drop guard** — the command future
+  dropped mid-flight (webview teardown) used to detach the task and leak the entry; the
+  guard aborts and removes, scoped by a per-registration sequence so a displaced
+  registration's cleanup cannot remove the one that replaced it (found by the duplicate-id
+  test); a **duplicate id** now aborts the displaced test instead of orphaning it; the
+  modal's own close path cancels too (the parent does unmount the form, so this is a belt);
+  a panic in the work yields a fixed string and the detail goes to the log. **Gemini 3.8's
+  extras:** the SMTP wrapper's `testId` pinned; `isRunning()` now guards a double click.
+  **Declined:** none. **Questions answered:** app commands need no capability entry
+  (`core:default`, as `db_tx_*`/`ai_fetch`); lettre's transport is async — the SMTP
+  silent-socket test proves the abort in <1 s; the modal unmounts the form; the security
+  union has no `"tls"`; `crypto.getRandomValues` exists in every webview Tauri ships on.
+  **Comparison:** Grok and Gemini 3.8 each found the three MEDIUM-class defects Gemini 3.7
+  missed; Grok alone found the drop-guard and duplicate-id leaks. Raw outputs in
+  `docs/reviews/2026-09-03-pr68-{grok,gemini38}-raw.md`.
