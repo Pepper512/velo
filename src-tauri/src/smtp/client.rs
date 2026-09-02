@@ -142,21 +142,142 @@ fn extract_envelope(raw: &[u8]) -> Result<lettre::address::Envelope, String> {
         .map_err(|e| format!("Envelope error: {}", e))
 }
 
+/// Index at which the body starts — just after the header block's last line
+/// terminator, so the blank line and everything after it belong to the tail.
+/// The whole input when there is no blank line.
+fn header_block_end(raw: &[u8]) -> usize {
+    let mut i = 0;
+    while i < raw.len() {
+        let rest = &raw[i..];
+        if rest.starts_with(b"\r\n\r\n") {
+            return i + 2;
+        }
+        // Bare LF, and the mixed `\n\r\n` a builder can produce (Gemini NIT 2).
+        if rest.starts_with(b"\n\n") || rest.starts_with(b"\n\r\n") {
+            return i + 1;
+        }
+        i += 1;
+    }
+    raw.len()
+}
+
+/// Split into lines, each keeping its own terminator; a final unterminated
+/// line is returned as well.
+fn lines_inclusive(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
+    let mut start = 0;
+    std::iter::from_fn(move || {
+        if start >= bytes.len() {
+            return None;
+        }
+        let end = bytes[start..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|p| start + p + 1)
+            .unwrap_or(bytes.len());
+        let line = &bytes[start..end];
+        start = end;
+        Some(line)
+    })
+}
+
+/// Is this header line a `Bcc` or `Resent-Bcc` field (RFC 5322 §3.6.3 and
+/// §3.6.6 remove both before transmission)? The field name is everything
+/// before the first colon with surrounding whitespace removed — §4.5.3
+/// obsolete syntax allows `Bcc :`, and `mail_parser` accepts it, so it must
+/// be caught.
+fn is_bcc_field(line: &[u8]) -> bool {
+    // A UTF-8 BOM before the first field is not part of the name (Grok L2).
+    let line = line.strip_prefix(b"\xEF\xBB\xBF").unwrap_or(line);
+    // A name folded before its colon (`Bcc\r\n : x`) is not RFC 5322 syntax,
+    // but a parser that unfolds first would see a Bcc, so the bare name on a
+    // line of its own counts too (Grok M1).
+    let name = match line.iter().position(|&b| b == b':') {
+        Some(colon) => &line[..colon],
+        None => line,
+    }
+    .trim_ascii();
+    name.eq_ignore_ascii_case(b"bcc") || name.eq_ignore_ascii_case(b"resent-bcc")
+}
+
+/// Remove every `Bcc` and `Resent-Bcc` header field — with its folded
+/// continuation lines — from the header block of an RFC 5322 message, leaving
+/// every other byte as it was (#297, REQ-1.1/1.3). The body is never touched:
+/// a line reading `Bcc: …` after the blank line is content.
+fn strip_bcc_header(raw: &[u8]) -> Vec<u8> {
+    let body_at = header_block_end(raw);
+    let mut out = Vec::with_capacity(raw.len());
+    let mut skipping = false;
+    let mut seen_field = false;
+    for line in lines_inclusive(&raw[..body_at]) {
+        let continuation = matches!(line.first(), Some(b' ') | Some(b'\t'));
+        // A whitespace-led line continues the field above it; with no field
+        // above (a malformed first line) it is judged on its own (Gemini NIT 3).
+        if !continuation || !seen_field {
+            skipping = is_bcc_field(line);
+            seen_field = true;
+        }
+        if !skipping {
+            out.extend_from_slice(line);
+        }
+    }
+    out.extend_from_slice(&raw[body_at..]);
+    out
+}
+
+/// The fail-closed guard (#297, REQ-1.4): parse the bytes about to leave and
+/// refuse if a `Bcc` field is still visible to the parser. Any spelling the
+/// scanner misses becomes a refused send, never a disclosure.
+fn refuse_if_bcc(wire: &[u8]) -> Result<(), String> {
+    let message = mail_parser::MessageParser::default()
+        .parse(wire)
+        .ok_or("Failed to parse the outgoing message after removing Bcc")?;
+    // "Field present" is the question, not "addresses parsed": an empty or
+    // unparseable `Bcc:` is still a Bcc field on the wire (Grok M3).
+    let field_present = message
+        .headers()
+        .iter()
+        .any(|h| h.name().eq_ignore_ascii_case("bcc") || h.name().eq_ignore_ascii_case("resent-bcc"));
+    if field_present || message.bcc().is_some() || message.resent_bcc().is_some() {
+        return Err("Refusing to send: a Bcc header survived removal".to_string());
+    }
+    Ok(())
+}
+
+/// Turn the message as built into what goes on the wire: the envelope is read
+/// from the original bytes (so blind recipients are delivered to), and the
+/// bytes transmitted carry no `Bcc` field (#297).
+fn prepare_for_wire(raw: &[u8]) -> Result<(lettre::address::Envelope, Vec<u8>), String> {
+    prepare_for_wire_with(raw, strip_bcc_header)
+}
+
+/// The pipeline with the stripper injected, so a test can prove the guard is
+/// wired in by passing a stripper that removes nothing (Grok, test gaps).
+fn prepare_for_wire_with(
+    raw: &[u8],
+    strip: fn(&[u8]) -> Vec<u8>,
+) -> Result<(lettre::address::Envelope, Vec<u8>), String> {
+    let envelope = extract_envelope(raw)?;
+    let wire = strip(raw);
+    refuse_if_bcc(&wire)?;
+    Ok((envelope, wire))
+}
+
 /// Send a pre-built RFC 2822 email via SMTP.
 ///
 /// The `raw_email_base64url` parameter is the full email message encoded as
 /// base64url (the same encoding Gmail uses: `+` → `-`, `/` → `_`, no padding).
-/// The function decodes it, extracts the envelope from headers, and sends it.
+/// The function decodes it, extracts the envelope from headers, removes the
+/// `Bcc` field from the transmitted bytes (RFC 5322 §3.6.3), and sends it.
 pub async fn send_raw_email(
     config: &SmtpConfig,
     raw_email_base64url: &str,
 ) -> Result<SmtpSendResult, String> {
     let raw_bytes = decode_base64url(raw_email_base64url)?;
-    let envelope = extract_envelope(&raw_bytes)?;
+    let (envelope, wire) = prepare_for_wire(&raw_bytes)?;
     let transport = build_transport(config)?;
 
     transport
-        .send_raw(&envelope, &raw_bytes)
+        .send_raw(&envelope, &wire)
         .await
         .map(|_response| SmtpSendResult {
             success: true,
@@ -227,10 +348,185 @@ mod tests {
         assert!(result.unwrap_err().contains("No recipients found"));
     }
 
+    /// #297: the envelope must still carry the blind recipient, and the bytes
+    /// handed to `send_raw` must not.
     #[test]
     fn test_extract_envelope_with_bcc() {
         let raw = b"From: alice@example.com\r\nTo: bob@example.com\r\nBcc: secret@example.com\r\nSubject: Test\r\n\r\nBody";
         let envelope = extract_envelope(raw).unwrap();
         assert_eq!(envelope.to().len(), 2);
+
+        let (wire_envelope, wire) = prepare_for_wire(raw).unwrap();
+        assert_eq!(wire_envelope.to().len(), 2);
+        assert!(!contains_ci(&wire, b"bcc"), "Bcc reached the wire: {:?}", String::from_utf8_lossy(&wire));
+        assert_eq!(
+            wire,
+            b"From: alice@example.com\r\nTo: bob@example.com\r\nSubject: Test\r\n\r\nBody".to_vec()
+        );
+    }
+
+    // ---------- #297: strip_bcc_header ----------
+
+    fn contains_ci(haystack: &[u8], needle: &[u8]) -> bool {
+        haystack
+            .windows(needle.len())
+            .any(|w| w.eq_ignore_ascii_case(needle))
+    }
+
+    fn stripped(raw: &[u8]) -> Vec<u8> {
+        strip_bcc_header(raw)
+    }
+
+    #[test]
+    fn strip_removes_a_single_bcc_line_crlf_and_lf() {
+        let crlf = b"From: a@x.org\r\nBcc: s@x.org\r\nTo: b@x.org\r\n\r\nBody\r\n";
+        assert_eq!(stripped(crlf), b"From: a@x.org\r\nTo: b@x.org\r\n\r\nBody\r\n".to_vec());
+        let lf = b"From: a@x.org\nBcc: s@x.org\nTo: b@x.org\n\nBody\n";
+        assert_eq!(stripped(lf), b"From: a@x.org\nTo: b@x.org\n\nBody\n".to_vec());
+    }
+
+    #[test]
+    fn strip_removes_a_folded_bcc_with_its_continuation_lines() {
+        let raw = b"From: a@x.org\r\nBcc: s1@x.org,\r\n s2@x.org,\r\n\ts3@x.org\r\nSubject: hi\r\n\r\nBody";
+        assert_eq!(stripped(raw), b"From: a@x.org\r\nSubject: hi\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn strip_is_case_insensitive_and_accepts_obsolete_whitespace_before_the_colon() {
+        let raw = b"From: a@x.org\r\nBCC: s@x.org\r\nbcc : t@x.org\r\nbcc\t: u@x.org\r\nBcc:\r\nTo: b@x.org\r\n\r\nBody";
+        assert_eq!(stripped(raw), b"From: a@x.org\r\nTo: b@x.org\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn strip_leaves_every_other_header_and_the_body_alone() {
+        let raw = b"From: a@x.org\r\nCc: c@x.org\r\nX-Bcc-Note: keep\r\nBcc-Ish: keep\r\nTo: b@x.org\r\n\r\nBcc: not-a-header@x.org\r\n Bcc: still body\r\n";
+        assert_eq!(stripped(raw), raw.to_vec());
+        // The same with a real Bcc among the lookalikes: only it goes (Grok, test gaps).
+        let mixed = b"X-Bcc-Note: keep\r\nBcc: s@x.org\r\nTo: b@x.org\r\n\r\nBcc: body@x.org\r\n";
+        assert_eq!(stripped(mixed), b"X-Bcc-Note: keep\r\nTo: b@x.org\r\n\r\nBcc: body@x.org\r\n".to_vec());
+    }
+
+    #[test]
+    fn strip_catches_a_name_folded_before_its_colon_and_a_leading_bom() {
+        // Grok M1: not RFC 5322 syntax, but a parser that unfolds first sees a Bcc.
+        let folded_name = b"From: a@x.org\r\nTo: b@x.org\r\nBcc\r\n : s@x.org\r\nSubject: T\r\n\r\nBody";
+        assert_eq!(stripped(folded_name), b"From: a@x.org\r\nTo: b@x.org\r\nSubject: T\r\n\r\nBody".to_vec());
+        // Grok L2: a UTF-8 BOM before the first field.
+        let bom = b"\xEF\xBB\xBFBcc: s@x.org\r\nTo: b@x.org\r\n\r\nBody";
+        assert_eq!(stripped(bom), b"To: b@x.org\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn strip_leaves_a_multipart_body_alone() {
+        let raw = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: s@x.org\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nBcc: in part\r\n--b1--\r\n";
+        assert_eq!(
+            stripped(raw),
+            b"From: a@x.org\r\nTo: b@x.org\r\nContent-Type: multipart/mixed; boundary=\"b1\"\r\n\r\n--b1\r\nContent-Type: text/plain\r\n\r\nBcc: in part\r\n--b1--\r\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn the_guard_judges_field_presence_not_parsed_addresses() {
+        // Grok M3: `Bcc: @` and an empty `Bcc:` carry no parseable address, and
+        // are still Bcc fields on the wire.
+        assert!(refuse_if_bcc(b"From: a@x.org\r\nTo: b@x.org\r\nBcc: @\r\n\r\nBody").is_err());
+        assert!(refuse_if_bcc(b"From: a@x.org\r\nTo: b@x.org\r\nBcc:\r\n\r\nBody").is_err());
+        assert!(refuse_if_bcc(b"From: a@x.org\r\nTo: b@x.org\r\nResent-Bcc:\r\n\r\nBody").is_err());
+    }
+
+    #[test]
+    fn the_guard_is_wired_into_the_pipeline() {
+        // With a stripper that removes nothing, the guard alone must refuse.
+        let raw = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: s@x.org\r\n\r\nBody";
+        let err = prepare_for_wire_with(raw, |bytes| bytes.to_vec()).unwrap_err();
+        assert!(err.contains("Refusing to send"), "{err}");
+        // And an empty `Bcc:` goes through the real pipeline cleanly: stripped, not refused.
+        let (_, wire) = prepare_for_wire(b"From: a@x.org\r\nTo: b@x.org\r\nBcc:\r\n\r\nBody").unwrap();
+        assert_eq!(wire, b"From: a@x.org\r\nTo: b@x.org\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn the_envelope_keeps_a_bcc_only_recipient_and_every_member_of_a_folded_list() {
+        let bcc_only = b"From: a@x.org\r\nBcc: s@x.org\r\nSubject: T\r\n\r\nBody";
+        let (envelope, wire) = prepare_for_wire(bcc_only).unwrap();
+        assert_eq!(envelope.to().len(), 1);
+        assert_eq!(envelope.to()[0].to_string(), "s@x.org");
+        assert_eq!(wire, b"From: a@x.org\r\nSubject: T\r\n\r\nBody".to_vec());
+
+        let folded = b"From: a@x.org\r\nBcc: s1@x.org,\r\n s2@x.org,\r\n\ts3@x.org\r\nSubject: hi\r\n\r\nBody";
+        let (envelope, wire) = prepare_for_wire(folded).unwrap();
+        assert_eq!(envelope.to().len(), 3);
+        assert_eq!(wire, b"From: a@x.org\r\nSubject: hi\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn strip_handles_a_header_only_message_and_an_empty_input() {
+        assert_eq!(stripped(b"From: a@x.org\r\nBcc: s@x.org"), b"From: a@x.org\r\n".to_vec());
+        assert_eq!(stripped(b"Bcc: s@x.org\r\nTo: b@x.org"), b"To: b@x.org".to_vec());
+        assert_eq!(stripped(b""), Vec::<u8>::new());
+    }
+
+    #[test]
+    fn strip_does_not_treat_a_continuation_line_as_a_bcc_header() {
+        // A folded Subject whose continuation happens to start with "Bcc:".
+        let raw = b"Subject: about\r\n Bcc: handling\r\nTo: b@x.org\r\n\r\nBody";
+        assert_eq!(stripped(raw), raw.to_vec());
+    }
+
+    #[test]
+    fn strip_removes_resent_bcc_too_and_the_guard_sees_it() {
+        // Gemini LOW 1 on #52: RFC 5322 §3.6.6 gives Resent-Bcc the same rule.
+        let raw = b"From: a@x.org\r\nTo: b@x.org\r\nResent-From: a@x.org\r\nResent-To: c@x.org\r\nResent-Bcc: s@x.org\r\n\r\nBody";
+        assert_eq!(
+            stripped(raw),
+            b"From: a@x.org\r\nTo: b@x.org\r\nResent-From: a@x.org\r\nResent-To: c@x.org\r\n\r\nBody".to_vec()
+        );
+        assert!(refuse_if_bcc(raw).is_err());
+    }
+
+    #[test]
+    fn strip_finds_the_body_boundary_when_line_endings_are_mixed() {
+        // LF headers, CRLF blank line (Gemini NIT 2): the body must stay untouched.
+        let raw = b"From: a@x.org\nTo: b@x.org\n\r\nBody\nBcc: not-a-header@x.org\n";
+        assert_eq!(stripped(raw), raw.to_vec());
+        let with_bcc = b"From: a@x.org\nBcc: s@x.org\n\r\nBody\n";
+        assert_eq!(stripped(with_bcc), b"From: a@x.org\n\r\nBody\n".to_vec());
+    }
+
+    #[test]
+    fn strip_judges_a_whitespace_led_first_line_on_its_own() {
+        // Malformed: nothing above it to continue (Gemini NIT 3).
+        let raw = b" Bcc: s@x.org\r\nTo: b@x.org\r\n\r\nBody";
+        assert_eq!(stripped(raw), b"To: b@x.org\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn strip_boundary_cases_folded_last_field_sole_field_and_non_contiguous_fields() {
+        // Gemini NIT 4's three inputs.
+        let folded_last = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: s1@x.org,\r\n s2@x.org\r\n\r\nBody";
+        assert_eq!(stripped(folded_last), b"From: a@x.org\r\nTo: b@x.org\r\n\r\nBody".to_vec());
+        let sole = b"Bcc: secret@x.org\r\n\r\nBody";
+        assert_eq!(stripped(sole), b"\r\nBody".to_vec());
+        let two = b"Bcc: s1@x.org\r\nTo: b@x.org\r\nBcc: s2@x.org,\r\n\ts3@x.org\r\nSubject: Hi\r\n\r\nBody";
+        assert_eq!(stripped(two), b"To: b@x.org\r\nSubject: Hi\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn prepare_for_wire_keeps_bcc_in_the_envelope_and_out_of_the_bytes() {
+        let raw = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: s1@x.org, s2@x.org\r\nSubject: hi\r\n\r\nBody";
+        let (envelope, wire) = prepare_for_wire(raw).unwrap();
+        assert_eq!(envelope.to().len(), 3);
+        let parsed = mail_parser::MessageParser::default().parse(&wire).unwrap();
+        assert!(parsed.bcc().is_none());
+        assert_eq!(parsed.to().unwrap().first().unwrap().address(), Some("b@x.org"));
+        assert!(!contains_ci(&wire, b"bcc"));
+    }
+
+    #[test]
+    fn the_guard_refuses_bytes_that_still_carry_a_bcc() {
+        let leaking = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: s@x.org\r\n\r\nBody";
+        let err = refuse_if_bcc(leaking).unwrap_err();
+        assert!(err.contains("Bcc"), "{err}");
+        assert!(refuse_if_bcc(b"From: a@x.org\r\nTo: b@x.org\r\n\r\nBody").is_ok());
     }
 }

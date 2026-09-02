@@ -669,6 +669,23 @@ describe("ImapSmtpProvider", () => {
       expect(result.id).toMatch(/^imap-sent-/);
     });
 
+    it("hands the Bcc-bearing bytes unchanged to both SMTP and the Sent copy — the wire strip is Rust's (#297 REQ-2.1)", async () => {
+      const withBcc =
+        "From: user@example.com\r\nTo: bob@example.com\r\nBcc: secret@example.com\r\nSubject: Test\r\nDate: Thu, 20 Feb 2025 12:00:00 GMT\r\nMessage-ID: <bcc1@example.com>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\n\r\nHello";
+      const encoded = btoa(withBcc).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      vi.mocked(smtpSendEmail).mockResolvedValue({ success: true, message: "OK" });
+      vi.mocked(findSpecialFolder).mockResolvedValue("Sent");
+      vi.mocked(imapAppendMessage).mockResolvedValue(undefined);
+
+      await provider.sendMessage(encoded);
+
+      // The Rust command receives the message with Bcc (it builds the envelope
+      // from it and strips it before transmission); the user's own Sent copy
+      // keeps the header so they can see whom they blind-copied.
+      expect(smtpSendEmail).toHaveBeenCalledWith(mockSmtpConfig, encoded);
+      expect(imapAppendMessage).toHaveBeenCalledWith("test-session", "Sent", encoded, ["Seen"]);
+    });
+
     it("adds SENT label to existing thread when replying", async () => {
       vi.mocked(smtpSendEmail).mockResolvedValue({
         success: true,

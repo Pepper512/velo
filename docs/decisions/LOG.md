@@ -714,3 +714,33 @@
   spec's letter, never delays a vanish; the counter-only trigger is the no-UIDPLUS signature the
   belt exists for), NIT 10 (`SEARCH RETURN (COUNT)` is an ESEARCH capability, later). Raw outputs
   in `docs/reviews/2026-09-02-pr50-{gemini,grok}-raw.md`.
+- **2026-09-02 ~17:45 UTC — #297 (Bcc disclosed over SMTP) built** on Jim's "start the bug-fix
+  queue at #297". Verified in the fork before a line was written: `buildRawEmail` emits `Bcc:`
+  (`emailBuilder.ts:143`), `extract_envelope` reads it into the envelope (`smtp/client.rs:127`),
+  `send_raw_email` transmits the bytes unchanged (`:159`). Plan committed first
+  (`docs/briefs/2026-09-02-297-bcc-strip.md`, Tier 2). **Decisions:** strip in Rust inside the
+  send command, not in the TypeScript builder — the builder's output is also the Sent and Drafts
+  copy, which keeps `Bcc` on purpose so the user can see whom they blind-copied; a hand-written
+  header-block scanner (parser-independent, unit-tested for folding, case, obsolete `Bcc :`
+  whitespace, bare LF, header-only input, body lines untouched) rather than `mail_parser`'s
+  byte offsets, with `mail_parser` used as the **fail-closed guard**: if the parser still sees a
+  `Bcc` after stripping, the send is refused with an error rather than transmitted. Gmail path
+  untouched (**ASSUMPTION:** the Gmail API strips `Bcc` on submission). TDD: nine Rust tests red
+  first, then green; one TypeScript seam test pins that the same bytes go to SMTP and to the
+  Sent append.
+- **2026-09-02 ~18:30 UTC — PR #52 (#297) cross-vendor review, both legs.** Gemini 3.7: APPROVE
+  WITH NITS (1 LOW, 3 NIT) — all four adopted: `Resent-Bcc` stripped and guarded (RFC 5322
+  §3.6.6), the mixed `\n\r\n` blank line found so the body is never scanned, a whitespace-led
+  first line judged on its own, three boundary inputs as tests. Grok 4.6: APPROVE WITH NITS
+  (3 MED, 3 LOW, 1 NIT, a test-gap table) on the first commit's diff — **adopted:** M1 a field
+  name folded before its colon (`Bcc\r\n : x`) now counts as a Bcc field; M3 the fail-closed
+  guard judged parsed addresses (`bcc().is_some()`), so `Bcc: @` passed it — it now refuses on
+  the field *name* via `headers()`; L2's BOM before the first field; the test gaps (guard wiring
+  through a `prepare_for_wire_with(raw, strip)` seam with an identity stripper, Bcc-only
+  envelope, folded list in the envelope, tab obs-WSP, lookalikes with a real Bcc, empty `Bcc:`
+  through the pipeline, multipart body). **Declined with reasons:** L4 bare-CR line endings (not
+  RFC 5322, not produced by the builder, the command is webview-only, and `mail_parser` splits
+  on CR so the guard refuses), `Bcc (obs):` (a different field name under `ftext`), NIT 7
+  `trim_ascii` wider than WSP (over-stripping an illegal name is the safe side). Two Grok
+  findings (M5 mixed blank line, L6 whitespace-led first line) were Gemini's already. Raw
+  outputs in `docs/reviews/2026-09-02-pr52-{gemini,grok}-raw.md`.
