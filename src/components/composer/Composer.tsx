@@ -72,6 +72,17 @@ export function Composer() {
   const dragCounterRef = useRef(0);
   const overlayRef = useRef<HTMLDivElement | null>(null);
 
+  // SPEC-281: a transient notice for a refused paste. Its own state, never the
+  // draft's `saveError` — auto-save clears that on success and a real save
+  // failure owns it (#69 review, Gemini M1).
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const pasteNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showPasteNotice = (message: string) => {
+    setPasteNotice(message);
+    if (pasteNoticeTimer.current) clearTimeout(pasteNoticeTimer.current);
+    pasteNoticeTimer.current = setTimeout(() => setPasteNotice(null), 5_000);
+  };
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -145,21 +156,20 @@ export function Composer() {
         const picked = pickPastedImage(event.clipboardData);
         if (!picked) return false;
         event.preventDefault();
-        const notice = (message: string | null) => useComposerStore.getState().setSaveError(message);
         if (picked.kind === "refused") {
-          notice(picked.reason);
-          setTimeout(() => notice(null), 5_000);
+          showPasteNotice(picked.reason);
           return true;
         }
         readImageAsDataUrl(picked.file)
           .then((src) => {
+            // The read is async; the composer may have closed meanwhile (#69 review, Gemini L2).
+            if (view.isDestroyed) return;
             const { schema } = view.state;
             const node = schema.nodes.image?.create({ src, alt: picked.file.name });
             if (node) view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
           })
           .catch((err: unknown) => {
-            notice(err instanceof Error ? err.message : "Could not read the pasted image.");
-            setTimeout(() => notice(null), 5_000);
+            showPasteNotice(err instanceof Error ? err.message : "Could not read the pasted image.");
           });
         return true;
       },
@@ -595,6 +605,11 @@ export function Composer() {
                 title={saveError ?? undefined}
               >
                 {savedLabel}
+              </span>
+            )}
+            {pasteNotice && (
+              <span className="text-xs text-danger font-medium" role="status">
+                {pasteNotice}
               </span>
             )}
             <SignatureSelector />

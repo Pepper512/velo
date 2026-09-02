@@ -65,11 +65,49 @@ describe("pickPastedImage (SPEC-281)", () => {
   });
 });
 
+describe("pickPastedImage — non-image files and odd casing (#69 review)", () => {
+  it("ignores a non-image file so the default paste runs (a PDF is not a refusal)", () => {
+    const pdf = new File(["%PDF-1.4"], "doc.pdf", { type: "application/pdf" });
+    expect(pickPastedImage(transfer({ files: [pdf] }))).toBeNull();
+  });
+
+  it("admits an upper-case declared type", () => {
+    const file = new File([new Uint8Array(4)], "SHOT.PNG", { type: "image/PNG" });
+    expect(pickPastedImage(transfer({ files: [file] }))).toEqual({ kind: "image", file });
+  });
+});
+
 describe("readImageAsDataUrl (SPEC-281 REQ-2.3)", () => {
-  it("reads the file to a data URL carrying the file's own type", async () => {
-    const bytes = new Uint8Array([0x89, 0x50, 0x4e, 0x47]);
-    const url = await readImageAsDataUrl(new File([bytes], "shot.png", { type: "image/png" }));
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  it("reads a real PNG to a data URL carrying the file's own type", async () => {
+    const url = await readImageAsDataUrl(new File([PNG], "shot.png", { type: "image/png" }));
+    expect(url).toBe("data:image/png;base64,iVBORw0KGgo=");
+  });
+
+  it("lower-cases an upper-case declared type in the URL", async () => {
+    const url = await readImageAsDataUrl(new File([PNG], "shot.png", { type: "image/PNG" }));
     expect(url.startsWith("data:image/png;base64,")).toBe(true);
-    expect(url).toBe("data:image/png;base64,iVBORw==");
+  });
+
+  it("rejects a file whose bytes are not its declared type (a spoofed label, #69 L3)", async () => {
+    const svgAsPng = new File(["<svg onload=alert(1)></svg>"], "x.png", { type: "image/png" });
+    await expect(readImageAsDataUrl(svgAsPng)).rejects.toThrow(/not the image type it claims/);
+    const htmlAsJpeg = new File(["<html>"], "x.jpg", { type: "image/jpeg" });
+    await expect(readImageAsDataUrl(htmlAsJpeg)).rejects.toThrow(/not the image type/);
+  });
+
+  it.each([
+    ["image/jpeg", [0xff, 0xd8, 0xff, 0xe0]],
+    ["image/gif", [0x47, 0x49, 0x46, 0x38, 0x39, 0x61]],
+    ["image/webp", [0x52, 0x49, 0x46, 0x46, 0, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]],
+  ] as const)("accepts a real %s by its magic bytes", async (type, head) => {
+    const url = await readImageAsDataUrl(new File([new Uint8Array(head)], "x", { type }));
+    expect(url.startsWith(`data:${type};base64,`)).toBe(true);
+  });
+
+  it("rejects an empty or truncated file", async () => {
+    await expect(readImageAsDataUrl(new File([], "empty.png", { type: "image/png" }))).rejects.toThrow();
+    await expect(readImageAsDataUrl(new File([new Uint8Array([0x89])], "t.png", { type: "image/png" }))).rejects.toThrow();
   });
 });
