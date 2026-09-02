@@ -140,6 +140,22 @@ describe("buildSmtpConfig", () => {
     expect(config.password).toBe(smtpSecret);
   });
 
+  it("falls back per field the other way: an SMTP username with no SMTP password keeps the IMAP password (Gemini NIT 4 on #59)", () => {
+    const account = createMockDbAccount({ imap_username: "imap-login", smtp_username: "relay-login", smtp_password: null });
+    const config = buildSmtpConfig(account);
+    expect(config.username).toBe("relay-login");
+    expect(config.password).toBe("secret123");
+  });
+
+  it("treats a stored empty SMTP password as empty, and an empty SMTP username as 'use IMAP' — locked (Grok L4 on #59)", () => {
+    // A stored string is what the connection test used, so it is sent as is;
+    // a blank username has always meant "fall back" (the `||` rule, like imap_username).
+    const account = createMockDbAccount({ imap_username: "imap-login", smtp_username: "", smtp_password: "" });
+    const config = buildSmtpConfig(account);
+    expect(config.username).toBe("imap-login");
+    expect(config.password).toBe("");
+  });
+
   it("ignores a stored SMTP password for OAuth accounts — the access token authenticates SMTP", () => {
     const account = createMockDbAccount({ auth_method: "oauth2", smtp_password: ["smtp", "only"].join("-") });
     const config = buildSmtpConfig(account, "fresh-token");

@@ -224,6 +224,21 @@ describe("accounts", () => {
       expect(params).not.toContain(smtpSecret);
     });
 
+    it("stores a given SMTP password as given — only null means 'same as IMAP' (Gemini M1 on #59)", async () => {
+      mockExecute.mockResolvedValue(undefined);
+      const base = {
+        id: "x", email: "u@x", displayName: null, avatarUrl: null, imapHost: "i", imapPort: 993, imapSecurity: "ssl",
+        smtpHost: "s", smtpPort: 587, smtpSecurity: "starttls", authMethod: "password", password: "p",
+      };
+      await insertImapAccount({ ...base, smtpUsername: "relay-user", smtpPassword: "" });
+      await insertImapAccount({ ...base, smtpUsername: null, smtpPassword: null });
+
+      const [, first] = mockExecute.mock.calls[0] as [string, unknown[]];
+      const [, second] = mockExecute.mock.calls[1] as [string, unknown[]];
+      expect(first.slice(-2)).toEqual(["relay-user", "enc:"]);
+      expect(second.slice(-2)).toEqual([null, null]);
+    });
+
     it("inserts IMAP account with custom username", async () => {
       mockExecute.mockResolvedValue(undefined);
 
@@ -338,6 +353,21 @@ describe("accounts", () => {
 // ---------------------------------------------------------------------------
 
 describe("decryptAccountTokens fails closed (P5)", () => {
+  it("names the SMTP password, never its value, when it cannot be decrypted (SPEC-252 REQ-3.1; Gemini L2 on #59)", async () => {
+    const { decryptValue } = await import("@/utils/crypto");
+    vi.mocked(decryptValue).mockResolvedValueOnce("enc:still-encrypted");
+    const ciphertext = ["enc", "opaque-smtp"].join(":");
+    // The only ciphertext on the row is the SMTP password, so the banner must name it.
+    mockSelectFirstBy.mockResolvedValue({ ...createMockImapAccount(), imap_password: null, smtp_password: ciphertext });
+
+    const failure = await getAccount("acct-1").then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(failure?.message).toMatch(/SMTP password/);
+    expect(failure?.message).not.toContain("opaque-smtp");
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -352,6 +382,7 @@ describe("decryptAccountTokens fails closed (P5)", () => {
     "access_token",
     "refresh_token",
     "imap_password",
+    "smtp_password",
     "oauth_client_secret",
     "caldav_password",
   ] as const;

@@ -158,6 +158,18 @@ describe("runMigrations against real SQLite", () => {
     expect(columns).toContain("smtp_username");
     expect(columns).toContain("smtp_password");
     expect(appliedVersions()).toContain(28);
+
+    // A row written the pre-28 way (no SMTP columns named) reads back NULL for
+    // both — the fallback to the IMAP credentials depends on it (Grok L6 on #59).
+    harness.raw
+      .prepare("INSERT INTO accounts (id, email, provider) VALUES ('pre-28', 'u@x', 'imap')")
+      .run();
+    const row = harness.raw
+      .prepare<{ smtp_username: string | null; smtp_password: string | null }>(
+        "SELECT smtp_username, smtp_password FROM accounts WHERE id = 'pre-28'",
+      )
+      .get();
+    expect(row).toEqual({ smtp_username: null, smtp_password: null });
   });
 
   it("is idempotent — a second run applies nothing", async () => {

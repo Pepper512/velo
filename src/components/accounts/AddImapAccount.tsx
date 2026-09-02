@@ -47,7 +47,7 @@ interface FormState {
   password: string;
   smtpUsername: string;
   smtpPassword: string;
-  samePassword: boolean;
+  sameCredentials: boolean;
   acceptInvalidCerts: boolean;
   // OAuth2 fields
   authMode: AuthMode;
@@ -73,7 +73,7 @@ const initialFormState: FormState = {
   password: "",
   smtpUsername: "",
   smtpPassword: "",
-  samePassword: true,
+  sameCredentials: true,
   acceptInvalidCerts: false,
   authMode: "password",
   oauthProvider: null,
@@ -112,13 +112,12 @@ const labelClass = "block text-xs font-medium text-text-secondary mb-1";
 const selectClass =
   "w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent transition-colors appearance-none";
 
-/** Map UI security value ("ssl") to Rust config value ("tls") */
 /** The form fields the SMTP credential resolver reads (SPEC-252 REQ-1.3). */
 function smtpCredentialInputs(form: FormState, isOAuth: boolean): SmtpCredentialInputs {
   return {
     isOAuth,
     oauthAccessToken: form.oauthAccessToken,
-    sameCredentials: form.samePassword,
+    sameCredentials: form.sameCredentials,
     imapUsername: form.imapUsername,
     password: form.password,
     smtpUsername: form.smtpUsername,
@@ -126,6 +125,7 @@ function smtpCredentialInputs(form: FormState, isOAuth: boolean): SmtpCredential
   };
 }
 
+/** Map UI security value ("ssl") to Rust config value ("tls") */
 function mapSecurity(security: string): string {
   if (security === "ssl") return "tls";
   return security;
@@ -334,7 +334,7 @@ export function AddImapAccount({
             host: form.smtpHost,
             port: form.smtpPort,
             security: mapSecurity(form.smtpSecurity),
-            username: smtp.username || form.imapUsername || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
+            username: smtp.username || form.imapUsername.trim() || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
             password: smtp.password,
             auth_method: isOAuth ? "oauth2" : "password",
             accept_invalid_certs: form.acceptInvalidCerts,
@@ -358,11 +358,19 @@ export function AddImapAccount({
   const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
+    // SPEC-252 (Gemini M1 on #59): an empty separate SMTP password would be
+    // tested as empty and stored as empty — refuse it instead of guessing.
+    if (!isOAuth && !form.sameCredentials && form.smtpPassword.length === 0) {
+      setSaveError('Enter the SMTP password, or tick "Use same credentials as IMAP".');
+      setSaving(false);
+      return;
+    }
     try {
       const accountId = crypto.randomUUID();
       const email = (isOAuth ? form.oauthEmail : null) ?? form.email.trim();
 
       const imapUsername = form.imapUsername.trim() || null;
+      const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, isOAuth));
 
       if (isOAuth) {
         await insertOAuthImapAccount({
@@ -401,14 +409,11 @@ export function AddImapAccount({
           password: form.password,
           imapUsername,
           acceptInvalidCerts: form.acceptInvalidCerts,
-          // SPEC-252: what the SMTP test used is what gets saved (#252's
-          // identical ternary discarded the SMTP password here).
-          ...(form.samePassword
-            ? {}
-            : (() => {
-                const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, false));
-                return { smtpUsername: smtp.username, smtpPassword: smtp.password };
-              })()),
+          // SPEC-252: the same resolver the SMTP test used, always (#252's
+          // identical ternary discarded the SMTP password here; a checkbox
+          // special-case would be the next place to get it wrong — Grok M3).
+          smtpUsername: smtp.username,
+          smtpPassword: form.sameCredentials ? null : smtp.password,
         });
       }
 
@@ -809,8 +814,8 @@ export function AddImapAccount({
             <input
               id="smtp-same-password"
               type="checkbox"
-              checked={form.samePassword}
-              onChange={(e) => updateForm("samePassword", e.target.checked)}
+              checked={form.sameCredentials}
+              onChange={(e) => updateForm("sameCredentials", e.target.checked)}
               className="rounded border-border-primary text-accent focus:ring-accent"
             />
             <label
@@ -820,8 +825,8 @@ export function AddImapAccount({
               Use same credentials as IMAP
             </label>
           </div>
-          {!form.samePassword && (
-            <div>
+          {!form.sameCredentials && (
+            <div className="space-y-3">
               <label htmlFor="smtp-username" className={labelClass}>
                 SMTP Username
               </label>

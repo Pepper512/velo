@@ -229,7 +229,12 @@ export async function insertImapAccount(account: {
 }): Promise<void> {
   const db = await getDb();
   const encPassword = await encryptValue(account.password);
-  const encSmtpPassword = account.smtpPassword ? await encryptValue(account.smtpPassword) : null;
+  // Null/undefined means "same credentials as IMAP". A string — even an empty
+  // one — is stored as given, so what the connection test used is what the
+  // account keeps (Gemini M1 on #59); the form refuses an empty SMTP password
+  // before it gets here.
+  const encSmtpPassword =
+    account.smtpPassword != null ? await encryptValue(account.smtpPassword) : null;
   await db.execute(
     `INSERT INTO accounts (id, email, display_name, avatar_url, access_token, refresh_token, provider, imap_host, imap_port, imap_security, smtp_host, smtp_port, smtp_security, auth_method, imap_password, imap_username, accept_invalid_certs, smtp_username, smtp_password)
      VALUES ($1, $2, $3, $4, NULL, NULL, 'imap', $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,

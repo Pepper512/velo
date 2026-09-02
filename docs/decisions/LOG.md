@@ -832,6 +832,23 @@
   which is the structural fix for the disagreement; no edit-account UI (none exists for IMAP
   settings — a separate item). TDD: six tests red across four suites, then green; fixtures
   assemble fake secrets at runtime (the secret scan reads commit history).
+- **2026-09-03 — PR #59 (#252/#253) cross-vendor review, both legs.** Gemini 3.7: APPROVE WITH
+  NITS (1M 2L 3N). Grok 4.6: CHANGES REQUESTED (3M 3L 2N). **Both found the same real hole:** an
+  empty separate SMTP password was tested as `""` but stored as `NULL` (the insert's falsy
+  check), so the send fell back to the IMAP password — #252's disagreement in a new place.
+  **Adopted:** the form refuses to save an unticked box with an empty SMTP password, and
+  `insertImapAccount` stores any string as given (only `null` means "same as IMAP"); the save
+  always runs the same resolver the test runs and never builds credentials in a branch of its
+  own (Grok M3, structural); `smtp_password` in the parametrised fail-closed test plus a test
+  that the failure names "SMTP password" and never carries the ciphertext; the inverse
+  per-field fallback, the empty-string rule locked (`??` for password, `||` for username), a
+  pre-28 row reading `NULL` after migration 28; the IMAP-username trim in the test path; form
+  spacing; `samePassword` renamed `sameCredentials`; the doc comment put back on
+  `mapSecurity`. **Declined with reasons:** Grok M2 (decrypt failure falling open to the IMAP
+  password) — `decryptAccountTokens` throws for the whole account, so `buildSmtpConfig` never
+  sees a nulled field, and the new tests pin that; a component test for the form (Gemini L3,
+  Grok M3's test half) — no harness exists, and the property is now enforced by shape. Raw
+  outputs in `docs/reviews/2026-09-03-pr59-{gemini,grok}-raw.md`.
 - **2026-09-02 ~22:30 UTC — #280 built (http scope for local AI; connection-test reason)** on
   Jim's instruction. Verified first: the Ollama client uses `@tauri-apps/plugin-http`'s `fetch`
   (`ollamaProvider.ts:2`), the plugin matches its scope with the `urlpattern` crate, and under
