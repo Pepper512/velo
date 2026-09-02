@@ -41,8 +41,11 @@
 ## 1. Exact next step
 
 **The full ordered plan is `docs/ROADMAP.md`** (pinned 2026-09-02): F-4 follow-up → bug-fix queue
-(#297, #240, …) → carried hardening → Superhuman-parity waves, with the decisions only Jim can
-make listed separately and the copy-paste prompt for the next session at the end.
+(#297, #240, …) → carried hardening → Superhuman-parity waves, with the copy-paste prompt for the
+next session at the end. **Jim made all eight gating decisions on 2026-09-02** (LOG.md): widen
+`img-src` for #197, Rust fetch for #209, `@tanstack/react-virtual` approved, MCP ADR now, wire
+P19/F-3, signing and distribution not yet, **Grok 4.6 is a standing second Tier-2 review leg
+(ADR-004)** — run both legs on every Tier-2 PR.
 
 **Build the F-4 follow-up: REQ-2.3's `NOT DELETED` belt (one Rust command), REQ-4's reconcile
 queue op (`compactQueue` branch, 3-strike degrade, migration 27), and the "folder gone" path (a

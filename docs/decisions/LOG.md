@@ -655,6 +655,24 @@
     `try/finally`. One semantic recorded rather than changed: **"Keep them" is a threshold, not a
     hold** — once the folder is no longer more than half gone, budgeted removal resumes; the copy
     says so now, and a persistent per-folder hold is an option for Jim.
+- **2026-09-02 ~14:00 UTC — Eight roadmap decisions, Jim direct, asked one at a time with a
+  recommendation each; Jim took the recommendation on all eight** (`docs/ROADMAP.md` §Decisions).
+  1. **#197 remote images:** widen `img-src https:` behind the existing opt-in (¼ day, Tier 2);
+     the Rust image proxy is queued as a later privacy enhancement, not the fix.
+  2. **#209/#265 custom LLM URL:** a validated Rust fetch command (https or loopback only, no
+     off-host redirects) — the CSP stays tight; **not** a widened `connect-src`.
+  3. **Speed budget dependency:** `@tanstack/react-virtual` **approved** for list virtualization
+     (headless, no transitive deps, same family as the router already in use). Recorded here as
+     the dependency approval `CLAUDE.md` requires; the PR still justifies it.
+  4. **MCP server:** write the ADR now (runtime, stdio transport, loopback only, Zod on every tool
+     argument, authz in every handler, draft-only), build in enhancement wave 3.
+  5. **P19/F-3:** **wire** `LinkConfirmDialog` on the email link path (~1 day, Tier 1).
+  6. **#278 macOS signing:** not yet — tied to decision 8.
+  7. **Grok 4.6:** **promoted to a standing second cross-vendor review leg on Tier 2** — ADR-004,
+     roster row moved; diffs only, secrets-free, no repo access, findings verified before adoption.
+     The Tier-2 human-merge carve-out stays **not adopted**.
+  8. **EX-007 distribution:** not yet — revisit with an ADR after the P0/P1 bug queue (#297, #240)
+     lands. EX-007 stays open to its 2027-03-01 expiry.
   - **Merged by the seat as `ef7c91c`** after Jim corrected the deferral: *"read your rules, you
     are in charge of the merges, commits, push, pr, etc."* The standing rule (*Agents perform the
     merge*, with its preconditions) stands; Opus 5's recommended Tier-2 carve-out is **not
