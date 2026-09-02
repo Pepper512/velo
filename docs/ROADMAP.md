@@ -1,6 +1,6 @@
 # Velo fork — roadmap
 
-> Pinned 2026-09-02 at `ef7c91c` (#47). Sources: the vault build queues
+> Pinned 2026-09-02 at `9bec56a` (#50). Sources: the vault build queues
 > (`~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/`), the 2026-09-01 issue ledger, parity
 > report and effort model, `docs/decisions/LOG.md` and `EXCEPTIONS.md`, and `HANDOFF.md`. Days are
 > the effort model's build-days for one credentialed seat, tests and Tier-2 overhead included.
@@ -10,31 +10,31 @@
 
 Velo is a local-first Tauri v2 (Rust) + React 19 desktop email client, forked from
 `avihaymenahem/velo` v0.4.21 and being hardened under Jim's methodology before any feature work.
-The hardening line is most of the way through; the correctness line for IMAP is done except for one
-follow-up; the bug-fix queue from the upstream triage and the Superhuman-parity enhancements have
-not started.
+The hardening line is most of the way through; the correctness line for IMAP is done in code (one
+manual live check outstanding); the bug-fix queue from the upstream triage and the
+Superhuman-parity enhancements have not started.
 
 | Line | State |
 |---|---|
 | Methodology, CI gates, exceptions | Landed (#1–#12). EX-003/005/006/007 open by design |
 | Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA) and **P19/F-3** (orphaned phishing dialog — Jim's product decision: wire or delete) |
 | Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
-| IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47) landed. E2 part 3 carry list and the F-4 follow-up remain |
+| IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
 | Bug-fix queue (upstream triage) | **Nothing started.** 13 items, 21 days, two P0 |
 | Enhancement queue (Superhuman parity) | **Nothing started.** 10 items in 3 waves, 33.5 days |
 
 ## Next up, in order
 
-### 1. F-4 follow-up — finish the reconciliation line (Tier 2, ~2 days)
-- REQ-2.3 `NOT DELETED` belt for no-UIDPLUS accounts (one Rust command).
-- REQ-4 reconcile queue op: enqueue on `VELO_OUTCOME_UNKNOWN`, `compactQueue` branch (newest per
-  folder, merged UIDs, max attempts, pending-only), handler (absent → suspect, present → notice),
-  3-strike degrade to a forced full-list pass (migration 27), queue UI label.
-- The "folder gone" path: a folder deleted on the server keeps its `folder_sync_state` row and
-  now blocks attestation until it is removed.
-- **Run the live Dovecot Done-when** in `docs/briefs/2026-09-02-f4-part2-plan.md` — never run.
-- Options from #47's reviews, Jim's call: a persistent per-folder hold behind "Keep them"; a UI
-  refresh of stale ids after an F-5 re-key.
+### 1. F-4 follow-up — **landed as #50 (`9bec56a`, 2026-09-02)**
+- Built: the REQ-2.3 `NOT DELETED` belt, the REQ-4 reconcile queue op (compaction, 3-strike
+  degrade, migration 27), the "folder gone" path; then Grok's review follow-up (op inserts only,
+  partial-LIST bound, generation-pinned op, queued-path enqueue, degrade-before-fail).
+- **Still open, manual:** the live Dovecot Done-when — scenarios 1–5 in
+  `docs/testing/dovecot/README.md`, needs the running app; never run.
+- Jim's call, from #47's reviews: a persistent per-folder hold behind "Keep them"; a UI refresh
+  of stale ids after an F-5 re-key.
+- Recorded for later: `SEARCH RETURN (COUNT)` (ESEARCH) for the belt; `exists` from the belt's
+  own SELECT.
 
 ### 2. Bug-fix queue — the two P0s first (Tier 2)
 | Order | Id | What | Days |
@@ -101,6 +101,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-Then build the F-4 follow-up from docs/briefs/2026-09-02-f4-part2-plan.md steps 5 and 7 plus the "folder gone" path (REQ-2.3 NOT DELETED belt as one Rust command; REQ-4 reconcile queue op with the compactQueue branch, 3-strike degrade and migration 27; a folder deleted on the server must stop blocking attestation once its folder_sync_state row is removed). Tier 2: plan in the PR before code, TDD on the SQLite harness, Gemini 3.7 via agy as the cross-vendor leg, merge on green — you own commits, pushes, PRs and merges. Then run the live Dovecot Done-when in that plan file and attach the transcript.
-After that, start the bug-fix queue at #297 (Bcc strip) — spec it from the vault's SPEC template into docs/briefs first.
+Then start the bug-fix queue at #297: blind-copied recipients are disclosed because Bcc is not stripped before SMTP send_raw. Spec it from the vault's SPEC template (~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/) into docs/briefs/ first, verifying the bug in the fork's send path before writing a line. Tier 2: plan in the PR before code (threat pass, rollback), TDD, Gemini 3.7 via agy AND Grok 4.6 via the grok CLI as review legs (diffs only), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges. Then #240 (a dedicated Rust-side transaction connection; also Opus 5's HIGH 2) — plan first, it is the biggest single fix.
+Do not run the F-4 live Dovecot Done-when unless the app can be driven; it is manual and recorded as open.
 ```

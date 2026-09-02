@@ -4,12 +4,12 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `ef7c91c`** (#47, F-4 part 2 — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline ef7c91c..origin/main` —
+- **Code pin: `9bec56a`** (#50, F-4 part 3 — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 9bec56a..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
-  `gh pr list --repo Pepper512/velo`. #43–#47 all landed 2026-09-02.
+  `gh pr list --repo Pepper512/velo`. #43–#47 and #50 all landed 2026-09-02.
 - **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
   were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
@@ -21,19 +21,20 @@
   - **Merge permission** is with the build seat under the standing rule (green on the exact SHA,
     up to date, no unresolved conversation) — exercised on #43 this session.
   - **Independent review = two cross-vendor legs this session:** Gemini 3.7 via `agy` **and Grok
-    4.6 via the `grok` CLI** (`grok -m grok-4.6 --disable-web-search --prompt-file …`). Grok's use as
-    a Tier-2 reviewer is a **named deviation** from `ROSTER.md` valid for the window only. Both legs
-    found real defects on #43 that the author missed, and they found *different* ones (LOG.md).
+    4.6 via the `grok` CLI** (`grok -m grok-4.6 --disable-web-search --prompt-file …`). Grok is a
+    **standing second Tier-2 leg since ADR-004** (Jim, 2026-09-02) — run both legs on every Tier-2
+    PR. Both legs found real defects on every PR this day that the author missed, and they found
+    *different* ones (LOG.md; on #50 Grok's three HIGHs were all real while Gemini approved).
     `agy` gotchas unchanged: flags before `--print`, prompt via a `.sh` wrapper, tell it not to use
     tools. Grok gotcha: with a long prompt it "offloads" the text and reads it back with its own
     tools — takes 5–10 minutes, the output file stays near-empty until it finishes.
   - **Worktrees:** the session's own worktree `.claude/worktrees/f5-move-hygiene` (branch
-    `f4-vanished-uid-part1` checked out at the end) plus the **two dead ones from before**
+    `docs-post-50` checked out at the end) plus the **two dead ones from before**
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `ef7c91c`:** frontend **157** files / **1,954** tests · Rust **95** + 1 ignored
-  (the live Dovecot test) · 26 migrations / 32 tables · npm audit 0 · 0 service import cycles. No
+- **State on `main` @ `9bec56a`:** frontend **160** files / **2,028** tests · Rust **95** + 1 ignored
+  (the live Dovecot test) · 27 migrations / 32 tables · npm audit 0 · 0 service import cycles. No
   dependency added or removed this session.
 
 ---
@@ -47,13 +48,20 @@ next session at the end. **Jim made all eight gating decisions on 2026-09-02** (
 P19/F-3, signing and distribution not yet, **Grok 4.6 is a standing second Tier-2 review leg
 (ADR-004)** — run both legs on every Tier-2 PR.
 
-**Build the F-4 follow-up: REQ-2.3's `NOT DELETED` belt (one Rust command), REQ-4's reconcile
-queue op (`compactQueue` branch, 3-strike degrade, migration 27), and the "folder gone" path (a
-folder deleted on the server keeps its `folder_sync_state` row and now blocks attestation until
-it is removed).** Then run the live Dovecot Done-when in the part 2 plan — it has not been run.
-Also open from #47's reviews: a persistent per-folder hold for "Keep them" (today it is a
-threshold, not a hold). **Merges are the build seat's** under the standing rule — Jim reaffirmed
-it on 2026-09-02 after the seat deferred #47 to him; Opus 5's Tier-2 carve-out was not adopted.
+**F-4 is complete in code: part 3 landed as #50 (`9bec56a`)** — the REQ-2.3 `NOT DELETED` belt,
+the REQ-4 reconcile queue op, the "folder gone" path, migration 27, plus one follow-up commit
+adopting Grok's three HIGHs (the op inserts suspects only and the next list *adopts* them; a
+short LIST cannot count folders as gone; the op is pinned to its UIDVALIDITY generation). Every
+disposition is on the PR and in LOG.md.
+
+**Next: the bug-fix queue, starting with #297 (Bcc strip before SMTP `send_raw`, P0, ~1 day,
+Tier 2).** Spec it from the vault SPEC template into `docs/briefs/` first, plan in the PR before
+code, TDD, both review legs, merge on green. Then #240 (dedicated Rust transaction connection —
+also Opus 5's HIGH 2). **Still open on F-4:** the live Dovecot Done-when (scenarios 1–5 in
+`docs/testing/dovecot/README.md`; manual, needs the running app — never run) and, Jim's call, a
+persistent per-folder hold for "Keep them" (today a threshold, not a hold). **Merges are the
+build seat's** under the standing rule — Jim reaffirmed it on 2026-09-02 after the seat deferred
+#47 to him; Opus 5's Tier-2 carve-out was not adopted.
 
 **Before that, read the Opus 5 full review** (`docs/reviews/2026-09-02-opus5-window-review.md`;
 verdicts and dispositions in LOG.md). Its HIGH 1 — permanent delete had become a server-side
@@ -87,11 +95,11 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected on `main`: **157 test files, 1,954 tests; Rust 95 passed, 1 ignored.**
+Expected on `main`: **160 test files, 2,028 tests; Rust 95 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline ef7c91c..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline 9bec56a..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
@@ -191,23 +199,24 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `ef7c91c`** (#44 F-4
-part 1; the only SHA pinned — `git log --oneline ef7c91c..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 157 files / 1,954 tests / Rust 95 + 1 ignored · 26 migrations ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `9bec56a`** (#50 F-4
+part 3; the only SHA pinned — `git log --oneline 9bec56a..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 160 files / 2,028 tests / Rust 95 + 1 ignored · 27 migrations ·
 npm audit 0.
 
-**Next action: the F-4 follow-up PR (REQ-2.3 belt, REQ-4 reconcile op, "folder gone" path) and
-the live Dovecot Done-when in `docs/briefs/2026-09-02-f4-part2-plan.md`, which has not been
-run.** The build seat merges its own green PRs (Jim reaffirmed the standing rule 2026-09-02).
-Opus 5's HIGH 2 (pooled-connection transaction state) is still Jim's to scope.
+**Next action: #297 — strip `Bcc` before SMTP `send_raw` (P0, Tier 2).** Spec from the vault
+SPEC template into `docs/briefs/`, plan in the PR before code, TDD, Gemini + Grok legs, merge on
+green. Then #240 (Rust-side transaction connection = Opus 5's HIGH 2). Open on F-4: the live
+Dovecot Done-when (manual, needs the running app; `docs/testing/dovecot/README.md` scenarios
+1–5) and the "Keep them" hold (Jim's call). The build seat merges its own green PRs.
 
 **Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
-(Grok is a named deviation from the roster, valid for the 2026-09-02 window only — ask Jim before
-reusing it). Both found real defects this session. Don't merge Tier 2 on one pair of eyes.
+(a standing second Tier-2 leg since ADR-004). Both found real defects on every PR this day —
+on #50 Grok's three HIGHs were real while Gemini approved. Don't merge Tier 2 on one pair of eyes.
 
-**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the two dead worktrees (+ this
-session's once #44 lands) · glance at the vault F-4 spec edits (approval line, Task 13, coupling
-note) — the vault **is** reachable from this machine.
+**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the three worktrees
+(`f1-decisions` locked, `f2-email-links-open`, `f5-move-hygiene`) · glance at the vault edits
+(F-4 spec task list, queue lines) — the vault **is** reachable from this machine.
 
 **Verify first:** `git worktree list` · `gh pr list` · `ListAgents` · `gh run list --branch main --limit 2`.
 
