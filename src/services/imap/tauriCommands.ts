@@ -269,8 +269,16 @@ export interface SmtpSendResult {
  * Test IMAP connectivity: connect, authenticate, list folders, logout.
  * Returns a success message string.
  */
-export async function imapTestConnection(config: ImapConfig): Promise<string> {
-  return invoke<string>('imap_test_connection', { config });
+export async function imapTestConnection(config: ImapConfig, testId?: number): Promise<string> {
+  return invoke<string>('imap_test_connection', { config, testId: testId ?? null });
+}
+
+/**
+ * Abort a connection test started with a `testId` (SPEC-204). `true` once for
+ * a test that was in flight; `false` for an unknown or finished id.
+ */
+export async function cancelConnectionTest(testId: number): Promise<boolean> {
+  return invoke<boolean>('connection_test_cancel', { testId });
 }
 
 // ---------- Pooled session lifecycle (brief E2/P15) ----------
@@ -606,6 +614,6 @@ export async function smtpSendEmail(
 /**
  * Test SMTP connectivity by connecting and authenticating.
  */
-export async function smtpTestConnection(config: SmtpConfig): Promise<SmtpSendResult> {
-  return invoke<SmtpSendResult>('smtp_test_connection', { config });
+export async function smtpTestConnection(config: SmtpConfig, testId?: number): Promise<SmtpSendResult> {
+  return invoke<SmtpSendResult>('smtp_test_connection', { config, testId: testId ?? null });
 }

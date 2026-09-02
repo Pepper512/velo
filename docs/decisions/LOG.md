@@ -1106,3 +1106,26 @@
   every `Upload … to release` step is now enumerated and checked. **Questions:** no aarch64
   bundle is planned (runners are x86_64; recorded); release checksums are a follow-up for
   the release ADR. Raw output in `docs/reviews/2026-09-03-pr67-gemini-raw.md`.
+- **2026-09-03 — #204 built (cancel an in-flight connection test)** on Jim's instruction,
+  bug-fix queue item 12, **Tier 2** (new commands on the Rust IMAP/SMTP client path; the
+  form carries credentials). Of the issue's three complaints, "database is locked" was
+  closed by #240 and the first-attempt `AUTHENTICATIONFAILED` is provider-specific; the
+  residual is the test that "cannot be broken". Verified first: the form awaited two raw
+  `invoke`s with no way to stop them and the IMAP test's timeout ladder holds a silent host
+  for up to ~90 s; an IPC call cannot be cancelled from the webview. **Decision:** abort at
+  the task boundary — `connection_tests.rs` keeps an `AbortHandle` per caller-minted id
+  (never a config), `imap_test_connection`/`smtp_test_connection` take an optional `testId`
+  and run as a spawned task when given (wire shape backward-compatible), and
+  `connection_test_cancel(testId) -> bool` aborts it; over a UI-only cancel (the socket and
+  the credential-carrying attempt would run on) and over threading a cancellation token
+  through `connect` (more invasive for the same effect). TypeScript: `tauriCommands`
+  wrappers, a pure `connectionTestRun` (ids, a generation so a late result after Cancel or a
+  re-test is dropped, cancel only the ids still in flight), and the form's Cancel button
+  beside "Testing..."; the form's two raw `invoke` calls are gone. TDD: Rust — registry
+  unit tests and the real IMAP test against a `TcpListener` that accepts and never answers,
+  cancelled after 100 ms and back in under a second; TS — the run module (distinct ids,
+  delivery, cancel invokes both ids and drops late results, finished tests not cancelled,
+  re-test supersedes) and the wrapper shapes. Spec
+  `docs/briefs/2026-09-03-204-cancel-connection-test.md`, committed before the code.
+  Gates: cargo test 154 (+5), clippy `-D warnings`, 169 files / 2,199 tests, tsc, graph,
+  docs. Both review legs to follow (second: Grok if affordable, else Gemini 3.8 Flash).
