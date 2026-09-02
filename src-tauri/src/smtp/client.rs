@@ -152,7 +152,8 @@ fn header_block_end(raw: &[u8]) -> usize {
         if rest.starts_with(b"\r\n\r\n") {
             return i + 2;
         }
-        if rest.starts_with(b"\n\n") {
+        // Bare LF, and the mixed `\n\r\n` a builder can produce (Gemini NIT 2).
+        if rest.starts_with(b"\n\n") || rest.starts_with(b"\n\r\n") {
             return i + 1;
         }
         i += 1;
@@ -179,29 +180,35 @@ fn lines_inclusive(bytes: &[u8]) -> impl Iterator<Item = &[u8]> {
     })
 }
 
-/// Is this header line a `Bcc` field? The field name is everything before the
-/// first colon with trailing whitespace removed (RFC 5322 §4.5.3 obsolete
-/// syntax allows `Bcc :`, and `mail_parser` accepts it, so it must be caught).
+/// Is this header line a `Bcc` or `Resent-Bcc` field (RFC 5322 §3.6.3 and
+/// §3.6.6 remove both before transmission)? The field name is everything
+/// before the first colon with surrounding whitespace removed — §4.5.3
+/// obsolete syntax allows `Bcc :`, and `mail_parser` accepts it, so it must
+/// be caught.
 fn is_bcc_field(line: &[u8]) -> bool {
     let Some(colon) = line.iter().position(|&b| b == b':') else {
         return false;
     };
-    let name = line[..colon].trim_ascii_end();
-    name.eq_ignore_ascii_case(b"bcc")
+    let name = line[..colon].trim_ascii();
+    name.eq_ignore_ascii_case(b"bcc") || name.eq_ignore_ascii_case(b"resent-bcc")
 }
 
-/// Remove every `Bcc` header field — with its folded continuation lines — from
-/// the header block of an RFC 5322 message, leaving every other byte as it was
-/// (#297, REQ-1.1/1.3). The body is never touched: a line reading `Bcc: …`
-/// after the blank line is content.
+/// Remove every `Bcc` and `Resent-Bcc` header field — with its folded
+/// continuation lines — from the header block of an RFC 5322 message, leaving
+/// every other byte as it was (#297, REQ-1.1/1.3). The body is never touched:
+/// a line reading `Bcc: …` after the blank line is content.
 fn strip_bcc_header(raw: &[u8]) -> Vec<u8> {
     let body_at = header_block_end(raw);
     let mut out = Vec::with_capacity(raw.len());
     let mut skipping = false;
+    let mut seen_field = false;
     for line in lines_inclusive(&raw[..body_at]) {
         let continuation = matches!(line.first(), Some(b' ') | Some(b'\t'));
-        if !continuation {
+        // A whitespace-led line continues the field above it; with no field
+        // above (a malformed first line) it is judged on its own (Gemini NIT 3).
+        if !continuation || !seen_field {
             skipping = is_bcc_field(line);
+            seen_field = true;
         }
         if !skipping {
             out.extend_from_slice(line);
@@ -218,7 +225,7 @@ fn refuse_if_bcc(wire: &[u8]) -> Result<(), String> {
     let message = mail_parser::MessageParser::default()
         .parse(wire)
         .ok_or("Failed to parse the outgoing message after removing Bcc")?;
-    if message.bcc().is_some() {
+    if message.bcc().is_some() || message.resent_bcc().is_some() {
         return Err("Refusing to send: a Bcc header survived removal".to_string());
     }
     Ok(())
@@ -387,6 +394,44 @@ mod tests {
         // A folded Subject whose continuation happens to start with "Bcc:".
         let raw = b"Subject: about\r\n Bcc: handling\r\nTo: b@x.org\r\n\r\nBody";
         assert_eq!(stripped(raw), raw.to_vec());
+    }
+
+    #[test]
+    fn strip_removes_resent_bcc_too_and_the_guard_sees_it() {
+        // Gemini LOW 1 on #52: RFC 5322 §3.6.6 gives Resent-Bcc the same rule.
+        let raw = b"From: a@x.org\r\nTo: b@x.org\r\nResent-From: a@x.org\r\nResent-To: c@x.org\r\nResent-Bcc: s@x.org\r\n\r\nBody";
+        assert_eq!(
+            stripped(raw),
+            b"From: a@x.org\r\nTo: b@x.org\r\nResent-From: a@x.org\r\nResent-To: c@x.org\r\n\r\nBody".to_vec()
+        );
+        assert!(refuse_if_bcc(raw).is_err());
+    }
+
+    #[test]
+    fn strip_finds_the_body_boundary_when_line_endings_are_mixed() {
+        // LF headers, CRLF blank line (Gemini NIT 2): the body must stay untouched.
+        let raw = b"From: a@x.org\nTo: b@x.org\n\r\nBody\nBcc: not-a-header@x.org\n";
+        assert_eq!(stripped(raw), raw.to_vec());
+        let with_bcc = b"From: a@x.org\nBcc: s@x.org\n\r\nBody\n";
+        assert_eq!(stripped(with_bcc), b"From: a@x.org\n\r\nBody\n".to_vec());
+    }
+
+    #[test]
+    fn strip_judges_a_whitespace_led_first_line_on_its_own() {
+        // Malformed: nothing above it to continue (Gemini NIT 3).
+        let raw = b" Bcc: s@x.org\r\nTo: b@x.org\r\n\r\nBody";
+        assert_eq!(stripped(raw), b"To: b@x.org\r\n\r\nBody".to_vec());
+    }
+
+    #[test]
+    fn strip_boundary_cases_folded_last_field_sole_field_and_non_contiguous_fields() {
+        // Gemini NIT 4's three inputs.
+        let folded_last = b"From: a@x.org\r\nTo: b@x.org\r\nBcc: s1@x.org,\r\n s2@x.org\r\n\r\nBody";
+        assert_eq!(stripped(folded_last), b"From: a@x.org\r\nTo: b@x.org\r\n\r\nBody".to_vec());
+        let sole = b"Bcc: secret@x.org\r\n\r\nBody";
+        assert_eq!(stripped(sole), b"\r\nBody".to_vec());
+        let two = b"Bcc: s1@x.org\r\nTo: b@x.org\r\nBcc: s2@x.org,\r\n\ts3@x.org\r\nSubject: Hi\r\n\r\nBody";
+        assert_eq!(stripped(two), b"To: b@x.org\r\nSubject: Hi\r\n\r\nBody".to_vec());
     }
 
     #[test]
