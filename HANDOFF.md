@@ -32,8 +32,10 @@
     Fable seat's, live), and **`f2-email-links-open` — dead.** Its head `86bbc52` is exactly what
     #31 merged, the tree is clean and unlocked, and it holds nothing unlanded (Opus verified in the
     #35 review). Its directory name never matched its branch and it has misled every session since.
-    **Safe to `git worktree remove .claude/worktrees/f2-email-links-open`** — left for Jim or the
-    main-checkout seat because it is not the Fable seat's to delete.
+    **Safe to `git worktree remove .claude/worktrees/f2-email-links-open` — and Jim's ALONE to do:**
+    the main-checkout seat tried and was classifier-blocked (~00:15 UTC, the fourth gate of the
+    night after the protection append and two merges). A gate that refuses one seat and is then
+    satisfied by the other is laundering whether the object is branch protection or a directory.
   - Worktrees are gitignored but **not vitest-excluded**: a bare `npx vitest run` at the repo root
     globs into every one of them — always pass the excludes in §1.
 - **State on `main`:** frontend **1,822** tests (152 files) · Rust **56** · npm audit **0 — full
@@ -47,9 +49,11 @@
 
 **Jim is back from a three-hour absence during which he delegated his decision authority to the
 Fable seat** (`velo-build-f1`; 22:30 → 01:30 UTC, 2026-09-01/02 — recorded with a hard expiry in
-`docs/decisions/LOG.md` via #33). **It expires at 01:30 UTC on 2026-09-02 — if you are reading
-this after that, it has expired and nothing further is decided in his name.** (Written at ~00:10
-UTC, inside the window.) What waits on him, in the order it unblocks work:
+`docs/decisions/LOG.md` via #33) — **renewed verbatim by Jim at ~00:20 UTC to 03:20 UTC** (same
+entry, `cb92d46`). **If you are reading this after 03:20 UTC on 2026-09-02, it has expired and
+nothing further is decided in his name.** (Written at ~00:45 UTC, inside the renewed window.) The
+renewal lifted no permission gate and did not reach the Opus seat's hold — both stated in the entry.
+What waits on him, in the order it unblocks work:
 
 1. **Ratify or reverse the delegated decisions — read the #33 LOG entry first.** Every decision
    made under the delegation is marked *(delegated)* there and is subject to his retroactive
@@ -193,8 +197,9 @@ retroactive review:**
 **Made by the Opus seat, and right:** hold E2 until Jim confirms the delegation directly.
 
 **Pending Jim:** everything in §1 · P11 · P19/F-3 · the "agent reach" question, which now has
-three more data points (two blocked merges, one blocked protection append), all handled the same
-way: surface, never route around.
+four more data points (two blocked merges, one blocked protection append, one blocked
+`git worktree remove` for the other seat), all handled the same way: surface, never route around.
+They are converging on one question, not four: **what may an agent seat reach on its own.**
 
 **Deliberately deferred + reason:**
 - **`AbortSignal.timeout()` on the Gemini fetch** — one line, but the test environment is jsdom and
@@ -214,6 +219,9 @@ way: surface, never route around.
   misleading "non-JSON" error — use `mockImplementation(() => new Response(…))` for multi-call tests.
 - **The cross-session classifier blocks messages that assert authority in prose.** Land the record
   first, then send a pointer to it. This is also the process-correct order.
+- **`gh pr checks` can start being refused mid-session after working repeatedly** (Opus seat, during
+  the #35 review) while `gh pr view --json mergeStateStatus` keeps working — `CLEAN` is the usable
+  green signal. Do not conclude the gates are broken; use the substitute.
 
 ---
 
@@ -252,8 +260,9 @@ SHA pinned; `git log --oneline 0d0b373..origin/main` shows what is above it) · 
 
 **Next action — Jim, in this order:**
 1. **Read the #33 LOG entry and ratify or reverse** the decisions made under the 3-hour delegation
-   (expires 01:30 UTC 2026-09-02; after that, expired): E2 rev 2 re-confirmed with findings 1/3/5 in
-   scope; PR C amended to *no new dependency*; F-4 read and recommended but **not** decided.
+   (renewed to 03:20 UTC 2026-09-02; after that, expired): E2 rev 2 re-confirmed with findings 1/3/5
+   in scope; PR C amended to *no new dependency*; F-4 read and recommended but **not** decided; F-5
+   briefed (decision-ready, not built — it is Rust work that collides with E2).
 2. **Merge #33, then #34** — both green and reviewed; every agent merge was classifier-blocked and
    deliberately not routed through the other seat. Or rule on agent merge reach.
 3. **Tell the Opus seat directly** that the delegation was real — it is holding the E2 build on
