@@ -1129,3 +1129,16 @@
   `docs/briefs/2026-09-03-204-cancel-connection-test.md`, committed before the code.
   Gates: cargo test 154 (+5), clippy `-D warnings`, 169 files / 2,199 tests, tsc, graph,
   docs. Both review legs to follow (second: Grok if affordable, else Gemini 3.8 Flash).
+- **2026-09-03 — PR #68 (#204) review, leg 1.** Gemini 3.7 Flash: APPROVE WITH NITS (1L 3N);
+  it confirmed the abort closes the socket at the current await point, that the registry
+  never sees a config, and the wire shape (`null` → `None`, 53-bit id → `u64`).
+  **Adopted:** L1 — a `start()` over a run still in flight now cancels the old ids first
+  (they would have held their sockets to the timeout); N2 — lazy `useRef`, one run per
+  mount; N3 — spawn and register under one registry lock, so a cancel racing the call
+  either finds the handle or is answered `false` before the task exists; N4 — a panicking
+  task is reported and its entry removed, and the real **SMTP** test against a silent
+  socket is cancelled in under a second like the IMAP one. **Declined:** a component test
+  for unmount cleanup — no `AddImapAccount` test exists and the cleanup is one effect over
+  the tested `cancel()`. A failed cancel IPC is now warned, still swallowed. The first
+  push failed CI's Rust job on `in_flight` being unused outside tests — `#[cfg(test)]` now.
+  Raw output in `docs/reviews/2026-09-03-pr68-gemini-raw.md`.

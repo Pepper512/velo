@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { createConnectionTestRun } from "./connectionTestRun";
+import { createConnectionTestRun, type ConnectionTestRun } from "./connectionTestRun";
 import type { ImapConfig, SmtpConfig } from "@/services/imap/tauriCommands";
 import {
   ArrowLeft,
@@ -326,13 +326,15 @@ export function AddImapAccount({
 
   // SPEC-204: one cancellable run for both tests. A result that arrives after
   // Cancel or a re-test is dropped by the run, never by a state check here.
-  const testRun = useRef(createConnectionTestRun());
-  useEffect(() => () => { void testRun.current.cancel(); }, []);
+  const testRun = useRef<ConnectionTestRun | null>(null);
+  if (!testRun.current) testRun.current = createConnectionTestRun(); // lazy: one per mount, not per render
+  const runOf = () => testRun.current!;
+  useEffect(() => () => { void runOf().cancel(); }, []);
 
   const testBothConnections = async () => {
     setImapTest({ state: "testing" });
     setSmtpTest({ state: "testing" });
-    await testRun.current.start(imapTestConfig(), smtpTestConfig(), {
+    await runOf().start(imapTestConfig(), smtpTestConfig(), {
       onImap: (r) => setImapTest({ state: r.ok ? "success" : "error", message: r.message }),
       onSmtp: (r) => setSmtpTest({ state: r.ok ? "success" : "error", message: r.message }),
     });
@@ -341,7 +343,7 @@ export function AddImapAccount({
   const cancelConnectionTests = async () => {
     setImapTest({ state: "idle" });
     setSmtpTest({ state: "idle" });
-    await testRun.current.cancel();
+    await runOf().cancel();
   };
 
   const handleSave = async () => {

@@ -29,10 +29,6 @@ impl ConnectionTests {
         self.inner.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
-    fn register(&self, id: u64, handle: AbortHandle) {
-        self.lock().insert(id, handle);
-    }
-
     fn remove(&self, id: u64) {
         self.lock().remove(&id);
     }
@@ -49,6 +45,7 @@ impl ConnectionTests {
         }
     }
 
+    #[cfg(test)]
     pub fn in_flight(&self) -> usize {
         self.lock().len()
     }
@@ -71,8 +68,15 @@ where
     let Some(id) = id else {
         return work.await;
     };
-    let handle = tokio::spawn(work);
-    tests.register(id, handle.abort_handle());
+    // Spawn and register under one lock: `spawn` only schedules the task, so a
+    // cancel racing this call either finds the handle or is answered `false`
+    // *before* the task exists — never in between (#68 review, Gemini N3).
+    let handle = {
+        let mut map = tests.lock();
+        let handle = tokio::spawn(work);
+        map.insert(id, handle.abort_handle());
+        handle
+    };
     let outcome = match handle.await {
         Ok(result) => result,
         Err(join) if join.is_cancelled() => Err("cancelled".to_string()),
@@ -143,18 +147,65 @@ mod tests {
         assert_eq!(tests.in_flight(), 0);
     }
 
+    #[tokio::test]
+    async fn a_panicking_test_is_reported_and_its_entry_removed() {
+        let tests = ConnectionTests::new();
+        let out = run_cancellable::<(), _>(&tests, Some(5), async {
+            panic!("boom");
+        })
+        .await;
+        let err = out.unwrap_err();
+        assert!(err.starts_with("connection test failed:"), "{err}");
+        assert_eq!(tests.in_flight(), 0);
+    }
+
+    /// A socket that accepts and then says nothing for longer than the test.
+    fn silent_server() -> u16 {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            let (_stream, _) = listener.accept().unwrap();
+            std::thread::sleep(Duration::from_secs(5));
+        });
+        port
+    }
+
+    /// SPEC-204 REQ-2.3 — the real SMTP test against a silent socket, same
+    /// shape as the IMAP one (#68 review, Gemini N4).
+    #[tokio::test]
+    async fn a_real_smtp_test_against_a_silent_server_is_cancelled_within_a_second() {
+        use crate::smtp::client as smtp_client;
+        use crate::smtp::types::SmtpConfig;
+        let config = SmtpConfig {
+            host: "127.0.0.1".to_string(),
+            port: silent_server(),
+            security: "none".to_string(),
+            username: "someone".to_string(),
+            password: "not-a-real-secret".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs: false,
+        };
+        let tests = Arc::new(ConnectionTests::new());
+        let runner = Arc::clone(&tests);
+        let started = Instant::now();
+        let run = tokio::spawn(async move {
+            run_cancellable(&runner, Some(6), async move { smtp_client::test_connection(&config).await }).await
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(tests.cancel(6));
+
+        let out = run.await.unwrap();
+        assert_eq!(out.unwrap_err(), "cancelled");
+        assert!(started.elapsed() < Duration::from_secs(1), "took {:?}", started.elapsed());
+        assert_eq!(tests.in_flight(), 0);
+    }
+
     /// SPEC-204 REQ-2.3 — the real IMAP test against a socket that accepts and
     /// never answers, cancelled after 100 ms: back well under a second, not
     /// after the 30 s greeting timeout.
     #[tokio::test]
     async fn a_real_imap_test_against_a_silent_server_is_cancelled_within_a_second() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = listener.local_addr().unwrap().port();
-        std::thread::spawn(move || {
-            // Accept, then hold the socket open in silence for longer than the test.
-            let (_stream, _) = listener.accept().unwrap();
-            std::thread::sleep(Duration::from_secs(5));
-        });
+        let port = silent_server();
         let config = ImapConfig {
             host: "127.0.0.1".to_string(),
             port,

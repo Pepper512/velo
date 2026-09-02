@@ -50,6 +50,9 @@ export function createConnectionTestRun(): ConnectionTestRun {
   let inFlight = new Set<number>();
 
   async function start(imap: ImapConfig, smtp: SmtpConfig, handlers: ConnectionTestHandlers): Promise<void> {
+    // A run started over one still in flight aborts it first; otherwise the old
+    // Rust tasks would hold their sockets to the timeout (#68 review, Gemini L1).
+    if (inFlight.size > 0) await cancel();
     generation += 1;
     const mine = generation;
     const imapId = newTestId();
@@ -78,7 +81,15 @@ export function createConnectionTestRun(): ConnectionTestRun {
     generation += 1;
     const ids = [...inFlight];
     inFlight = new Set();
-    await Promise.all(ids.map((id) => cancelConnectionTest(id).catch(() => false)));
+    await Promise.all(
+      ids.map((id) =>
+        cancelConnectionTest(id).catch((err: unknown) => {
+          // Best effort: the result is dropped by the generation either way.
+          console.warn("[connectionTestRun] cancel failed:", describe(err));
+          return false;
+        }),
+      ),
+    );
   }
 
   return { start, cancel, isRunning: () => inFlight.size > 0 };

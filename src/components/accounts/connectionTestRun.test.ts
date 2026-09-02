@@ -141,11 +141,35 @@ describe("connectionTestRun (SPEC-204)", () => {
     await first;
     expect(onImap).not.toHaveBeenCalled();
 
+    // The second start cancels the first run before it invokes its own tests.
+    await new Promise((r) => setTimeout(r, 0));
     pending.get("imap_test_connection")!.resolve("fresh");
     pending.get("smtp_test_connection")!.resolve({ success: true, message: "fresh" });
     await second;
     expect(onImap).toHaveBeenCalledTimes(1);
     expect(onImap).toHaveBeenCalledWith({ ok: true, message: "fresh" });
+  });
+
+  it("a start over a run still in flight cancels the old ids first (#68 L1)", async () => {
+    const pending = deferredInvoke();
+    const run = createConnectionTestRun();
+    const first = run.start(imap, smtp, { onImap: vi.fn(), onSmtp: vi.fn() });
+    const oldIds = [calls("imap_test_connection")[0]!.testId, calls("smtp_test_connection")[0]!.testId];
+    const firstImap = pending.get("imap_test_connection")!;
+    const firstSmtp = pending.get("smtp_test_connection")!;
+    pending.delete("imap_test_connection");
+    pending.delete("smtp_test_connection");
+
+    const second = run.start(imap, smtp, { onImap: vi.fn(), onSmtp: vi.fn() });
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(calls("connection_test_cancel").map((a) => a.testId).sort()).toEqual([...oldIds].sort());
+    firstImap.reject("cancelled");
+    firstSmtp.reject("cancelled");
+    await first;
+    pending.get("imap_test_connection")!.resolve("ok");
+    pending.get("smtp_test_connection")!.resolve({ success: true, message: "ok" });
+    await second;
   });
 
   it("a cancel with nothing in flight invokes nothing", async () => {
