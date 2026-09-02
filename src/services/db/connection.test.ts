@@ -93,18 +93,39 @@ describe("withTransaction (pinned, SPEC-240)", () => {
     expect(log).toEqual(["begin", "execute tx-1 UPDATE t SET v = 1", "rollback tx-1"]);
   });
 
-  it("rolls back when the commit itself fails, and reports the commit error", async () => {
+  it("reports a failed commit without a rollback — Rust has already closed that connection (Gemini M3 on #54)", async () => {
     const log: string[] = [];
     fakeRust(log);
-    mockInvoke.mockImplementationOnce(async () => "tx-9");
-    mockInvoke
-      .mockImplementationOnce(async () => {
-        throw new Error("COMMIT failed: disk I/O error");
-      })
-      .mockImplementationOnce(async () => null);
+    mockInvoke.mockImplementationOnce(async () => "tx-9").mockImplementationOnce(async () => {
+      throw new Error("COMMIT failed: disk I/O error");
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(withTransaction(async () => {})).rejects.toThrow("COMMIT failed");
-    expect(mockInvoke).toHaveBeenLastCalledWith("db_tx_rollback", { id: "tx-9" });
+
+    expect(mockInvoke).toHaveBeenLastCalledWith("db_tx_commit", { id: "tx-9" });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("gives up on VELO_TX_BUSY after the retry budget and surfaces it (Gemini test gap 3 on #54)", async () => {
+    vi.useFakeTimers();
+    try {
+      mockInvoke.mockImplementation(async (cmd: string) => {
+        if (cmd === "db_tx_begin") throw new Error("VELO_TX_BUSY: a transaction is already open");
+        return null;
+      });
+      const run = withTransaction(async () => {});
+      const outcome = run.then(
+        () => "resolved",
+        (e: unknown) => String(e),
+      );
+      await vi.advanceTimersByTimeAsync(100 * 60);
+      expect(await outcome).toContain("VELO_TX_BUSY");
+      expect(mockInvoke).toHaveBeenCalledTimes(51);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("stays quiet when the rollback fails only because the watchdog already reaped the transaction", async () => {

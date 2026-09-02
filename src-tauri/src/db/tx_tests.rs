@@ -197,6 +197,43 @@ async fn binding_and_decoding_match_the_plugin() {
 }
 
 #[tokio::test]
+async fn booleans_bind_as_integers_and_round_trip_through_an_integer_filter() {
+    // Gemini H1 on #54: the plugin would store the JSON text "true".
+    let db = temp_db(Duration::from_secs(1)).await;
+    let tx = TxManager::new();
+
+    let id = tx.begin(&db.pool).await.unwrap();
+    tx.execute(&id, "INSERT INTO t (v, n) VALUES ($1, $2)", vec![json!("yes"), json!(true)])
+        .await
+        .unwrap();
+    tx.execute(&id, "INSERT INTO t (v, n) VALUES ($1, $2)", vec![json!("no"), json!(false)])
+        .await
+        .unwrap();
+    let rows = tx
+        .select(&id, "SELECT v, n FROM t WHERE n = 1", vec![])
+        .await
+        .unwrap();
+    tx.commit(&id).await.unwrap();
+
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].get("v"), Some(&json!("yes")));
+    assert_eq!(rows[0].get("n"), Some(&json!(1)));
+}
+
+#[tokio::test]
+async fn a_new_transaction_forgets_the_previously_reaped_id() {
+    let db = temp_db(Duration::from_secs(1)).await;
+    let tx = TxManager::new();
+
+    let old = tx.begin(&db.pool).await.unwrap();
+    assert_eq!(tx.reap_idle(Duration::ZERO).await, Some(old.clone()));
+    let fresh = tx.begin(&db.pool).await.unwrap();
+    let err = tx.execute(&old, "SELECT 1", vec![]).await.unwrap_err();
+    assert!(err.starts_with(TX_UNKNOWN), "{err}");
+    tx.rollback(&fresh).await.unwrap();
+}
+
+#[tokio::test]
 async fn a_failing_statement_reports_the_error_and_keeps_the_transaction_open() {
     let db = temp_db(Duration::from_secs(1)).await;
     let tx = TxManager::new();

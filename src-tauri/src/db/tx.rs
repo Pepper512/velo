@@ -110,6 +110,8 @@ impl TxManager {
             conn,
             last_used: Instant::now(),
         });
+        // A new transaction supersedes the memory of the reaped one (Gemini NIT 5).
+        inner.expired = None;
         Ok(id)
     }
 
@@ -138,7 +140,11 @@ impl TxManager {
         let result = bind_all(sqlx::query(sql), values)
             .execute(&mut *tx.conn)
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|e| e.to_string());
+        // Idle means "since the last statement *finished*": a slow statement
+        // must not spend the caller's idle budget (Gemini M2).
+        tx.last_used = Instant::now();
+        let result = result?;
         Ok((result.rows_affected(), result.last_insert_rowid()))
     }
 
@@ -148,8 +154,9 @@ impl TxManager {
         let rows = bind_all(sqlx::query(sql), values)
             .fetch_all(&mut *tx.conn)
             .await
-            .map_err(|e| e.to_string())?;
-        rows.iter().map(row_to_json).collect()
+            .map_err(|e| e.to_string());
+        tx.last_used = Instant::now();
+        rows?.iter().map(row_to_json).collect()
     }
 
     pub async fn commit(&self, id: &str) -> Result<(), String> {
@@ -198,9 +205,13 @@ async fn release(mut tx: OpenTx, statement: &str) -> Result<(), String> {
     }
 }
 
-/// Bind exactly as the plugin does (`tauri-plugin-sql` `wrapper.rs`): null →
-/// NULL, string → TEXT, **number → f64**, anything else → JSON. The f64 quirk is
-/// the plugin's; it is kept so a query keeps its meaning when it moves here.
+/// Bind as the plugin does (`tauri-plugin-sql` `wrapper.rs`): null → NULL,
+/// string → TEXT, **number → f64**, anything else → JSON. The f64 quirk is the
+/// plugin's; it is kept so a query keeps its meaning when it moves here. One
+/// deliberate departure (Gemini H1 on #54): a JSON boolean binds as the
+/// INTEGER 1/0 SQLite means by "boolean", not as the JSON text `"true"` the
+/// plugin would store — every Velo caller already writes `? 1 : 0` by hand,
+/// so this only closes the trap for the next one that forgets.
 fn bind_all<'q>(
     mut query: sqlx::query::Query<'q, Sqlite, SqliteArguments<'q>>,
     values: Vec<Value>,
@@ -210,6 +221,8 @@ fn bind_all<'q>(
             query.bind(None::<Value>)
         } else if let Some(s) = value.as_str() {
             query.bind(s.to_owned())
+        } else if let Some(b) = value.as_bool() {
+            query.bind(if b { 1_i64 } else { 0_i64 })
         } else if let Some(n) = value.as_f64() {
             query.bind(n)
         } else {

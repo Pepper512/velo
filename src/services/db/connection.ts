@@ -92,10 +92,9 @@ export async function withTransaction<T = void>(fn: (db: DbExecutor) => Promise<
   try {
     const id = expectTxId(await beginWithRetry());
     const handle = transactionHandle(id);
+    let result: T;
     try {
-      const result = await fn(handle);
-      await invoke("db_tx_commit", { id });
-      return result;
+      result = await fn(handle);
     } catch (err) {
       // Roll back on the same connection. A rollback that fails because the
       // watchdog already reaped the transaction is not the error to report.
@@ -108,6 +107,11 @@ export async function withTransaction<T = void>(fn: (db: DbExecutor) => Promise<
       }
       throw err;
     }
+    // A COMMIT that fails has already released its connection on the Rust
+    // side (closed, not returned); there is nothing left to roll back
+    // (Gemini M3 on #54).
+    await invoke("db_tx_commit", { id });
+    return result;
   } finally {
     resolve(); // always unblock the next queued transaction
   }

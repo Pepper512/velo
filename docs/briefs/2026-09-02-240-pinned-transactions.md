@@ -200,7 +200,18 @@ so explicitly rather than silently dropping the task.
   `imapSync.test.ts` asserts the callbacks pass the handle down.
 - [ ] 6. Manual: initial IMAP sync against the Dovecot harness with the UI open and a folder
   being browsed — no `database is locked`; note the run in the Dovecot README.
-- [ ] 7. LOG.md, ROADMAP, vault row; close-out notes for #264/#204/#205 after re-verifying them.
+- [ ] 7. LOG.md, ROADMAP, vault row; close-out notes for #264/#204/#205 — **re-verified against
+  the upstream issues 2026-09-02:**
+  - **#264** ("cannot commit - no transaction", then "database is locked" on a fresh IMAP
+    account's first sync, Windows, 0.4.21) — the exact mechanism this PR removes. **Closes.**
+  - **#204** (`AUTHENTICATIONFAILED` against goneo.de, plus an uncancellable connection test) —
+    authentication and UI, nothing to do with transactions. **Does not close**; the ledger's
+    "closes #204" was wrong. The "cancel connection test" half stays as bug-fix item 12.
+  - **#205** (Gmail sync: `table labels has no column named imap_folder_path`) — a migration's
+    `ALTER TABLE` missing while its ledger row exists is what the old three-call migration path
+    could produce (the ledger insert and the DDL on different connections). This PR makes each
+    migration atomic on one connection, so it can no longer happen *going forward*; a database
+    already in that state is not repaired by it. **Re-test after landing; not closed.**
 
 ## Done when
 `cargo test --locked` and clippy clean with the tests above; vitest green; migrations run on a
