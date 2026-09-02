@@ -6,7 +6,8 @@
 - **Tier:** **2** — the correct fix needs Rust IMAP protocol work (`COPYUID` parsing in
   `src-tauri/src/imap/client.rs`), and every option touches a local-deletion or re-key path. Plan
   approved before code; threat pass and rollback below.
-- **Status:** rev 2 — **decision-ready, deliberately NOT built.** Rev 1 was written under the
+- **Status:** rev 2 — **APPROVED by Jim (direct, 2026-09-02), not yet built.** Builds after E2
+  part 2 (#39) lands; see §Approval. Rev 1 was written under the
   2026-09-02 delegation window (LOG.md, PR #33). Rev 2 adopts the opposite-line plan read (Opus seat,
   at `be6a50e`): the two items rev 1 marked *unverified* now have answers, **one of which changes
   option A's cost and the sequencing argument** — `COPYUID` is already parsed by a crate in the
@@ -157,11 +158,20 @@ stale rows — no worse than today.
 
 ## Approval
 
-- **Plan approval:** __________ (Jim) date: ______ — *deliberately not taken under the delegation.*
+- **Plan approval: APPROVED — Jim, direct, 2026-09-02.** Given in his own session, not under the
+  delegation and not relayed: he was asked for F-4 and F-5 and answered *"I approve f-4 and f-5"*.
+  Recorded in `docs/decisions/LOG.md` the same day.
+  **What was approved is option A** — re-key on `COPYUID`, with option B's hidden-row semantics as
+  the fallback for accounts without UIDPLUS — **as described in rev 2**, which is the revision that
+  corrected rev 1's cost basis and sequencing reason. Anyone building from rev 1 is building
+  something Jim did not approve.
 - **Opposite-line plan read: done** (Opus seat, at `be6a50e`, on PR #36) — *"the analysis holds,
   the recommendation needs one revision."* Both of its verifications and its re-scoping of
   Done-when 3 are adopted in rev 2; the `COPYUID` trace was re-verified independently by the
   author in the cargo registry source before adoption. Re-read requested at the rev-2 head.
-- **Sequencing decision embedded here for Jim to confirm or reject:** F-5 (A) builds **after E2,
-  before F-4** — **on the ownership-interaction reason in §Recommendation, not the
-  parser-collision reason rev 1 gave.** The before-E2 alternative is recorded there as an option.
+- **Sequencing: CONFIRMED with the approval.** F-5 (A) builds **after E2, before F-4** — on the
+  ownership-interaction reason in §Recommendation, not the parser-collision reason rev 1 gave. The
+  before-E2 alternative stays recorded there as the option it is.
+  **Not yet started:** E2 part 2 (#39) is in review, and F-5 touches `client.rs`'s move path, which
+  part 2 has just rewritten. Building before #39 lands would rebase a Tier-2 change onto a moving
+  file for no gain.
