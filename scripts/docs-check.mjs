@@ -61,6 +61,20 @@ const testFileCount = srcFiles.filter(
   (f) => isTest(f) && (f.endsWith(".ts") || f.endsWith(".tsx")),
 ).length;
 
+/**
+ * Test files by top-level `src/` directory — the "across stores (9), services
+ * (83), …" breakdown that sits beside the total in two docs. The total was
+ * gated from the start; the breakdown was not, and on 2026-09-02 the two docs
+ * disagreed with each other and with the tree by up to twelve files while the
+ * gated total passed. Same rule as the total: measured here, never typed.
+ */
+const testFilesByDir = {};
+for (const f of srcFiles) {
+  if (!isTest(f) || !(f.endsWith(".ts") || f.endsWith(".tsx"))) continue;
+  const dir = f.split("/")[1];
+  testFilesByDir[dir] = (testFilesByDir[dir] ?? 0) + 1;
+}
+
 const storeCount = srcFiles.filter(
   (f) => f.startsWith("src/stores/") && f.endsWith(".ts") && !isTest(f),
 ).length;
@@ -130,6 +144,45 @@ for (const { file, label, re, fact } of CHECKS) {
     if (!ok) {
       failures.push(`${file}: claims "${m[0]}" but the tree has ${actual}`);
     }
+  }
+}
+
+/**
+ * The per-directory breakdown: `N test files across a (x), b (y), …`. Every
+ * `name (count)` pair must match the tree, and every directory that holds a
+ * test file must appear — an omitted directory is how "153 across …" summed to
+ * 129 for a whole day without anyone noticing.
+ */
+const BREAKDOWN_FILES = ["CLAUDE.md", "docs/development.md"];
+const expectedBreakdown = Object.entries(testFilesByDir)
+  .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+  .map(([dir, n]) => `${dir} (${n})`)
+  .join(", ");
+
+console.log("\nTest-file breakdown in docs:");
+for (const file of BREAKDOWN_FILES) {
+  if (!existsSync(join(ROOT, file))) continue;
+  const line = read(file).match(/\d+ test files across ([^\n]+)/);
+  if (!line) {
+    console.log(`  ${file}: no breakdown claim found (ok — nothing to drift)`);
+    continue;
+  }
+
+  const claimed = {};
+  for (const m of line[1].matchAll(/([a-z]+) \((\d+)\)/g)) claimed[m[1]] = Number(m[2]);
+
+  const problems = [];
+  for (const [dir, n] of Object.entries(testFilesByDir)) {
+    if (!(dir in claimed)) problems.push(`omits ${dir} (${n})`);
+    else if (claimed[dir] !== n) problems.push(`${dir} claimed ${claimed[dir]}, actual ${n}`);
+  }
+  for (const dir of Object.keys(claimed)) {
+    if (!(dir in testFilesByDir)) problems.push(`claims ${dir}, which holds no test files`);
+  }
+
+  console.log(`  ${file}: ${problems.length === 0 ? "ok" : `WRONG — ${problems.join("; ")}`}`);
+  if (problems.length > 0) {
+    failures.push(`${file}: test-file breakdown ${problems.join("; ")}. Expected: "${expectedBreakdown}"`);
   }
 }
 
