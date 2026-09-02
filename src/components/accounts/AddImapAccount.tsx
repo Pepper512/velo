@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Modal } from "@/components/ui/Modal";
 import { insertImapAccount, insertOAuthImapAccount } from "@/services/db/accounts";
+import { resolveSmtpCredentials, type SmtpCredentialInputs } from "@/services/imap/smtpCredentials";
 import { useAccountStore } from "@/stores/accountStore";
 import {
   discoverSettings,
@@ -44,8 +45,9 @@ interface FormState {
   smtpPort: number;
   smtpSecurity: SecurityType;
   password: string;
+  smtpUsername: string;
   smtpPassword: string;
-  samePassword: boolean;
+  sameCredentials: boolean;
   acceptInvalidCerts: boolean;
   // OAuth2 fields
   authMode: AuthMode;
@@ -69,8 +71,9 @@ const initialFormState: FormState = {
   smtpPort: 465,
   smtpSecurity: "ssl",
   password: "",
+  smtpUsername: "",
   smtpPassword: "",
-  samePassword: true,
+  sameCredentials: true,
   acceptInvalidCerts: false,
   authMode: "password",
   oauthProvider: null,
@@ -108,6 +111,19 @@ const inputClass =
 const labelClass = "block text-xs font-medium text-text-secondary mb-1";
 const selectClass =
   "w-full px-3 py-2 bg-bg-secondary border border-border-primary rounded-lg text-sm text-text-primary outline-none focus:border-accent transition-colors appearance-none";
+
+/** The form fields the SMTP credential resolver reads (SPEC-252 REQ-1.3). */
+function smtpCredentialInputs(form: FormState, isOAuth: boolean): SmtpCredentialInputs {
+  return {
+    isOAuth,
+    oauthAccessToken: form.oauthAccessToken,
+    sameCredentials: form.sameCredentials,
+    imapUsername: form.imapUsername,
+    password: form.password,
+    smtpUsername: form.smtpUsername,
+    smtpPassword: form.smtpPassword,
+  };
+}
 
 /** Map UI security value ("ssl") to Rust config value ("tls") */
 function mapSecurity(security: string): string {
@@ -308,11 +324,9 @@ export function AddImapAccount({
   const testSmtpConnection = async () => {
     setSmtpTest({ state: "testing" });
     try {
-      const smtpPassword = isOAuth
-        ? (form.oauthAccessToken ?? "")
-        : form.samePassword
-          ? form.password
-          : form.smtpPassword;
+      // SPEC-252 REQ-1.3: the same resolver the save uses, so the test can
+      // never pass with credentials the account will not keep.
+      const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, isOAuth));
       const result = await invoke<{ success: boolean; message: string }>(
         "smtp_test_connection",
         {
@@ -320,8 +334,8 @@ export function AddImapAccount({
             host: form.smtpHost,
             port: form.smtpPort,
             security: mapSecurity(form.smtpSecurity),
-            username: form.imapUsername || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
-            password: smtpPassword,
+            username: smtp.username || form.imapUsername.trim() || (isOAuth ? (form.oauthEmail ?? form.email) : form.email),
+            password: smtp.password,
             auth_method: isOAuth ? "oauth2" : "password",
             accept_invalid_certs: form.acceptInvalidCerts,
           },
@@ -344,11 +358,19 @@ export function AddImapAccount({
   const handleSave = async () => {
     setSaving(true);
     setSaveError(null);
+    // SPEC-252 (Gemini M1 on #59): an empty separate SMTP password would be
+    // tested as empty and stored as empty — refuse it instead of guessing.
+    if (!isOAuth && !form.sameCredentials && form.smtpPassword.length === 0) {
+      setSaveError('Enter the SMTP password, or tick "Use same credentials as IMAP".');
+      setSaving(false);
+      return;
+    }
     try {
       const accountId = crypto.randomUUID();
       const email = (isOAuth ? form.oauthEmail : null) ?? form.email.trim();
 
       const imapUsername = form.imapUsername.trim() || null;
+      const smtp = resolveSmtpCredentials(smtpCredentialInputs(form, isOAuth));
 
       if (isOAuth) {
         await insertOAuthImapAccount({
@@ -384,9 +406,14 @@ export function AddImapAccount({
           smtpPort: form.smtpPort,
           smtpSecurity: form.smtpSecurity,
           authMethod: "password",
-          password: form.samePassword ? form.password : form.password,
+          password: form.password,
           imapUsername,
           acceptInvalidCerts: form.acceptInvalidCerts,
+          // SPEC-252: the same resolver the SMTP test used, always (#252's
+          // identical ternary discarded the SMTP password here; a checkbox
+          // special-case would be the next place to get it wrong — Grok M3).
+          smtpUsername: smtp.username,
+          smtpPassword: form.sameCredentials ? null : smtp.password,
         });
       }
 
@@ -787,19 +814,31 @@ export function AddImapAccount({
             <input
               id="smtp-same-password"
               type="checkbox"
-              checked={form.samePassword}
-              onChange={(e) => updateForm("samePassword", e.target.checked)}
+              checked={form.sameCredentials}
+              onChange={(e) => updateForm("sameCredentials", e.target.checked)}
               className="rounded border-border-primary text-accent focus:ring-accent"
             />
             <label
               htmlFor="smtp-same-password"
               className="text-sm text-text-secondary"
             >
-              Use same password as IMAP
+              Use same credentials as IMAP
             </label>
           </div>
-          {!form.samePassword && (
-            <div>
+          {!form.sameCredentials && (
+            <div className="space-y-3">
+              <label htmlFor="smtp-username" className={labelClass}>
+                SMTP Username
+              </label>
+              <input
+                id="smtp-username"
+                type="text"
+                value={form.smtpUsername}
+                onChange={(e) => updateForm("smtpUsername", e.target.value)}
+                placeholder="Same as IMAP username if left empty"
+                className={inputClass}
+                autoComplete="off"
+              />
               <label htmlFor="smtp-password" className={labelClass}>
                 SMTP Password
               </label>
