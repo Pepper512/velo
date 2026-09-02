@@ -101,7 +101,10 @@ vi.mock("../db/accounts", () => ({
   updateAccountSyncState: vi.fn(),
 }));
 vi.mock("../db/connection", () => ({
-  withTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
+  // SPEC-240: the callback receives the pinned handle and must pass it down.
+  withTransaction: vi.fn(async (fn: (tx: unknown) => Promise<void>) =>
+    fn({ execute: vi.fn(async () => ({ rowsAffected: 0 })), select: vi.fn(async () => []) }),
+  ),
 }));
 vi.mock("../db/folderSyncState", () => ({
   upsertFolderSyncState: vi.fn(),
@@ -405,10 +408,16 @@ describe("imapInitialSync", () => {
 
     // Thread IDs should be batch-updated via updateMessageThreadIds
     expect(mockUpdateMessageThreadIds).toHaveBeenCalledTimes(1);
-    const [accountId, messageIds, threadId] = mockUpdateMessageThreadIds.mock.calls[0]!;
+    const [accountId, messageIds, threadId, handle] = mockUpdateMessageThreadIds.mock.calls[0]!;
     expect(accountId).toBe("acc-1");
     expect(messageIds).toHaveLength(1);
     expect(threadId).toBeTruthy();
+    // SPEC-240 REQ-4.1: both stores (Phase 2 chunk, Phase 4 batch) and the
+    // thread-id update run on the transaction's handle (Gemini test gap 4 on #54).
+    const isHandle = expect.objectContaining({ execute: expect.any(Function), select: expect.any(Function) });
+    expect(handle).toEqual(isHandle);
+    for (const call of mockUpsertThread.mock.calls) expect(call[1]).toEqual(isHandle);
+    for (const call of mockUpsertMessage.mock.calls) expect(call[1]).toEqual(isHandle);
   });
 
   it("returns empty messages array (bodies not accumulated)", async () => {
@@ -442,12 +451,14 @@ describe("imapInitialSync", () => {
     await imapInitialSync("acc-1");
 
     expect(mockUpsertAttachment).toHaveBeenCalledTimes(1);
+    // ...and through the transaction's handle, not a fresh connection (SPEC-240 REQ-4.1).
     expect(mockUpsertAttachment).toHaveBeenCalledWith(
       expect.objectContaining({
         filename: "doc.pdf",
         mimeType: "application/pdf",
         accountId: "acc-1",
       }),
+      expect.objectContaining({ execute: expect.any(Function), select: expect.any(Function) }),
     );
   });
 

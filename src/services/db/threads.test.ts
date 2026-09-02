@@ -9,7 +9,14 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 });
 
 import { getDb } from "@/services/db/connection";
-import { muteThread, unmuteThread, getMutedThreadIds, deleteAllThreadsForAccount } from "./threads";
+import {
+  muteThread,
+  unmuteThread,
+  getMutedThreadIds,
+  deleteAllThreadsForAccount,
+  upsertThread,
+  setThreadLabels,
+} from "./threads";
 import { createMockDb } from "@/test/mocks";
 
 const mockDb = createMockDb();
@@ -84,5 +91,38 @@ describe("threads service - mute", () => {
 
       expect(result.size).toBe(0);
     });
+  });
+});
+
+describe("threads service - SPEC-240 handle routing (Gemini test gap 3 on #54)", () => {
+  const handle = {
+    execute: vi.fn(async () => ({ rowsAffected: 1 })),
+    select: vi.fn(async () => [{ is_snoozed: 0, snooze_until: null }]),
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getDb).mockResolvedValue(mockDb as unknown as Awaited<ReturnType<typeof getDb>>);
+  });
+
+  it("upsertThread and setThreadLabels — with its snooze read — stay on the handle when given one", async () => {
+    await upsertThread(
+      { id: "t1", accountId: "acc-1", subject: "s", snippet: null, lastMessageAt: 1, messageCount: 1, isRead: false, isStarred: false, isImportant: false, hasAttachments: false },
+      handle,
+    );
+    await setThreadLabels("acc-1", "t1", ["INBOX", "X"], handle);
+
+    // 1 upsert + 1 delete + 2 label inserts; the snooze-override read is the one select.
+    expect(handle.execute).toHaveBeenCalledTimes(4);
+    expect(handle.select).toHaveBeenCalledTimes(1);
+    expect(getDb).not.toHaveBeenCalled();
+  });
+
+  it("fall back to getDb() without a handle", async () => {
+    await upsertThread(
+      { id: "t1", accountId: "acc-1", subject: "s", snippet: null, lastMessageAt: 1, messageCount: 1, isRead: false, isStarred: false, isImportant: false, hasAttachments: false },
+    );
+    expect(getDb).toHaveBeenCalledTimes(1);
+    expect(mockDb.execute).toHaveBeenCalledTimes(1);
   });
 });

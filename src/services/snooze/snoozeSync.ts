@@ -1,4 +1,4 @@
-import { getDb } from "../db/connection";
+import { getDb, type DbExecutor } from "../db/connection";
 import { getAccount } from "../db/accounts";
 import { getAliasesForAccount } from "../db/sendAsAliases";
 import { getExistingMessageIds } from "../db/messages";
@@ -40,15 +40,16 @@ export async function clearSnoozeForNewExternalMessages(
   threadId: string,
   incoming: IncomingMessageRef[],
   ownAddresses: Set<string>,
+  executor?: DbExecutor,
 ): Promise<boolean> {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   const rows = await db.select<{ is_snoozed: number }[]>(
     "SELECT is_snoozed FROM threads WHERE account_id = $1 AND id = $2",
     [accountId, threadId],
   );
   if (rows[0]?.is_snoozed !== 1) return false;
 
-  const existing = await getExistingMessageIds(accountId, incoming.map((m) => m.id));
+  const existing = await getExistingMessageIds(accountId, incoming.map((m) => m.id), db);
   const hasNewExternal = incoming.some(
     (m) =>
       !existing.has(m.id) &&

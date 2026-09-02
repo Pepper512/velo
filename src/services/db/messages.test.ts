@@ -11,6 +11,7 @@ vi.mock("@/services/db/connection", async (importOriginal) => {
 import { getDb } from "@/services/db/connection";
 import {
   deleteAllMessagesForAccount,
+  getExistingMessageIds,
   updateMessageThreadIds,
   upsertMessage,
   tombstoneMovedMessages,
@@ -104,6 +105,48 @@ describe("messages service", () => {
         "UPDATE messages SET moved_to = $1 WHERE account_id = $2 AND id IN ($3, $4)",
         ["Archive", "acc-1", "m1", "m2"],
       );
+    });
+  });
+
+  describe("SPEC-240 handle routing (Gemini test gaps 3–4 on #54)", () => {
+    const handle = { execute: vi.fn(async () => ({ rowsAffected: 1 })), select: vi.fn(async () => []) };
+
+    beforeEach(() => {
+      handle.execute.mockClear();
+      handle.select.mockClear();
+    });
+
+    it("upsertMessage runs on the handle when given one and never opens a fresh connection", async () => {
+      await upsertMessage(
+        {
+          id: "imap-acc-1-INBOX-5", accountId: "acc-1", threadId: "t1", fromAddress: "a@x", fromName: null,
+          toAddresses: null, ccAddresses: null, bccAddresses: null, replyTo: null, subject: "s", snippet: null,
+          date: 1, isRead: false, isStarred: false, bodyHtml: null, bodyText: null, rawSize: null, internalDate: null,
+          messageIdHeader: "<m@x>", imapFolder: "INBOX", imapUid: 5,
+        },
+        handle,
+      );
+      // The upsert and the F-5 reap both went through the handle.
+      expect(handle.execute).toHaveBeenCalledTimes(2);
+      expect(getDb).not.toHaveBeenCalled();
+    });
+
+    it("falls back to getDb() when no handle is given", async () => {
+      await updateMessageThreadIds("acc-1", ["m1"], "t1");
+      expect(getDb).toHaveBeenCalled();
+      expect(mockDb.execute).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps every chunk of a large id list on the handle", async () => {
+      const ids = Array.from({ length: 1201 }, (_, i) => `m${i}`);
+      handle.select.mockResolvedValue([]);
+
+      await updateMessageThreadIds("acc-1", ids, "t1", handle);
+      await getExistingMessageIds("acc-1", ids, handle);
+
+      expect(handle.execute).toHaveBeenCalledTimes(3); // 500 + 500 + 201
+      expect(handle.select).toHaveBeenCalledTimes(3);
+      expect(getDb).not.toHaveBeenCalled();
     });
   });
 

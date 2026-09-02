@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const harnessRef: { current: ReturnType<typeof createSqliteHarness> | null } = { current: null };
 
 vi.mock("@/services/db/connection", () => ({
-  getDb: () => Promise.resolve(harnessRef.current!.db),
+  getDb: vi.fn(() => Promise.resolve(harnessRef.current!.db)),
   selectFirstBy: async (sql: string, params: unknown[] = []) =>
     (await harnessRef.current!.db.select<unknown[]>(sql, params))[0] ?? null,
   withTransaction: async (fn: (db: unknown) => Promise<void>) => {
@@ -34,6 +34,7 @@ vi.mock("@/services/db/connection", () => ({
 
 import { createSqliteHarness } from "@/test/sqliteHarness";
 import { runMigrations } from "../db/migrations";
+import { getDb } from "@/services/db/connection";
 import {
   getMessagesForThread,
   rekeyMovedMessages,
@@ -270,6 +271,23 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     // A row with no header match is still tombstoned, not deleted.
     await settleMovedRows(ACC, "INBOX", "Archive", [5], null, null);
     expect(messageRow(A_OLD)).toMatchObject({ moved_to: "Archive" });
+  });
+
+  it("issues every re-key statement — PRAGMA, SAVEPOINT, rewrites — through the transaction handle, never a fresh getDb() (SPEC-240 Task 5, Opus HIGH 2)", async () => {
+    const A_NEW = `imap-${ACC}-Archive-3`;
+    vi.mocked(getDb).mockClear();
+
+    await rekeyMovedMessages(ACC, [{ oldId: A_OLD, newId: A_NEW, folder: "Archive", uid: 3 }]);
+
+    expect(messageRow(A_OLD)).toBeUndefined();
+    expect(messageRow(A_NEW)).toBeDefined();
+    // The whole destructive rewrite depends on per-connection state
+    // (`defer_foreign_keys`, `SAVEPOINT`); with a pinned handle that state is
+    // real only if nothing inside reaches for another connection.
+    expect(getDb).not.toHaveBeenCalled();
+    const s = harnessRef.current!.statements;
+    expect(s.some((x) => x.includes("defer_foreign_keys"))).toBe(true);
+    expect(s.some((x) => x.startsWith("SAVEPOINT"))).toBe(true);
   });
 
   it("re-keys unmapped rows' tombstones in the same transaction as the re-keys", async () => {

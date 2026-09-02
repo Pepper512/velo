@@ -265,7 +265,7 @@ async function storeThreadsAndMessages(
   for (let i = 0; i < threadGroups.length; i += THREAD_BATCH_SIZE) {
     const batch = threadGroups.slice(i, i + THREAD_BATCH_SIZE);
 
-    await withTransaction(async () => {
+    await withTransaction(async (tx) => {
       for (const group of batch) {
         if (skippedThreadIds.has(group.threadId)) continue;
 
@@ -317,6 +317,7 @@ async function storeThreadsAndMessages(
           group.threadId,
           messages.map((m) => ({ id: m.id, fromAddress: m.fromAddress })),
           ownAddresses,
+          tx,
         );
 
         await upsertThread({
@@ -330,10 +331,10 @@ async function storeThreadsAndMessages(
           isStarred,
           isImportant: false,
           hasAttachments,
-        });
+        }, tx);
 
         const labelArray = [...allLabelIds];
-        await setThreadLabels(accountId, group.threadId, labelArray);
+        await setThreadLabels(accountId, group.threadId, labelArray, tx);
 
         // Store messages sequentially to avoid concurrent DB writes
         for (const parsed of messages) {
@@ -366,7 +367,7 @@ async function storeThreadsAndMessages(
             inReplyToHeader: imapMsg?.in_reply_to ?? null,
             imapUid: imapMsg?.uid ?? null,
             imapFolder: imapMsg?.folder ?? null,
-          });
+          }, tx);
 
           for (const att of parsed.attachments) {
             await upsertAttachment({
@@ -379,7 +380,7 @@ async function storeThreadsAndMessages(
               gmailAttachmentId: att.gmailAttachmentId,
               contentId: att.contentId,
               isInline: att.isInline,
-            });
+            }, tx);
           }
 
           storedMessages.push(parsed);
@@ -642,7 +643,7 @@ export async function imapInitialSync(
 
         // Write entire chunk to DB in a single transaction
         if (chunkParsed.length > 0) {
-          await withTransaction(async () => {
+          await withTransaction(async (tx) => {
             for (const { parsed, msg } of chunkParsed) {
               // Create placeholder thread first to satisfy FK constraint
               await upsertThread({
@@ -656,7 +657,7 @@ export async function imapInitialSync(
                 isStarred: parsed.isStarred,
                 isImportant: false,
                 hasAttachments: parsed.hasAttachments,
-              });
+              }, tx);
               await upsertMessage({
                 id: parsed.id,
                 accountId,
@@ -684,7 +685,7 @@ export async function imapInitialSync(
                 inReplyToHeader: msg.in_reply_to ?? null,
                 imapUid: msg.uid ?? null,
                 imapFolder: msg.folder ?? null,
-              });
+              }, tx);
 
               // Store attachments
               for (const att of parsed.attachments) {
@@ -698,7 +699,7 @@ export async function imapInitialSync(
                   gmailAttachmentId: att.gmailAttachmentId,
                   contentId: att.contentId,
                   isInline: att.isInline,
-                });
+                }, tx);
               }
             }
           });
@@ -809,7 +810,7 @@ export async function imapInitialSync(
       }
     }
 
-    await withTransaction(async () => {
+    await withTransaction(async (tx) => {
       for (const group of batch) {
         if (skippedThreadIds.has(group.threadId)) continue;
 
@@ -849,6 +850,7 @@ export async function imapInitialSync(
           group.threadId,
           messages.map((m) => ({ id: m.id, fromAddress: m.fromAddress })),
           ownAddresses,
+          tx,
         );
 
         await upsertThread({
@@ -862,13 +864,13 @@ export async function imapInitialSync(
           isStarred,
           isImportant: false,
           hasAttachments,
-        });
+        }, tx);
 
-        await setThreadLabels(accountId, group.threadId, [...allLabelIds]);
+        await setThreadLabels(accountId, group.threadId, [...allLabelIds], tx);
 
         // Batch-update thread IDs for all messages in this thread
         const messageIds = messages.map((m) => m.id);
-        await updateMessageThreadIds(accountId, messageIds, group.threadId);
+        await updateMessageThreadIds(accountId, messageIds, group.threadId, tx);
       }
     });
 

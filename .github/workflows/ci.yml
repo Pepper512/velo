@@ -81,6 +81,17 @@ jobs:
         # No allowances. The three pre-existing lints that EX-002 covered were
         # fixed in Batch A, so any warning is now a failure.
         run: cargo clippy --all-targets --locked -- -D warnings
+      - name: One sqlx in the graph (SPEC-240)
+        working-directory: src-tauri
+        # `db/tx.rs` holds a `PoolConnection<Sqlite>` taken from
+        # tauri-plugin-sql's own pool, so the app's direct `sqlx` must be the
+        # very same crate version the plugin compiles against. A second copy
+        # would type-check as two different `Pool<Sqlite>` types at best and
+        # link two SQLite stacks at worst. Grok L7 on #54.
+        run: |
+          copies=$(cargo tree --locked -e normal -i sqlx 2>/dev/null | grep -c '^sqlx v' || true)
+          echo "sqlx copies in the graph: $copies"
+          test "$copies" = "1"
       - name: Release-profile check (dev-only commands must compile out)
         working-directory: src-tauri
         # `open_devtools` and `imap_raw_fetch_diagnostic` live behind

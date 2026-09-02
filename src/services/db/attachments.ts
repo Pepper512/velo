@@ -1,4 +1,4 @@
-import { getDb } from "./connection";
+import { getDb, type DbExecutor } from "./connection";
 
 export interface DbAttachment {
   id: string;
@@ -23,8 +23,8 @@ export async function upsertAttachment(att: {
   gmailAttachmentId: string | null;
   contentId: string | null;
   isInline: boolean;
-}): Promise<void> {
-  const db = await getDb();
+}, executor?: DbExecutor): Promise<void> {
+  const db = executor ?? (await getDb());
   await db.execute(
     `INSERT INTO attachments (id, message_id, account_id, filename, mime_type, size, gmail_attachment_id, content_id, is_inline)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)

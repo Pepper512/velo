@@ -1,4 +1,4 @@
-import { getDb, withTransaction } from "./connection";
+import { getDb, withTransaction, type DbExecutor } from "./connection";
 
 export interface DbMessage {
   id: string;
@@ -80,8 +80,8 @@ export async function upsertMessage(msg: {
   inReplyToHeader?: string | null;
   imapUid?: number | null;
   imapFolder?: string | null;
-}): Promise<void> {
-  const db = await getDb();
+}, executor?: DbExecutor): Promise<void> {
+  const db = executor ?? (await getDb());
   await db.execute(
     `INSERT INTO messages (id, account_id, thread_id, from_address, from_name, to_addresses, cc_addresses, bcc_addresses, reply_to, subject, snippet, date, is_read, is_starred, body_html, body_text, body_cached, raw_size, internal_date, list_unsubscribe, list_unsubscribe_post, auth_results, message_id_header, references_header, in_reply_to_header, imap_uid, imap_folder)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
@@ -137,7 +137,7 @@ export async function upsertMessage(msg: {
     msg.messageIdHeader != null &&
     msg.messageIdHeader.trim().length > 0
   ) {
-    await reapMovedTombstones(msg.accountId, msg.messageIdHeader, msg.id, msg.imapFolder);
+    await reapMovedTombstones(msg.accountId, msg.messageIdHeader, msg.id, msg.imapFolder, db);
   }
 }
 
@@ -380,8 +380,9 @@ export async function reapMovedTombstones(
   messageIdHeader: string,
   freshMessageId: string,
   arrivedIn: string,
+  executor?: DbExecutor,
 ): Promise<void> {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   await db.execute(
     "DELETE FROM messages WHERE account_id = $1 AND message_id_header = $2 AND moved_to = $3 AND id <> $4",
     [accountId, messageIdHeader, arrivedIn, freshMessageId],
@@ -508,8 +509,9 @@ export async function updateMessageThreadIds(
   accountId: string,
   messageIds: string[],
   threadId: string,
+  executor?: DbExecutor,
 ): Promise<void> {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   // SQLite variable limit is 999; process in chunks
   for (let i = 0; i < messageIds.length; i += 500) {
     const chunk = messageIds.slice(i, i + 500);
@@ -558,10 +560,11 @@ export async function getRecentSentMessages(
 export async function getExistingMessageIds(
   accountId: string,
   ids: string[],
+  executor?: DbExecutor,
 ): Promise<Set<string>> {
   const found = new Set<string>();
   if (ids.length === 0) return found;
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   const CHUNK = 500;
   for (let i = 0; i < ids.length; i += CHUNK) {
     const chunk = ids.slice(i, i + CHUNK);

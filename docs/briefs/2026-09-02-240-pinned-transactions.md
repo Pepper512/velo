@@ -9,8 +9,9 @@
   approved before code; threat pass and rollback below; both cross-vendor legs.
 - **Base:** `main` @ `e6f3eb9` (code pin `9bec56a`; will be re-pinned after #297 lands). Every
   citation below was grepped at that pin or in the vendored crate sources named.
-- **Status:** **draft — awaiting Jim's approval and the `sqlx` dependency decision.** Nothing
-  built.
+- **Status:** **APPROVED by Jim (2026-09-02, by instruction: the plan, the `sqlx` direct
+  dependency — option A, version tracking the plugin's — and the 30 s idle watchdog). BUILDING**
+  on branch `f240-pinned-tx`. Task 0's audit result is below (§Task 0 result).
 - **Source:** upstream avihaymenahem/velo#240 (with #264 duplicate, #192/#186/#196 symptoms;
   the ledger says it closes #204 and re-tests #205 — re-verify those two before claiming them);
   the fork's 2026-09-01 triage ranked it **P0**; **Opus 5's HIGH 2 on #43**: F-5's identity re-key
@@ -153,24 +154,68 @@ longer land on different connections.
   watchdog fires under a legitimately slow statement (> 30 s on one statement), that transaction
   fails loudly and the sync retries next tick — recorded as the tunable.
 
+## Task 0 result — the helper audit (2026-09-02, at `6c45d5a`)
+
+Every statement the three `imapSync.ts` callbacks issue goes through a helper that fetches its
+own connection with `getDb()`. Nine helpers in total, seven called directly and two reached
+through them; **none takes a handle today**, so today not one statement inside those
+"transactions" is guaranteed to run on the connection that issued `BEGIN`.
+
+| Callback | Direct helpers (file:line) | Transitive, down to `getDb()` |
+|---|---|---|
+| Initial-sync thread store (`imapSync.ts:268`) | `clearSnoozeForNewExternalMessages` (`snooze/snoozeSync.ts:38`), `upsertThread` (`db/threads.ts:94`), `setThreadLabels` (`db/threads.ts:157`), `upsertMessage` (`db/messages.ts:56`), `upsertAttachment` (`db/attachments.ts:16`) | `getExistingMessageIds` (`db/messages.ts:558`, from the snooze helper), `applySnoozeOverride` (`db/threads.ts:136`, from `setThreadLabels`), `reapMovedTombstones` (`db/messages.ts:378`, from `upsertMessage`) |
+| Delta-sync chunk store (`imapSync.ts:645`) | `upsertThread`, `upsertMessage`, `upsertAttachment` | `reapMovedTombstones` |
+| Delta-sync thread store (`imapSync.ts:812`) | `clearSnoozeForNewExternalMessages`, `upsertThread`, `setThreadLabels`, `updateMessageThreadIds` (`db/messages.ts:507`) | `getExistingMessageIds`, `applySnoozeOverride` |
+
+**Threading plan (REQ-4.1):** each of the nine gains a trailing optional `db?: DbExecutor`
+(`Pick<Database, "execute" | "select">`, exported from `db/connection.ts`) resolved as
+`db ?? await getDb()`, and passes it down; the three callbacks pass the handle
+`withTransaction` gives them. No signature changes for existing callers (the parameter is
+optional and last). The other seven `withTransaction` callers already use the handle.
+
+**Plan correction found by the audit:** the plan's Task 2 said five commands would be added to
+`src-tauri/capabilities/default.json`. That file lists no application command — none of the
+IMAP or SMTP commands appear there — because Tauri 2 permits an app's own commands without
+per-command entries; only plugin commands need them. **No capability change**, and the PR says
+so explicitly rather than silently dropping the task.
+
 ## Tasks (risk-first)
-- [ ] 0. **Audit:** list every helper the three `imapSync.ts` callbacks call, and every helper
-  *they* call, down to `getDb()`; thread the optional `db` parameter (REQ-4.1). Sizes the PR.
-- [ ] 1. Rust `tx.rs` with tests on an in-memory sqlx pool: begin/execute/commit visible to a
-  second pool connection; rollback invisible; wrong id refused; second BEGIN refused; expiry
-  after idle rolls back and the id is dead; binding parity with the plugin for null/string/
-  number/object. — REQ-1.1–1.5, NFR-1
-- [ ] 2. Capability entries; commands registered in both handler lists in `lib.rs`.
-- [ ] 3. `withTransaction` on the handle; boundary validation of `invoke` results; tests with a
-  mocked `invoke` proving the sequence begin → statements-with-id → commit, and rollback on
-  throw. — REQ-1.1, 1.2
-- [ ] 4. `migrations.ts` on `withTransaction`; harness run of all 27 migrations up, idempotent
-  re-run. — REQ-3.1
-- [ ] 5. The Opus HIGH 2 proof: a harness-level test that `rekeyMovedMessages`' `PRAGMA
-  defer_foreign_keys` and `SAVEPOINT` are issued through the handle, never `getDb()`.
+- [x] 0. **Audit** — above. Nine helpers, three callbacks, no capability entries.
+- [x] 1. Rust `db/tx.rs` with tests on a **file-backed** sqlx pool (an in-memory SQLite database
+  is private to its connection, so "visible from another connection" needs a file): commit
+  visible to a second pool connection, rollback invisible, `BEGIN IMMEDIATE` proven by a second
+  writer failing fast, wrong id / second BEGIN / dead id refused with the named errors, idle
+  reap → `VELO_TX_EXPIRED`, binding and decoding parity, a failing statement leaves the
+  transaction open for the caller's rollback. — REQ-1.1–1.5, NFR-1
+- [x] 2. Commands registered in both handler lists in `lib.rs`; `TxManager` managed; the watchdog
+  spawned in `setup`. (No capability entries — see the audit's plan correction.) Deviations from
+  this text found in review: ids are `tx-{epoch}-{counter}`, not UUIDs (equality-checked only;
+  Grok NIT 12); the lockfile format moved from `version = 3` to `4` when the dependency was
+  added — the local toolchain's default, accepted by the 1.89 MSRV job (Grok L7); `sqlx` is
+  pinned `=0.8.6` and CI checks there is exactly one copy in the graph.
+- [x] 3. `withTransaction` on the handle (`DbExecutor`); `invoke` results validated at the
+  boundary; nine tests with a mocked `invoke`: sequence, id threading, rollback on throw, commit
+  failure, expired-rollback silence, serialisation, unblock after failure, refused begin,
+  validation. — REQ-1.1, 1.2
+- [x] 4. `migrations.ts` on `withTransaction`; the harness runs all 27 migrations up and the
+  idempotent re-run through the same mock. — REQ-3.1
+- [x] 5. The Opus HIGH 2 proof: `moveHygiene.test.ts` asserts `rekeyMovedMessages` issues its
+  `PRAGMA defer_foreign_keys` and `SAVEPOINT` through the handle and never calls `getDb()`;
+  `imapSync.test.ts` asserts the callbacks pass the handle down.
 - [ ] 6. Manual: initial IMAP sync against the Dovecot harness with the UI open and a folder
   being browsed — no `database is locked`; note the run in the Dovecot README.
-- [ ] 7. LOG.md, ROADMAP, vault row; close-out notes for #264/#204/#205 after re-verifying them.
+- [ ] 7. LOG.md, ROADMAP, vault row; close-out notes for #264/#204/#205 — **re-verified against
+  the upstream issues 2026-09-02:**
+  - **#264** ("cannot commit - no transaction", then "database is locked" on a fresh IMAP
+    account's first sync, Windows, 0.4.21) — the exact mechanism this PR removes. **Closes.**
+  - **#204** (`AUTHENTICATIONFAILED` against goneo.de, plus an uncancellable connection test) —
+    authentication and UI, nothing to do with transactions. **Does not close**; the ledger's
+    "closes #204" was wrong. The "cancel connection test" half stays as bug-fix item 12.
+  - **#205** (Gmail sync: `table labels has no column named imap_folder_path`) — a migration's
+    `ALTER TABLE` missing while its ledger row exists is what the old three-call migration path
+    could produce (the ledger insert and the DDL on different connections). This PR makes each
+    migration atomic on one connection, so it can no longer happen *going forward*; a database
+    already in that state is not repaired by it. **Re-test after landing; not closed.**
 
 ## Done when
 `cargo test --locked` and clippy clean with the tests above; vitest green; migrations run on a
