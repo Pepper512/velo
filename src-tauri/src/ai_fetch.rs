@@ -16,6 +16,7 @@
 use reqwest::{redirect::Policy, Method, Url};
 use serde::{Deserialize, Serialize};
 use std::net::IpAddr;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 /// Longest response body accepted. A chat completion is kilobytes; a page of
@@ -92,6 +93,21 @@ fn describe(err: reqwest::Error) -> String {
     err.without_url().to_string()
 }
 
+/// One client for the process, so consecutive completions reuse connections
+/// and TLS sessions (#65 review, Gemini L2). The redirect policy lives here —
+/// it is the property no request may override; the timeout is per request.
+fn shared_client() -> Result<&'static reqwest::Client, String> {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let built = reqwest::Client::builder()
+        .redirect(Policy::none())
+        .build()
+        .map_err(describe)?;
+    Ok(CLIENT.get_or_init(|| built))
+}
+
 /// The command's body, with the limits as parameters so a test can lower them.
 pub async fn fetch_with_limits(
     request: AiFetchRequest,
@@ -102,13 +118,8 @@ pub async fn fetch_with_limits(
     let method = parse_method(&request.method)?;
     let host = url.host_str().unwrap_or("?").to_string();
 
-    let client = reqwest::Client::builder()
-        .redirect(Policy::none())
-        .timeout(timeout)
-        .build()
-        .map_err(describe)?;
-
-    let mut builder = client.request(method.clone(), url);
+    let client = shared_client()?;
+    let mut builder = client.request(method.clone(), url).timeout(timeout);
     for (name, value) in &request.headers {
         if REQUEST_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
             builder = builder.header(name.as_str(), value.as_str());
@@ -204,10 +215,35 @@ mod tests {
             "http://169.254.169.254/latest/meta-data",
             "http://localhost.example.com/v1",
             "http://127.0.0.1.example.com/v1",
+            "http://0.0.0.0/v1",
+            "http://localhost./v1",
+            "http://[::ffff:127.0.0.1]/v1",
+            "http://[::ffff:10.0.0.1]/v1",
         ] {
             let err = validate_ai_url(raw).unwrap_err();
             assert!(err.contains("localhost only"), "{raw}: {err}");
         }
+    }
+
+    #[test]
+    fn ipv4_short_and_numeric_forms_are_normalised_before_the_rule() {
+        // The `url` crate turns these into dotted quads, so they are judged as
+        // the address they denote — 127.0.0.1 here, and a remote one below.
+        for raw in ["http://127.1/v1", "http://0177.0.0.1/v1", "http://2130706433/v1", "http://0x7f.1/v1"] {
+            let url = validate_ai_url(raw).unwrap_or_else(|e| panic!("{raw}: {e}"));
+            assert_eq!(url.host_str(), Some("127.0.0.1"), "{raw}");
+        }
+        for raw in ["http://10.1/v1", "http://167772161/v1", "http://0x0a000001/v1"] {
+            let err = validate_ai_url(raw).unwrap_err();
+            assert!(err.contains("localhost only"), "{raw}: {err}");
+        }
+    }
+
+    #[test]
+    fn whitespace_inside_the_url_does_not_smuggle_a_host() {
+        assert!(validate_ai_url("http://localhost\n.example.com/v1").is_err());
+        assert!(validate_ai_url("http://local host/v1").is_err());
+        assert!(validate_ai_url("https://api.example.com/v1?x=1#frag").is_ok());
     }
 
     #[test]
@@ -347,6 +383,19 @@ mod tests {
     async fn a_body_over_the_cap_is_refused() {
         let big = "x".repeat(2048);
         let (base, _rx) = serve_once(framed("HTTP/1.1 200 OK", &[("content-type", "text/plain")], &big));
+        let err = fetch_with_limits(post(format!("{base}/v1"), vec![], "{}"), 1024, TIMEOUT)
+            .await
+            .unwrap_err();
+        assert!(err.contains("larger than 1024 bytes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_body_over_the_cap_without_content_length_is_refused_while_streaming() {
+        // No content-length: the pre-check cannot fire, so the cap must hold in
+        // the chunk loop (#65 review, Gemini L1). The server closes to end the body.
+        let big = "y".repeat(2048);
+        let response = format!("HTTP/1.1 200 OK\r\ncontent-type: text/plain\r\nconnection: close\r\n\r\n{big}");
+        let (base, _rx) = serve_once(response);
         let err = fetch_with_limits(post(format!("{base}/v1"), vec![], "{}"), 1024, TIMEOUT)
             .await
             .unwrap_err();

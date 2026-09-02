@@ -268,6 +268,14 @@ describe("providerManager", () => {
       expect(createCustomProvider).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "", "gpt-4o-mini");
     });
 
+    it("a saved empty model name means the default, not an empty request (#65 N3)", async () => {
+      customSettings({ custom_model: "" });
+
+      await getActiveProvider();
+
+      expect(createCustomProvider).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "or-key", "gpt-4o-mini");
+    });
+
     it("throws NOT_CONFIGURED without a base URL — never a silent local default (REQ-1.2)", async () => {
       customSettings({ custom_base_url: null });
 

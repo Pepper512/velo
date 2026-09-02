@@ -87,18 +87,20 @@ export const rustFetch: typeof fetch = async (input, init) => {
     body = rawBody;
   }
 
-  if (init?.signal?.aborted) {
-    throw new DOMException("The operation was aborted.", "AbortError");
+  const signal = init?.signal ?? null;
+  if (signal?.aborted) {
+    throw abortError();
   }
 
   const request: AiFetchRequest = { url: requestUrl(input), method, headers, body };
-  let raw: unknown;
-  try {
-    raw = await invoke("ai_fetch", { request });
-  } catch (err) {
-    // The command rejects with a plain string; the SDK expects an Error.
+  // The command rejects with a plain string; the SDK expects an Error.
+  const work = invoke("ai_fetch", { request }).catch((err: unknown) => {
     throw err instanceof Error ? err : new Error(typeof err === "string" ? err : "ai_fetch failed");
-  }
+  });
+  // The SDK's timeout aborts the signal mid-flight; reject then rather than
+  // when Rust finishes (#65 review, Gemini N4). The Rust request itself runs
+  // to its own timeout — an IPC call cannot be cancelled — but nothing waits.
+  const raw: unknown = await raceWithAbort(work, signal);
 
   const parsed = AI_FETCH_RESPONSE.safeParse(raw);
   if (!parsed.success) {
@@ -113,3 +115,16 @@ export const rustFetch: typeof fetch = async (input, init) => {
 };
 
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+
+function abortError(): DOMException {
+  return new DOMException("The operation was aborted.", "AbortError");
+}
+
+function raceWithAbort<T>(work: Promise<T>, signal: AbortSignal | null): Promise<T> {
+  if (!signal) return work;
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(abortError());
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(resolve, reject).finally(() => signal.removeEventListener("abort", onAbort));
+  });
+}

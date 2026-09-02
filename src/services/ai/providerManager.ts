@@ -64,7 +64,8 @@ export async function getActiveProvider(): Promise<AiProviderClient> {
       throw new AiError("NOT_CONFIGURED", "custom endpoint base URL not configured");
     }
     const apiKey = (await getSecureSetting("custom_api_key")) ?? "";
-    const model = (await getSetting("custom_model")) ?? DEFAULT_MODELS.custom;
+    // `||`, not `??`: a saved empty string is "not chosen" (#65 review, Gemini N3).
+    const model = (await getSetting("custom_model")) || DEFAULT_MODELS.custom;
     const cacheKey = `${baseUrl}|${apiKey}|${model}`;
 
     if (cachedProvider && cachedProvider.name === "custom" && cachedProvider.key === cacheKey) {

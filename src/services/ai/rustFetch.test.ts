@@ -23,6 +23,10 @@ describe("isAllowedAiUrl", () => {
     "http://127.0.0.1:8080",
     "http://127.9.9.9/v1",
     "http://[::1]:11434/v1",
+    // Short and numeric IPv4 forms: the URL parser normalises them to 127.0.0.1.
+    "http://127.1/v1",
+    "http://0177.0.0.1/v1",
+    "http://2130706433/v1",
   ])("accepts %s", (raw) => {
     expect(isAllowedAiUrl(raw)).toBe(true);
   });
@@ -34,6 +38,12 @@ describe("isAllowedAiUrl", () => {
     "http://169.254.169.254/latest/meta-data",
     "http://localhost.example.com/v1",
     "http://127.0.0.1.example.com/v1",
+    "http://0.0.0.0/v1",
+    "http://localhost./v1",
+    "http://[::ffff:127.0.0.1]/v1",
+    "http://[::ffff:10.0.0.1]/v1",
+    "http://10.1/v1",
+    "http://167772161/v1",
     "ftp://files.example.com/",
     "javascript:alert(1)",
     "file:///etc/passwd",
@@ -116,6 +126,18 @@ describe("rustFetch", () => {
     mockInvoke.mockRejectedValue("http is allowed to localhost only; use https for a remote endpoint");
 
     await expect(rustFetch("http://api.example.com/v1")).rejects.toThrow(/localhost only/);
+  });
+
+  it("rejects at once when the signal aborts while the command is in flight (#65 N4)", async () => {
+    let finishRust: (v: unknown) => void = () => {};
+    mockInvoke.mockImplementation(() => new Promise((r) => { finishRust = r; }));
+    const controller = new AbortController();
+
+    const pending = rustFetch("https://api.deepseek.com/v1", { signal: controller.signal });
+    controller.abort();
+
+    await expect(pending).rejects.toThrow(/aborted/);
+    finishRust({ status: 200, headers: [], body: "{}" }); // the late result is dropped
   });
 
   it("does not call the command when the signal is already aborted", async () => {
