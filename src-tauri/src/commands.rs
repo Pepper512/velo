@@ -2,6 +2,9 @@ use crate::imap;
 use crate::imap::client as imap_client;
 use crate::imap::client::ImapSession;
 use crate::imap::pool::{AccountIdent, AccountKey, SessionPool};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use tauri::Emitter;
 use crate::imap::types::{
     DeltaCheckRequest, DeltaCheckResult, ImapConfig, ImapFetchResult, ImapFolder,
     ImapFolderSearchResult, ImapFolderStatus, ImapFolderSyncResult, ImapMessage,
@@ -72,9 +75,27 @@ pub async fn imap_session_open(
     let session = imap_client::connect(&config).await?;
     let id = new_session_id()?;
 
-    pool.insert(id.clone(), account_key(&config, version), session)
-        .map_err(|e| e.to_string())?;
-    Ok(id)
+    match pool.insert(id.clone(), account_key(&config, version), session) {
+        Ok(None) => Ok(id),
+        Ok(Some(victim)) => {
+            // The cap evicted the account's idlest idle session. It is in
+            // protocol sync and deserves a LOGOUT, but not on this command's
+            // clock: a stranger's slow server must not delay the open.
+            spawn_logout(victim);
+            Ok(id)
+        }
+        Err((err, session)) => {
+            // `StaleCredential`: a credential bump landed during the round trip
+            // above, so this session may be authenticated with the revoked
+            // credential and must not enter the map (SPEC-E2-3 REQ-2.1). The
+            // frontend reopens once against the new generation.
+            // `TooManySessions`: every session for the account is in flight.
+            // Either way the fresh session is ours to LOGOUT, and it is awaited
+            // here because the caller is already on the error path.
+            logout(session).await;
+            Err(err.to_string())
+        }
+    }
 }
 
 /// Close a session. Idempotent: an unknown id is not an error.
@@ -84,36 +105,68 @@ pub async fn imap_session_close(
     session_id: String,
 ) -> Result<(), String> {
     if let Some(session) = pool.remove(&session_id) {
-        logout_arc(session).await;
+        logout(session).await;
     }
     Ok(())
+}
+
+/// Window event fired after a credential invalidation has evicted (SPEC-E2-3
+/// REQ-3.1). Every window's session manager forgets the matching cached ids on
+/// receipt, so a pop-out does not have to fail one call to learn its id is gone.
+pub const SESSIONS_INVALIDATED_EVENT: &str = "velo-imap-sessions-invalidated";
+
+/// Payload of [`SESSIONS_INVALIDATED_EVENT`]: the account identity, never a
+/// session id and never a credential.
+#[derive(Clone, serde::Serialize)]
+pub struct SessionsInvalidated {
+    pub username: String,
+    pub host: String,
 }
 
 /// Invalidate every session for an account after a credential change.
 ///
 /// Called on password change (`clearConfigCache`) and on OAuth refresh failure,
-/// so a rotated credential is never served from the pool.
+/// so a rotated credential is never served from the pool. Emits
+/// [`SESSIONS_INVALIDATED_EVENT`] to every window once the LOGOUTs are done.
 #[tauri::command]
 pub async fn imap_sessions_invalidate(
+    app: tauri::AppHandle,
     pool: tauri::State<'_, ImapPool>,
     username: String,
     host: String,
 ) -> Result<(), String> {
-    for session in pool.bump_credential_version(&AccountIdent { username, host }) {
-        logout_arc(session).await;
+    let ident = AccountIdent { username, host };
+    for session in pool.bump_credential_version(&ident) {
+        logout(session).await;
     }
+    let _ = app.emit(
+        SESSIONS_INVALIDATED_EVENT,
+        SessionsInvalidated {
+            username: ident.username,
+            host: ident.host,
+        },
+    );
     Ok(())
 }
 
-/// Best-effort LOGOUT of a session nothing else holds.
+/// Budget for one LOGOUT. Bounded so that neither a close nor an invalidate
+/// IPC call, nor the reaper, can hang on a server that will not answer.
+pub const LOGOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Best-effort LOGOUT of a session the caller owns.
 ///
-/// Never fails the caller: the connection is being discarded either way, and a
-/// server that will not answer LOGOUT must not stall app exit.
-pub async fn logout_arc(session: std::sync::Arc<tokio::sync::Mutex<ImapSession>>) {
-    if let Ok(mutex) = std::sync::Arc::try_unwrap(session) {
-        let mut session = mutex.into_inner();
-        let _ = session.logout().await;
-    }
+/// Takes the session by value: the pool hands out owned sessions on every path
+/// that removes a clean one from the map, so there is no second handle that
+/// could make the LOGOUT conditional (SPEC-E2-3 REQ-1.4 — the conditional
+/// unwrap that used to skip it silently is gone). Never fails the caller: the
+/// connection is being discarded either way.
+pub async fn logout(mut session: ImapSession) {
+    let _ = tokio::time::timeout(LOGOUT_TIMEOUT, session.logout()).await;
+}
+
+/// LOGOUT on a background task, for callers that must not wait on it.
+fn spawn_logout(session: ImapSession) {
+    tauri::async_runtime::spawn(logout(session));
 }
 
 /// Run one IMAP operation against a pooled session.
@@ -123,23 +176,26 @@ pub async fn logout_arc(session: std::sync::Arc<tokio::sync::Mutex<ImapSession>>
 /// stays out of the map. That is the whole point of checkout-removes-entry, and
 /// it only works while the guard and the await share a scope.
 ///
-/// `Ok` puts the session back. Anything else leaves it evicted: an `Err` by way
-/// of `release_err`, a panic or a cancellation by way of `Drop`.
-async fn with_pooled_session<T, F, Fut>(
-    pool: &ImapPool,
-    session_id: &str,
-    op: F,
-) -> Result<T, String>
+/// The operation borrows the session exclusively through the guard — the pool
+/// owns it, nothing is cloned. The borrow is why `op` returns a boxed future:
+/// the future's lifetime is the borrow's, and a closure cannot spell that
+/// without the `for<'a>` on the bound.
+///
+/// `Ok` puts the session back — or, if its entry vanished while checked out,
+/// LOGOUTs the orphan on a background task (REQ-1.2). Anything else leaves it
+/// evicted: an `Err` by way of `release_err`, a panic or a cancellation by way
+/// of `Drop`.
+async fn with_pooled_session<T, F>(pool: &ImapPool, session_id: &str, op: F) -> Result<T, String>
 where
-    F: FnOnce(std::sync::Arc<tokio::sync::Mutex<ImapSession>>) -> Fut,
-    Fut: std::future::Future<Output = Result<T, String>>,
+    F: for<'a> FnOnce(&'a mut ImapSession) -> BoxFuture<'a, Result<T, String>>,
 {
-    let guard = pool.acquire(session_id).map_err(|e| e.to_string())?;
-    let session = guard.session().clone();
+    let mut guard = pool.acquire(session_id).map_err(|e| e.to_string())?;
 
-    match op(session).await {
+    match op(guard.session_mut()).await {
         Ok(value) => {
-            guard.release_ok();
+            if let Some(orphan) = guard.release_ok() {
+                spawn_logout(orphan);
+            }
             Ok(value)
         }
         Err(err) => {
@@ -155,22 +211,22 @@ where
 /// Only the removal commands want this — they warn once per account when the
 /// server has no UIDPLUS — and they used to read it off the `ImapConfig` they no
 /// longer receive.
-async fn with_pooled_session_for<T, F, Fut>(
+async fn with_pooled_session_for<T, F>(
     pool: &ImapPool,
     session_id: &str,
     op: F,
 ) -> Result<T, String>
 where
-    F: FnOnce(std::sync::Arc<tokio::sync::Mutex<ImapSession>>, AccountIdent) -> Fut,
-    Fut: std::future::Future<Output = Result<T, String>>,
+    F: for<'a> FnOnce(&'a mut ImapSession, AccountIdent) -> BoxFuture<'a, Result<T, String>>,
 {
-    let guard = pool.acquire(session_id).map_err(|e| e.to_string())?;
-    let session = guard.session().clone();
+    let mut guard = pool.acquire(session_id).map_err(|e| e.to_string())?;
     let account = guard.account().clone();
 
-    match op(session, account).await {
+    match op(guard.session_mut(), account).await {
         Ok(value) => {
-            guard.release_ok();
+            if let Some(orphan) = guard.release_ok() {
+                spawn_logout(orphan);
+            }
             Ok(value)
         }
         Err(err) => {
@@ -185,9 +241,8 @@ pub async fn imap_list_folders(
     pool: tauri::State<'_, ImapPool>,
     session_id: String,
 ) -> Result<Vec<ImapFolder>, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::list_folders(&mut session).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::list_folders(session).await }.boxed()
     })
     .await
 }
@@ -205,9 +260,8 @@ pub async fn imap_fetch_messages(
 
     let uid_set = uid_set(&uids);
 
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        match imap_client::fetch_messages(&mut session, &folder, &uid_set).await {
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { match imap_client::fetch_messages(session, &folder, &uid_set).await {
             Ok(r) => Ok(r),
             // Decision 4(a): the raw fallback needs a credential, and the pool
             // deliberately holds none. Rather than keep a password on this
@@ -223,7 +277,7 @@ pub async fn imap_fetch_messages(
                 Err(NEED_RAW_FALLBACK.to_string())
             }
             Err(imap_client::FetchError::Other(msg)) => Err(msg),
-        }
+        } }.boxed()
     })
     .await
 }
@@ -274,9 +328,8 @@ pub async fn imap_fetch_new_uids(
     folder: String,
     since_uid: u32,
 ) -> Result<Vec<u32>, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::fetch_new_uids(&mut session, &folder, since_uid).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::fetch_new_uids(session, &folder, since_uid).await }.boxed()
     })
     .await
 }
@@ -287,9 +340,8 @@ pub async fn imap_search_all_uids(
     session_id: String,
     folder: String,
 ) -> Result<Vec<u32>, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::search_all_uids(&mut session, &folder).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::search_all_uids(session, &folder).await }.boxed()
     })
     .await
 }
@@ -301,9 +353,8 @@ pub async fn imap_fetch_message_body(
     folder: String,
     uid: u32,
 ) -> Result<ImapMessage, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::fetch_message_body(&mut session, &folder, uid).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::fetch_message_body(session, &folder, uid).await }.boxed()
     })
     .await
 }
@@ -315,9 +366,8 @@ pub async fn imap_fetch_raw_message(
     folder: String,
     uid: u32,
 ) -> Result<String, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::fetch_raw_message(&mut session, &folder, uid).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::fetch_raw_message(session, &folder, uid).await }.boxed()
     })
     .await
 }
@@ -344,9 +394,8 @@ pub async fn imap_set_flags(
 
     let uid_set = uid_set(&uids);
 
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::set_flags(&mut session, &folder, &uid_set, add, &flags).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::set_flags(session, &folder, &uid_set, add, &flags).await }.boxed()
     })
     .await
 }
@@ -367,19 +416,19 @@ pub async fn imap_move_messages(
 
     let uid_set = uid_set(&uids);
 
-    with_pooled_session_for(&pool, &session_id, |session, account| async move {
-        let result = {
-            let mut session = session.lock().await;
-            imap_client::move_messages(&mut session, &folder, &uid_set, &destination).await?
-        };
+    with_pooled_session_for(&pool, &session_id, |session, account| {
+        async move {
+            let result = imap_client::move_messages(session, &folder, &uid_set, &destination).await?;
 
-        // The identity comes off the guard now: this command no longer receives
-        // an `ImapConfig` to read it from.
-        if !result.expunged {
-            imap::caps::warn_uidplus_missing_once(&account.username, &account.host);
+            // The identity comes off the guard now: this command no longer receives
+            // an `ImapConfig` to read it from.
+            if !result.expunged {
+                imap::caps::warn_uidplus_missing_once(&account.username, &account.host);
+            }
+
+            Ok(result)
         }
-
-        Ok(result)
+        .boxed()
     })
     .await
 }
@@ -398,17 +447,17 @@ pub async fn imap_delete_messages(
 
     let uid_set = uid_set(&uids);
 
-    with_pooled_session_for(&pool, &session_id, |session, account| async move {
-        let result = {
-            let mut session = session.lock().await;
-            imap_client::delete_messages(&mut session, &folder, &uid_set).await?
-        };
+    with_pooled_session_for(&pool, &session_id, |session, account| {
+        async move {
+            let result = imap_client::delete_messages(session, &folder, &uid_set).await?;
 
-        if !result.expunged {
-            imap::caps::warn_uidplus_missing_once(&account.username, &account.host);
+            if !result.expunged {
+                imap::caps::warn_uidplus_missing_once(&account.username, &account.host);
+            }
+
+            Ok(result)
         }
-
-        Ok(result)
+        .boxed()
     })
     .await
 }
@@ -419,9 +468,8 @@ pub async fn imap_get_folder_status(
     session_id: String,
     folder: String,
 ) -> Result<ImapFolderStatus, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::get_folder_status(&mut session, &folder).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::get_folder_status(session, &folder).await }.boxed()
     })
     .await
 }
@@ -434,9 +482,8 @@ pub async fn imap_fetch_attachment(
     uid: u32,
     part_id: String,
 ) -> Result<String, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::fetch_attachment(&mut session, &folder, uid, &part_id).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::fetch_attachment(session, &folder, uid, &part_id).await }.boxed()
     })
     .await
 }
@@ -463,9 +510,8 @@ pub async fn imap_append_message(
     // raw_message is base64url-encoded; decode it
     let raw_bytes = base64url_decode(&raw_message)?;
 
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::append_message(&mut session, &folder, flags.as_deref(), &raw_bytes).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::append_message(session, &folder, flags.as_deref(), &raw_bytes).await }.boxed()
     })
     .await
 }
@@ -485,9 +531,8 @@ pub async fn imap_search_folder(
     folder: String,
     since_date: Option<String>,
 ) -> Result<ImapFolderSearchResult, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::search_folder(&mut session, &folder, since_date).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::search_folder(session, &folder, since_date).await }.boxed()
     })
     .await
 }
@@ -500,9 +545,8 @@ pub async fn imap_count_not_deleted(
     session_id: String,
     folder: String,
 ) -> Result<u32, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::count_not_deleted(&mut session, &folder).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::count_not_deleted(session, &folder).await }.boxed()
     })
     .await
 }
@@ -523,9 +567,8 @@ pub async fn imap_search_uids_present(
     let uid_set = uid_set(&uids);
     crate::imap::wire::validate_uid_set(&uid_set)?;
 
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::search_uids_present(&mut session, &folder, &uid_set).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::search_uids_present(session, &folder, &uid_set).await }.boxed()
     })
     .await
 }
@@ -538,9 +581,8 @@ pub async fn imap_sync_folder(
     batch_size: u32,
     since_date: Option<String>,
 ) -> Result<ImapFolderSyncResult, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::sync_folder(&mut session, &folder, batch_size, since_date).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::sync_folder(session, &folder, batch_size, since_date).await }.boxed()
     })
     .await
 }
@@ -564,9 +606,8 @@ pub async fn imap_delta_check(
     session_id: String,
     folders: Vec<DeltaCheckRequest>,
 ) -> Result<Vec<DeltaCheckResult>, String> {
-    with_pooled_session(&pool, &session_id, |session| async move {
-        let mut session = session.lock().await;
-        imap_client::delta_check_folders(&mut session, &folders).await
+    with_pooled_session(&pool, &session_id, |session| {
+        async move { imap_client::delta_check_folders(session, &folders).await }.boxed()
     })
     .await
 }
@@ -588,4 +629,138 @@ pub async fn smtp_test_connection(
     tests: tauri::State<'_, ConnectionTests>,
 ) -> Result<SmtpSendResult, String> {
     run_cancellable(&tests, test_id, async move { smtp_client::test_connection(&config).await }).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn issued_session_ids_pass_the_pools_shape_check() {
+        // SPEC-E2-3 REQ-4.2: the validator in `acquire` must accept what
+        // `imap_session_open` hands out, or every session would be
+        // `NoSuchSession` on its first use.
+        for _ in 0..16 {
+            let id = new_session_id().expect("getrandom");
+            assert!(crate::imap::pool::is_well_formed_id(&id), "{id}");
+        }
+    }
+
+    #[test]
+    fn the_stale_credential_sentinel_matches_the_frontend() {
+        assert_eq!(
+            crate::imap::pool::PoolError::StaleCredential.to_string(),
+            "velo:pool:StaleCredential"
+        );
+    }
+}
+
+/// The live halves of E2's Done-when 9 and 10 (SPEC-E2-3 REQ-5), against the
+/// Dovecot harness (`docs/testing/dovecot`) — `cargo test --locked -- --ignored
+/// live_dovecot`. Unit tests prove the map's rules; these prove the two things
+/// only a real server can: that one pooled session serves two folders without
+/// bleeding data between them, and that a reaped session's LOGOUT is answered
+/// inside the budget.
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use crate::imap::pool::IDLE_TIMEOUT;
+
+    fn harness_config() -> ImapConfig {
+        ImapConfig {
+            host: "127.0.0.1".to_string(),
+            port: 11143,
+            security: "none".to_string(),
+            username: "velo".to_string(),
+            password: "velo-test-only".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs: false,
+        }
+    }
+
+    /// Done-when 9: operations on folder A then folder B over one pooled
+    /// session return B's data — the every-op-re-SELECTs invariant, on a real
+    /// server, through the real guard.
+    #[tokio::test]
+    #[ignore = "needs the Dovecot harness on 127.0.0.1:11143"]
+    async fn live_dovecot_one_pooled_session_isolates_folders() {
+        let config = harness_config();
+        let pool = ImapPool::new();
+        let version = pool.credential_version(&AccountIdent {
+            username: config.username.clone(),
+            host: config.host.clone(),
+        });
+        let session = imap_client::connect(&config).await.expect("connect");
+        let id = new_session_id().unwrap();
+        let inserted = pool.insert(id.clone(), account_key(&config, version), session);
+        assert!(matches!(inserted, Ok(None)), "first insert is under the cap");
+
+        let folder_b = format!("E2Iso{}", std::process::id());
+        let marker = format!("<e2-iso-{}@example.com>", std::process::id());
+
+        // Folder A (INBOX) first, then B, on the same checked-out session.
+        let (inbox_uids, b_uids, b_body) =
+            with_pooled_session(&pool, &id, |session| {
+                let folder_b = folder_b.clone();
+                let marker = marker.clone();
+                async move {
+                    let inbox = imap_client::search_all_uids(session, "INBOX").await?;
+                    let _ = session.create(&folder_b).await; // may exist from a prior run
+                    let raw = format!(
+                        "From: a@example.com\r\nTo: b@example.com\r\nSubject: E2 isolation\r\n\
+                         Message-ID: {marker}\r\n\r\nfolder B only\r\n"
+                    );
+                    imap_client::append_message(session, &folder_b, None, raw.as_bytes()).await?;
+                    let b = imap_client::search_all_uids(session, &folder_b).await?;
+                    let newest = *b.iter().max().expect("the appended message is in B");
+                    let body = imap_client::fetch_raw_message(session, &folder_b, newest).await?;
+                    Ok((inbox, b, body))
+                }
+                .boxed()
+            })
+            .await
+            .expect("operations over one session");
+
+        assert!(!b_uids.is_empty(), "B has the appended message");
+        assert!(b_body.contains(&marker), "the fetch after switching folders returns B's data");
+        // INBOX's UID list was taken before B was touched; if the session had
+        // leaked B's selection into INBOX's query the two would not be
+        // independent. They were fetched through one session, in sequence.
+        eprintln!("INBOX uids={inbox_uids:?}, {folder_b} uids={b_uids:?}");
+
+        for session in pool.drain() {
+            logout(session).await;
+        }
+    }
+
+    /// Done-when 10, live half: a reaped session is handed out for LOGOUT, and
+    /// the server answers the LOGOUT inside `LOGOUT_TIMEOUT`.
+    #[tokio::test]
+    #[ignore = "needs the Dovecot harness on 127.0.0.1:11143"]
+    async fn live_dovecot_reaped_session_is_logged_out_within_budget() {
+        let config = harness_config();
+        let pool = ImapPool::new();
+        let session = imap_client::connect(&config).await.expect("connect");
+        let id = new_session_id().unwrap();
+        pool.insert(id.clone(), account_key(&config, 0), session)
+            .map_err(|(e, _)| e)
+            .expect("insert");
+
+        // Not idle yet.
+        assert!(pool.reap(IDLE_TIMEOUT).is_empty());
+
+        // Idle "long enough": a zero timeout reaps everything not in flight.
+        let mut reaped = pool.reap(std::time::Duration::ZERO);
+        assert_eq!(reaped.len(), 1, "the idle session is handed out, not dropped");
+        let mut session = reaped.pop().unwrap();
+
+        let started = std::time::Instant::now();
+        let answered = tokio::time::timeout(LOGOUT_TIMEOUT, session.logout()).await;
+        assert!(
+            matches!(answered, Ok(Ok(()))),
+            "the server answered LOGOUT inside the budget: {answered:?}"
+        );
+        assert!(started.elapsed() < LOGOUT_TIMEOUT);
+        assert_eq!(pool.acquire(&id).unwrap_err(), crate::imap::pool::PoolError::NoSuchSession);
+    }
 }

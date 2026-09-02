@@ -1244,3 +1244,40 @@
   recorded for follow-up:** disable "Trust this sender" when SPF/DKIM failed (a spoofed
   `From:` could allowlist a real address); a trust from one message should dismiss sibling
   banners in the thread. Raw output in `docs/reviews/2026-09-03-pr71-gemini-raw.md`.
+- **2026-09-03 — E2 part 3 built (SPEC-E2-3, PR #73), Tier 2**, on Jim's roadmap
+  instruction and "go". Plan (`docs/briefs/2026-09-03-e2-part3-pool-carry.md`, threat pass
+  and rollback) committed and the PR opened **before any code**. **What the re-grep found
+  beyond the carry list:** (1) the carry item said a bump could evict a session opened on
+  the new credential (one wasted login) — the other interleaving is worse: a bump landing
+  during `imap_session_open`'s one round trip inserts an entry tagged with the *retired*
+  generation, authenticated with whichever credential the frontend had, and it survives
+  until the next bump or reap; (2) `imap_session_close` and `imap_sessions_invalidate`
+  awaited an **unbounded** LOGOUT while the reaper and exit hook bounded theirs; (3) the
+  cap's victim and a clean release into a vanished entry were dropped without LOGOUT, and
+  so was a fresh session refused by `TooManySessions`. **Decisions:** the pool owns
+  `Option<S>` (no `Arc`, no async mutex) and moves the session into the guard and back;
+  every path that removes a *clean* session from the map returns it to the caller —
+  `insert` returns the cap's victim, `release_ok` returns an orphan, refusals hand the
+  session back with the error (`Result<Option<S>, (PoolError, S)>`); one `logout(session)`
+  helper, 3 s budget, replaces `logout_arc`; `with_pooled_session` hands the operation
+  `&mut ImapSession` through a `BoxFuture` (one allocation per command, nothing beside the
+  round trip), guard still held across the await; **`StaleCredential`** is a new pool error
+  and `velo:pool:StaleCredential` sentinel — `insert` refuses any generation that is not
+  current, the open LOGOUTs the refused session, the frontend rebuilds the config and opens
+  once more; `bump_credential_version` filters `< next` explicitly; the frontend waits for
+  its own pending invalidation before opening; Rust emits `velo-imap-sessions-invalidated`
+  `{username, host}` after evicting and each window's session manager forgets matching
+  ids (listener registered lazily on first `withSession`, because pop-outs mount their own
+  roots); session ids are refused before the map unless exactly 32 lowercase hex. **Kept
+  as designed:** error / panic / cancellation still drop the socket without LOGOUT (module
+  doc says why). **Live halves:** Done-when 9 and 10 are `#[ignore]` tests against the
+  Dovecot harness (`mod live_tests`, README section); **Docker is down on this machine, so
+  they compile but were not run** — recorded, not claimed. Done-when 2 stays manual. TDD:
+  pool tests 19 → 31 plus 2 in `commands.rs` (Rust 159 → 171, 3 ignored); nine
+  `sessionManager` tests, seven of which were run against the committed module first and
+  failed there. `poolBoundary.test.ts` unchanged in substance (one mock line for the event
+  plugin). Gates: 172 files / 2,258 tests, tsc, clippy, graph, docs. **Process note:** the
+  format-on-save hook runs `rustfmt` on any `.rs` file edited, and the crate is not
+  rustfmt-clean — a stray `cargo fmt` reformatted twelve untouched files, which were
+  restored, and `commands.rs` was rebuilt from the committed file by script so the reviewer
+  diff carries only the change. No dependency, no capability, no schema.

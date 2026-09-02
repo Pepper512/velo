@@ -21,6 +21,18 @@ vi.mock("./tauriCommands", () => ({
   imapSessionsInvalidate: vi.fn(),
 }));
 
+// The cross-window invalidation listener (SPEC-E2-3 REQ-3). The handler is
+// captured so a test can deliver the event Rust would emit.
+const { mockListen, listeners } = vi.hoisted(() => {
+  const listeners: Array<{ name: string; handler: (event: { payload: unknown }) => void }> = [];
+  const mockListen = vi.fn(async (name: string, handler: (event: { payload: unknown }) => void) => {
+    listeners.push({ name, handler });
+    return () => {};
+  });
+  return { mockListen, listeners };
+});
+vi.mock("@tauri-apps/api/event", () => ({ listen: mockListen }));
+
 vi.mock("../db/accounts", () => ({
   getAccount: vi.fn(),
 }));
@@ -385,5 +397,139 @@ describe("credential invalidation", () => {
   it("does nothing for an account whose identity was never learned", async () => {
     await invalidateAccountCredentials("acc-never-opened");
     expect(mockInvalidate).not.toHaveBeenCalled();
+  });
+});
+
+describe("an open waits for this window's pending invalidation (SPEC-E2-3 REQ-2.4)", () => {
+  it("does not open until the invalidation has been answered", async () => {
+    await withSession("acc-1", "sync", {}, async (id) => id);
+
+    let settleInvalidate!: () => void;
+    mockInvalidate.mockImplementation(
+      () => new Promise<void>((resolve) => (settleInvalidate = resolve)),
+    );
+    // Fire-and-forget, as `clearConfigCache` does.
+    void invalidateAccountCredentials("acc-1");
+
+    const opened = withSession("acc-1", "sync", {}, async (id) => id);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+
+    settleInvalidate();
+    expect(await opened).toBe("session-2");
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+    // Order on the wire: the bump reached Rust before the open did.
+    expect(mockInvalidate.mock.invocationCallOrder[0]).toBeLessThan(
+      mockOpen.mock.invocationCallOrder[1]!,
+    );
+  });
+
+  it("still opens when the invalidation itself fails", async () => {
+    // A failed invalidation only costs a stale session the reaper takes; it
+    // must not wedge every later open for the account.
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    mockInvalidate.mockRejectedValueOnce(new Error("ipc down"));
+    await expect(invalidateAccountCredentials("acc-1")).rejects.toThrow("ipc down");
+
+    const id = await withSession("acc-1", "sync", {}, async (i) => i);
+
+    expect(id).toBe("session-2");
+  });
+});
+
+describe("a stale credential generation at open (SPEC-E2-3 REQ-2.2)", () => {
+  it("rebuilds the config and opens exactly once more", async () => {
+    // Rust refused to pool the session: a bump landed during the open's round
+    // trip. The reopen must carry a freshly built config, not the one that
+    // may hold the retired credential.
+    mockBuildConfig
+      .mockResolvedValueOnce({ ...CONFIG, password: "retired" })
+      .mockResolvedValueOnce({ ...CONFIG, password: "current" });
+    mockOpen
+      .mockRejectedValueOnce(poolError("StaleCredential"))
+      .mockResolvedValueOnce("session-fresh");
+
+    const id = await withSession("acc-1", "sync", {}, async (i) => i);
+
+    expect(id).toBe("session-fresh");
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+    expect(mockOpen).toHaveBeenLastCalledWith(expect.objectContaining({ password: "current" }));
+    expect(mockBuildConfig).toHaveBeenCalledTimes(2);
+  });
+
+  it("surfaces a second refusal rather than looping", async () => {
+    mockOpen.mockRejectedValue(poolError("StaleCredential"));
+
+    await expect(withSession("acc-1", "sync", {}, async (i) => i)).rejects.toThrow(
+      "velo:pool:StaleCredential",
+    );
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not mistake an IMAP error that mentions the sentinel for a refusal", async () => {
+    mockOpen.mockRejectedValueOnce(new Error("LOGIN failed: velo:pool:StaleCredential"));
+
+    await expect(withSession("acc-1", "sync", {}, async (i) => i)).rejects.toThrow(
+      "LOGIN failed",
+    );
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("another window's invalidation (SPEC-E2-3 REQ-3)", () => {
+  function deliver(payload: { username: string; host: string }): void {
+    const registered = listeners.filter((l) => l.name === "velo-imap-sessions-invalidated");
+    expect(registered.length).toBeGreaterThan(0);
+    for (const l of registered) l.handler({ payload });
+  }
+
+  it("registers the listener once per window, on first use", async () => {
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await withSession("acc-1", "interactive", {}, async (id) => id);
+
+    const names = listeners.map((l) => l.name);
+    expect(names.filter((n) => n === "velo-imap-sessions-invalidated")).toHaveLength(1);
+  });
+
+  it("forgets both of the matching account's ids, so the next call reopens", async () => {
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await withSession("acc-1", "interactive", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+
+    deliver({ username: "user@example.com", host: "imap.example.com" });
+
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await withSession("acc-1", "interactive", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(4);
+    // Forgotten, not closed: Rust already logged the sessions out.
+    expect(mockClose).not.toHaveBeenCalled();
+  });
+
+  it("leaves accounts with a different identity alone", async () => {
+    mockGetAccount.mockImplementation(async (id: string) => ({ id, auth_method: "password" }) as never);
+    mockBuildConfig.mockImplementation(async (account: { id: string }) => ({
+      ...CONFIG,
+      username: `${account.id}@example.com`,
+    }));
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    await withSession("acc-2", "sync", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+
+    deliver({ username: "acc-1@example.com", host: "imap.example.com" });
+
+    await withSession("acc-2", "sync", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(2);
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores an identity this window never opened", async () => {
+    await withSession("acc-1", "sync", {}, async (id) => id);
+
+    deliver({ username: "stranger@example.com", host: "imap.example.com" });
+
+    await withSession("acc-1", "sync", {}, async (id) => id);
+    expect(mockOpen).toHaveBeenCalledTimes(1);
   });
 });

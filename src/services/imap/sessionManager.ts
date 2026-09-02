@@ -38,7 +38,19 @@
  * caller puts two server-visible commands in one `fn`, a retry re-runs the
  * first — which is the duplicate bug arriving by a different road. Such a caller
  * must pass `retrySafe: false`.
+ *
+ * # Credential generations (SPEC-E2-3)
+ *
+ * Rust refuses to pool a session opened against a credential generation that a
+ * bump has since retired (`StaleCredential`): the open raced an invalidation and
+ * the session may carry the revoked credential. This module makes that race
+ * rare — an open waits for this window's own pending invalidation first — and
+ * harmless when it still happens across windows: one rebuilt config, one more
+ * open, never a loop. A Rust-emitted window event carries an invalidation to
+ * the other windows, so a pop-out forgets its ids instead of failing a call to
+ * learn they are gone.
  */
+import { listen } from "@tauri-apps/api/event";
 import type { DbAccount } from "../db/accounts";
 import { getAccount } from "../db/accounts";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
@@ -69,6 +81,19 @@ export type SessionId = string;
 const NO_SUCH_SESSION = "velo:pool:NoSuchSession";
 const SESSION_BUSY = "velo:pool:SessionBusy";
 const TOO_MANY_SESSIONS = "velo:pool:TooManySessions";
+const STALE_CREDENTIAL = "velo:pool:StaleCredential";
+
+/**
+ * Rust emits this to every window after a credential invalidation has evicted
+ * (SPEC-E2-3 REQ-3.1). The payload is the account identity — never a session
+ * id, never a credential.
+ */
+export const SESSIONS_INVALIDATED_EVENT = "velo-imap-sessions-invalidated";
+
+interface SessionsInvalidatedPayload {
+  username: string;
+  host: string;
+}
 
 /**
  * Pause before retrying a busy session.
@@ -96,19 +121,44 @@ const sessions = new Map<CacheKey, SessionId>();
 /** Accounts whose identity we know, so invalidation can reach the pool. */
 const accountIdents = new Map<string, { username: string; host: string }>();
 
+/**
+ * Invalidations this window has fired and not yet heard back on, by account.
+ *
+ * An open for the same account waits on this first (REQ-2.4): otherwise the
+ * open could read the generation the bump is about to retire, and Rust would
+ * refuse the session it just paid a login for.
+ */
+const pendingInvalidations = new Map<string, Promise<void>>();
+
 function cacheKey(accountId: string, kind: SessionKind): CacheKey {
   return `${accountId}::${kind}`;
 }
 
 async function openSession(accountId: string, kind: SessionKind): Promise<SessionId> {
+  // A failed invalidation must not block the open — it only costs a stale
+  // session the reaper will take — so the wait swallows the rejection; the
+  // invalidation's own caller still sees it.
+  await pendingInvalidations.get(accountId)?.catch(() => undefined);
+
   const account: DbAccount | null = await getAccount(accountId);
   if (!account) throw new Error(`Account ${accountId} not found`);
 
   // Always through the fresh-token builder (Decision 3): a pooled session may
   // outlive the access token that opened it, but it must never be *opened*
   // with a stale one.
-  const config = await buildImapConfigWithFreshToken(account);
-  const id = await imapSessionOpen(config);
+  let config = await buildImapConfigWithFreshToken(account);
+  let id: SessionId;
+  try {
+    id = await imapSessionOpen(config);
+  } catch (err) {
+    // Rust refused to pool the session because a credential bump landed during
+    // the open's round trip (another window's invalidation, typically). The
+    // config is rebuilt so the reopen carries the current credential, and it is
+    // tried exactly once — a second refusal surfaces.
+    if (!isPoolError(err, STALE_CREDENTIAL)) throw err;
+    config = await buildImapConfigWithFreshToken(account);
+    id = await imapSessionOpen(config);
+  }
 
   sessions.set(cacheKey(accountId, kind), id);
   accountIdents.set(accountId, { username: config.username, host: config.host });
@@ -123,6 +173,43 @@ async function sessionFor(accountId: string, kind: SessionKind): Promise<Session
 /** Forget a cached id without asking Rust to close it (it is already gone). */
 function forget(accountId: string, kind: SessionKind): void {
   sessions.delete(cacheKey(accountId, kind));
+}
+
+/** Forget both of an account's cached ids. */
+function forgetAccount(accountId: string): void {
+  forget(accountId, "sync");
+  forget(accountId, "interactive");
+}
+
+let invalidationListenerStarted = false;
+
+/**
+ * Hear other windows' invalidations (REQ-3.2). Registered once per window,
+ * lazily, so every window that does mail work gets it — pop-outs mount their
+ * own roots and never run `App`'s startup effect.
+ *
+ * Only the identity travels; each window maps it onto the accounts *it* has
+ * opened. An identity this window never opened is a no-op.
+ */
+function ensureInvalidationListener(): void {
+  if (invalidationListenerStarted) return;
+  invalidationListenerStarted = true;
+  listen<SessionsInvalidatedPayload>(SESSIONS_INVALIDATED_EVENT, (event) => {
+    onSessionsInvalidated(event.payload);
+  }).catch((err: unknown) => {
+    // Without the listener a pop-out still self-heals through NoSuchSession;
+    // it just pays one failed call first. Worth a line, not a failure.
+    console.warn("[sessionManager] Could not listen for session invalidations:", err);
+  });
+}
+
+/** The listener's body, exported for tests and free of any Tauri surface. */
+export function onSessionsInvalidated(payload: SessionsInvalidatedPayload): void {
+  for (const [accountId, ident] of accountIdents) {
+    if (ident.username === payload.username && ident.host === payload.host) {
+      forgetAccount(accountId);
+    }
+  }
 }
 
 export interface WithSessionOptions {
@@ -150,6 +237,7 @@ export async function withSession<T>(
   opts: WithSessionOptions,
   fn: (id: SessionId) => Promise<T>,
 ): Promise<T> {
+  ensureInvalidationListener();
   const retrySafe = opts.retrySafe ?? true;
 
   let id: SessionId;
@@ -215,13 +303,21 @@ export async function closeAccountSessions(accountId: string): Promise<void> {
  * which is the revocation case: a pooled session outlives the token that opened
  * it, so revocation has to reach the pool explicitly or the connection keeps
  * working after the user revoked it.
+ *
+ * The call is recorded as pending until Rust answers, so an open for the same
+ * account from this window waits behind it (REQ-2.4).
  */
 export async function invalidateAccountCredentials(accountId: string): Promise<void> {
   const ident = accountIdents.get(accountId);
-  forget(accountId, "sync");
-  forget(accountId, "interactive");
+  forgetAccount(accountId);
   if (!ident) return;
-  await imapSessionsInvalidate(ident.username, ident.host);
+  const pending = imapSessionsInvalidate(ident.username, ident.host).finally(() => {
+    if (pendingInvalidations.get(accountId) === pending) {
+      pendingInvalidations.delete(accountId);
+    }
+  });
+  pendingInvalidations.set(accountId, pending);
+  await pending;
 }
 
 /** Close everything. App quit, and the reset point for tests. */
@@ -229,6 +325,7 @@ export async function closeAllSessions(): Promise<void> {
   const ids = [...sessions.values()];
   sessions.clear();
   accountIdents.clear();
+  pendingInvalidations.clear();
   await Promise.all(ids.map((id) => imapSessionClose(id)));
 }
 

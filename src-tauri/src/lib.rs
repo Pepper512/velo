@@ -67,12 +67,6 @@ const EXIT_LOGOUT_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from
 /// How often the reaper looks for idle sessions.
 const REAPER_INTERVAL: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// Per-session budget for the reaper's LOGOUT.
-///
-/// Per-session here, unlike at exit: this runs on a background task with
-/// nothing waiting on it, so a slow server delays only its own cleanup.
-const REAPER_LOGOUT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Set explicit AUMID on Windows so toast notifications show "Velo"
@@ -222,12 +216,12 @@ pub fn run() {
                         let expired = handle
                             .state::<commands::ImapPool>()
                             .reap(crate::imap::pool::IDLE_TIMEOUT);
+                        // `logout` bounds itself (`commands::LOGOUT_TIMEOUT`),
+                        // per session: this runs on a background task with
+                        // nothing waiting on it, so a slow server delays only
+                        // its own cleanup.
                         for session in expired {
-                            let _ = tokio::time::timeout(
-                                REAPER_LOGOUT_TIMEOUT,
-                                commands::logout_arc(session),
-                            )
-                            .await;
+                            commands::logout(session).await;
                         }
                     }
                 });
@@ -393,7 +387,7 @@ pub fn run() {
                 // servers must not cost N timeouts before the app can quit.
                 // The LOGOUTs run concurrently for the same reason.
                 tauri::async_runtime::block_on(async {
-                    let logouts = sessions.into_iter().map(commands::logout_arc);
+                    let logouts = sessions.into_iter().map(commands::logout);
                     let _ = tokio::time::timeout(
                         EXIT_LOGOUT_TOTAL_TIMEOUT,
                         futures::future::join_all(logouts),
