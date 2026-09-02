@@ -789,3 +789,15 @@
   toolchain's default, accepted by the MSRV job). Raw outputs in
   `docs/reviews/2026-09-02-pr54-{gemini-round1,gemini,grok}-raw.md`. Gates after all three
   rounds: Rust 123, frontend 2,045, clippy/tsc/docs/graph clean.
+- **2026-09-02 ~23:00 UTC — #241 built (parenthesised `UID FETCH` attribute lists)** on Jim's
+  instruction, on its own branch alongside #280. Verified first: RFC 3501 §6.4.5 requires
+  parentheses around two or more fetch attributes; three `uid_fetch` sites in
+  `imap/client.rs` sent a bare list (initial-sync batch, single-message fetch, delta-sync
+  chunk), two sent a single attribute (valid), and the raw diagnostic already used the RFC form.
+  Plan committed first (`docs/briefs/2026-09-02-241-uid-fetch-parenthesised.md`, Tier 2 —
+  Rust IMAP). **Decisions:** the two lists become `FETCH_FULL` / `FETCH_UID_FLAGS_BODY`
+  constants (plus `FETCH_BODY`) and the diagnostic uses the same constant; a **guard test scans
+  the client source** for every `.uid_fetch(` site and fails on a bare multi-attribute list —
+  and refuses to pass by finding fewer than the five known sites. TDD: the guard red on the
+  first bare list (line 289), then green. No live Stalwart to run against; the reporter's
+  re-test is recorded as open.

@@ -253,6 +253,7 @@ Key tables (37 total): `accounts` (with `provider` "gmail_api"|"imap", IMAP/SMTP
 - **Windows AUMID**: Set explicitly in Rust for proper notification identity (`com.velomail.app`)
 - **OAuth (Gmail)**: Localhost server tries ports 17248-17251. PKCE flow, no client secret. Client ID stored in SQLite settings table, configured by user in Settings
 - **IMAP message IDs**: Format is `imap-{accountId}-{folder}-{uid}` — not the RFC Message-ID header
+- **IMAP FETCH attribute lists**: two or more attributes must be parenthesised (RFC 3501 §6.4.5) — use the `FETCH_*` constants at the top of `src-tauri/src/imap/client.rs`; a guard test scans every `.uid_fetch(` site. Dovecot and Gmail tolerate the bare list, Stalwart answers without the body (#241)
 - **IMAP security mapping**: UI shows "SSL/TLS", "STARTTLS", "None" but config stores "ssl", "starttls", "none"
 - **IMAP UIDVALIDITY**: If UIDVALIDITY changes on a folder, all cached UIDs are invalid — triggers full resync of that folder
 - **IMAP folders vs labels**: IMAP has no native labels; folders are mapped to Gmail-style labels via `folderMapper.ts` using special-use flags and well-known name matching
