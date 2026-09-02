@@ -673,6 +673,19 @@
      The Tier-2 human-merge carve-out stays **not adopted**.
   8. **EX-007 distribution:** not yet — revisit with an ADR after the P0/P1 bug queue (#297, #240)
      lands. EX-007 stays open to its 2027-03-01 expiry.
+- **2026-09-02 ~14:30 UTC — F-4 part 3 built on Jim's "continue building"** (the roadmap's first
+  item). Plan written before code as §Part 3 of the part-2 plan file. Three pieces, none deleting a
+  message row: the REQ-2.3 `NOT DELETED` belt (one Rust command, a per-folder pass clock, runs every
+  10th pass only where the no-UIDPLUS signature shows and only when the gate would open), the REQ-4
+  reconcile queue op (targeted `UID SEARCH UID <set>` after an unknown-outcome move/delete; absent →
+  suspect, present → notice; per-folder compaction with merged UIDs and max attempts; user ops
+  first; three strikes → forced full list + notice), and the "folder gone" path (two consecutive
+  LIST misses remove a folder's sync state so attestation resumes; **messages kept**, user told).
+  Migration 27 adds three advisory counters. Decisions in the build: the belt cannot age suspects
+  (it does not know *which* UIDs vanished), so it only ever saves the list when nothing did; the
+  queue processor's strike rule is applied to reconcile ops only — user ops keep `incrementRetry`'s
+  behaviour; REQ-4.4's "queue UI label" reduces to `params.kind = "repair"` because the queue
+  surface is a count badge, not a per-op list.
   - **Merged by the seat as `ef7c91c`** after Jim corrected the deferral: *"read your rules, you
     are in charge of the merges, commits, push, pr, etc."* The standing rule (*Agents perform the
     merge*, with its preconditions) stands; Opus 5's recommended Tier-2 carve-out is **not

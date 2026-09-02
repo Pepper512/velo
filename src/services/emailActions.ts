@@ -2,6 +2,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import { RECONCILE_OP, enqueueReconcileOps, runReconcileOp } from "@/services/imap/reconcileOp";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
 
@@ -364,11 +365,37 @@ export async function executeEmailAction(
       return { success: true, queued: true, nextThreadId };
     }
 
+    // F-4 REQ-4.1: the server may or may not have done it. Never retry (that
+    // duplicates mail); instead queue a targeted look at the source folder so
+    // the inconsistency gets an observer. Interleaves with the notice path.
+    if (classified.type === "indeterminate" && isMoveOrDelete(action)) {
+      try {
+        await enqueueReconcileOps(accountId, action.messageIds);
+      } catch (queueErr) {
+        console.warn("[emailActions] Could not queue a reconcile op:", queueErr);
+      }
+    }
+
     // Permanent error — revert optimistic update
     revertOptimisticUpdate(action);
     console.error(`Email action ${action.type} failed permanently:`, err);
     return { success: false, error: classified.message };
   }
+}
+
+function isMoveOrDelete(
+  action: EmailAction,
+): action is Extract<EmailAction, { messageIds: string[] }> & {
+  type: "archive" | "trash" | "permanentDelete" | "spam" | "moveToFolder";
+} {
+  return (
+    (action.type === "archive" ||
+      action.type === "trash" ||
+      action.type === "permanentDelete" ||
+      action.type === "spam" ||
+      action.type === "moveToFolder") &&
+    "messageIds" in action
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -380,6 +407,11 @@ export async function executeQueuedAction(
   operationType: string,
   params: Record<string, unknown>,
 ): Promise<void> {
+  // F-4 REQ-4.5: a reconcile op is a read-repair, not a provider action.
+  if (operationType === RECONCILE_OP) {
+    await runReconcileOp(accountId, params);
+    return;
+  }
   const action = { type: operationType, ...params } as EmailAction;
   await executeViaProvider(accountId, action);
 }

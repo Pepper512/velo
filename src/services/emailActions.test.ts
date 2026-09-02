@@ -20,6 +20,11 @@ vi.mock("@/services/email/providerFactory", () => ({
   getEmailProvider: vi.fn(),
 }));
 
+vi.mock("@/services/imap/reconcileOp", () => ({
+  RECONCILE_OP: "reconcile",
+  enqueueReconcileOps: vi.fn(async () => 1),
+  runReconcileOp: vi.fn(async () => {}),
+}));
 vi.mock("@/services/db/pendingOperations", () => ({
   enqueuePendingOperation: vi.fn(() => Promise.resolve("op-1")),
 }));
@@ -141,6 +146,42 @@ describe("emailActions", () => {
       expect(result.success).toBe(true);
       expect(result.queued).toBe(true);
       expect(enqueuePendingOperation).toHaveBeenCalled();
+    });
+  });
+
+  describe("unknown outcome → reconcile op (F-4 REQ-4.1)", () => {
+    it("queues a targeted re-check for a move whose server outcome is unknown, and does not retry the move", async () => {
+      const { enqueueReconcileOps } = await import("@/services/imap/reconcileOp");
+      vi.mocked(useUIStore.getState).mockReturnValue({ isOnline: true } as never);
+      mockProvider.archive.mockRejectedValueOnce(
+        new Error("VELO_OUTCOME_UNKNOWN: UID MOVE timed out after 30s. The move may already have completed on the server."),
+      );
+
+      const result = await archiveThread("acct-1", "t1", ["imap-acct-1-INBOX-5"]);
+
+      expect(result.success).toBe(false);
+      expect(enqueuePendingOperation).not.toHaveBeenCalled();
+      expect(enqueueReconcileOps).toHaveBeenCalledWith("acct-1", ["imap-acct-1-INBOX-5"]);
+    });
+
+    it("does not queue a re-check for a flag change", async () => {
+      const { enqueueReconcileOps } = await import("@/services/imap/reconcileOp");
+      vi.mocked(useUIStore.getState).mockReturnValue({ isOnline: true } as never);
+      mockProvider.star.mockRejectedValueOnce(new Error("VELO_OUTCOME_UNKNOWN: odd"));
+
+      await starThread("acct-1", "t1", ["imap-acct-1-INBOX-5"], true);
+
+      expect(enqueueReconcileOps).not.toHaveBeenCalled();
+    });
+
+    it("routes a queued reconcile op to its handler instead of a provider action", async () => {
+      const { runReconcileOp } = await import("@/services/imap/reconcileOp");
+      const { executeQueuedAction } = await import("./emailActions");
+
+      await executeQueuedAction("acct-1", "reconcile", { folder: "INBOX", uids: [5], kind: "repair" });
+
+      expect(runReconcileOp).toHaveBeenCalledWith("acct-1", { folder: "INBOX", uids: [5], kind: "repair" });
+      expect(mockProvider.archive).not.toHaveBeenCalled();
     });
   });
 

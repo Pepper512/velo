@@ -9,6 +9,7 @@ import {
   compactQueue,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
+import { RECONCILE_OP, degradeReconcileOp } from "../imap/reconcileOp";
 import { classifyError } from "@/utils/networkErrors";
 
 const BATCH_SIZE = 50;
@@ -42,14 +43,26 @@ async function processQueue(): Promise<void> {
       await deleteOperation(op.id);
     } catch (err) {
       const classified = classifyError(err);
+      // Reconcile ops carry their own strike rule (three, REQ-4.3) and must
+      // degrade visibly when spent; user ops keep `incrementRetry`'s handling.
+      const exhausted = op.operation_type === RECONCILE_OP && op.retry_count + 1 >= op.max_retries;
 
-      if (classified.isRetryable) {
+      if (classified.isRetryable && !exhausted) {
         // Increment retry with exponential backoff
         await updateOperationStatus(op.id, "pending", classified.message);
         await incrementRetry(op.id);
       } else {
         // Permanent failure
         await updateOperationStatus(op.id, "failed", classified.message);
+        // F-4 REQ-4.3: a reconcile op that gives up must not vanish — the
+        // folder gets a forced full list on the next pass and the user hears.
+        if (op.operation_type === RECONCILE_OP) {
+          try {
+            await degradeReconcileOp(op.account_id, JSON.parse(op.params));
+          } catch (degradeErr) {
+            console.warn("[queueProcessor] Could not degrade a reconcile op:", degradeErr);
+          }
+        }
       }
     }
   }

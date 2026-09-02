@@ -852,6 +852,30 @@ const MIGRATIONS = [
       ALTER TABLE folder_sync_state ADD COLUMN flagged_not_expunged INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    version: 27,
+    description:
+      "Vanished-UID reconciliation (F-4 part 3): per-folder pass counter, force-list flag, missing-folder counter",
+    // Expand step. Three small per-folder counters on `folder_sync_state`:
+    // `reconcile_passes` — how many delta passes have run for the folder,
+    //   the clock REQ-2.3's "once per N passes" belt ticks on;
+    // `force_list` — set by a `reconcile` op that exhausted its attempts
+    //   (REQ-4.3), read and cleared by the next pass, which then lists the
+    //   folder regardless of the gate;
+    // `missing_passes` — consecutive passes on which the server's LIST did
+    //   not return this folder. At two the folder is taken as gone on the
+    //   server: its sync state row is removed (so it stops blocking
+    //   attestation) and its cached messages are kept and reported. Never
+    //   on one observation (the same two-pass rule as a vanished UID).
+    //
+    // Contract step (not run here): `ALTER TABLE folder_sync_state DROP COLUMN
+    // reconcile_passes / force_list / missing_passes`. All three are advisory.
+    sql: `
+      ALTER TABLE folder_sync_state ADD COLUMN reconcile_passes INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE folder_sync_state ADD COLUMN force_list INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE folder_sync_state ADD COLUMN missing_passes INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ];
 
 /**

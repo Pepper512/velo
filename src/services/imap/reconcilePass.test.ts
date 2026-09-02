@@ -38,6 +38,8 @@ import {
   deleteConfirmedAfterUserApproval,
   finishReconcilePass,
   invalidateFolderSuspects,
+  beltDue,
+  noteFolderMissing,
   markFetchCompleted,
   reconcileFolderList,
   shouldListFolder,
@@ -123,7 +125,7 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
     raw()
       .prepare("INSERT INTO folder_sync_state (account_id, folder_path, uidvalidity, last_uid) VALUES (?, ?, ?, 0)")
       .run(ACC, INBOX, GEN);
-    useUIStore.setState({ reconcileStops: [] });
+    useUIStore.setState({ reconcileStops: [], notices: [] });
     vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "debug").mockImplementation(() => {});
@@ -470,6 +472,40 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
     expect(summary.deleted).toEqual([]);
     expect(summary.stops).toEqual([{ folder: INBOX, confirmed: 15, localRows: 20 }]);
     expect(liveUids()).toHaveLength(20);
+  });
+
+  // ---------- Part 3: the belt clock and the "folder gone" path ----------
+
+  it("beltDue fires only every Nth pass and only where the no-UIDPLUS signature shows", () => {
+    expect(beltDue(10, 3)).toBe(true);
+    expect(beltDue(20, 1)).toBe(true);
+    expect(beltDue(9, 3)).toBe(false);
+    expect(beltDue(10, 0)).toBe(false);
+    expect(beltDue(0, 3)).toBe(false);
+  });
+
+  it("a folder missing from LIST is only counted the first time, and removed with its messages kept the second", async () => {
+    seedFolder(3);
+    // A stop and suspects exist for the folder, to prove they are voided.
+    await passWith([2, 3]);
+    const stateRow = () =>
+      raw()
+        .prepare<[string], { missing_passes: number } | undefined>(
+          "SELECT missing_passes FROM folder_sync_state WHERE folder_path = ?",
+        )
+        .get(INBOX);
+
+    expect(await noteFolderMissing(ACC, INBOX)).toBe("counted");
+    expect(stateRow()).toEqual({ missing_passes: 1 });
+    expect(suspects()).toHaveLength(1);
+    expect(liveUids()).toHaveLength(3);
+
+    expect(await noteFolderMissing(ACC, INBOX)).toBe("removed");
+    expect(stateRow()).toBeUndefined();
+    expect(suspects()).toEqual([]);
+    expect(liveUids()).toHaveLength(3); // cached mail kept
+    expect(useUIStore.getState().notices[0]?.text).toContain("no longer exists on the server");
+    expect(useUIStore.getState().notices[0]?.text).toContain("3 cached messages are kept");
   });
 
   // ---------- F-5 interaction ----------

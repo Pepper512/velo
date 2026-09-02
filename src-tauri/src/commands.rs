@@ -485,6 +485,44 @@ pub async fn imap_search_folder(
     .await
 }
 
+/// F-4 REQ-2.3: the cheap belt for no-UIDPLUS accounts — how many messages
+/// are not `\Deleted`.
+#[tauri::command]
+pub async fn imap_count_not_deleted(
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
+    folder: String,
+) -> Result<u32, String> {
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::count_not_deleted(&mut session, &folder).await
+    })
+    .await
+}
+
+/// F-4 REQ-4.1: after a move or delete whose outcome was unknown, which of
+/// these UIDs are still in the source folder. Validated before checkout so a
+/// bad set costs nothing.
+#[tauri::command]
+pub async fn imap_search_uids_present(
+    pool: tauri::State<'_, ImapPool>,
+    session_id: String,
+    folder: String,
+    uids: Vec<u32>,
+) -> Result<Vec<u32>, String> {
+    if uids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let uid_set = uid_set(&uids);
+    crate::imap::wire::validate_uid_set(&uid_set)?;
+
+    with_pooled_session(&pool, &session_id, |session| async move {
+        let mut session = session.lock().await;
+        imap_client::search_uids_present(&mut session, &folder, &uid_set).await
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn imap_sync_folder(
     pool: tauri::State<'_, ImapPool>,

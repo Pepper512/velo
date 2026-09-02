@@ -31,7 +31,12 @@ import {
 } from "../db/messages";
 import { getThreadMessageCount } from "../db/threads";
 import { getPendingOpsForResource } from "../db/pendingOperations";
-import { getFolderSyncState, setFlaggedNotExpunged } from "../db/folderSyncState";
+import {
+  bumpFolderMissing,
+  deleteFolderSyncState,
+  getFolderSyncState,
+  setFlaggedNotExpunged,
+} from "../db/folderSyncState";
 import { useUIStore } from "@/stores/uiStore";
 import {
   applySearchAll,
@@ -159,6 +164,42 @@ export async function reconcileFolderList(
 export function markFetchCompleted(pass: ReconcilePass, folder: string): void {
   const entry = pass.listed.get(folder);
   if (entry) entry.fetchCompleted = true;
+}
+
+/** REQ-2.3: the belt runs once every N passes, only where the no-UIDPLUS signature shows. */
+export const BELT_EVERY_N_PASSES = 10;
+
+export function beltDue(passNumber: number, flaggedNotExpunged: number): boolean {
+  return flaggedNotExpunged > 0 && passNumber > 0 && passNumber % BELT_EVERY_N_PASSES === 0;
+}
+
+/**
+ * The "folder gone" path (part 3, plan §C). Called for every folder that has
+ * sync state but that this pass's LIST did not return. The first miss only
+ * counts (the folder is unchecked this pass, so nothing deletes); the second
+ * consecutive miss takes the folder as gone on the server: its sync state row
+ * goes (so attestation resumes), its suspects and any stop are voided, and the
+ * user is told. **Its cached messages are kept** — deleting them on LIST
+ * evidence alone would be the mass removal REQ-1 forbids.
+ */
+export async function noteFolderMissing(
+  accountId: string,
+  folder: string,
+): Promise<"counted" | "removed"> {
+  const misses = await bumpFolderMissing(accountId, folder);
+  if (misses < 2) {
+    console.warn(`[reconcile] ${folder} was not in the server's folder list (miss ${misses} of 2)`);
+    return "counted";
+  }
+  const kept = (await getLiveMessagesInFolder(accountId, folder)).length;
+  await deleteFolderSyncState(accountId, folder);
+  await purgeOtherGenerations(accountId, folder, 0);
+  useUIStore.getState().clearReconcileStop(accountId, folder);
+  useUIStore.getState().addNotice({
+    text: `${folder} no longer exists on the server; its ${kept} cached message${kept === 1 ? "" : "s"} ${kept === 1 ? "is" : "are"} kept`,
+  });
+  console.warn(`[reconcile] ${folder} taken as gone on the server after two consecutive misses; sync state removed, ${kept} message(s) kept`);
+  return "removed";
 }
 
 /**
