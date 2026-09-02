@@ -765,10 +765,13 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "AI overview",
         summary: "Choose your AI provider and bring your own key.",
         description:
-          "The app supports three AI providers: Anthropic Claude, OpenAI GPT, and Google Gemini. You bring your own API key, which means your email data is sent directly to the provider's API — there's no middleman or third-party server involved. API keys are stored securely in your local database. AI features include thread summaries, smart replies, compose assistance, text transformation, and natural language inbox queries. You can enable or disable AI features globally, and choose which provider to use.",
+          "The app supports Anthropic Claude, OpenAI GPT, Google Gemini, GitHub Copilot, xAI Grok, a local Ollama or LM Studio server, and any custom OpenAI-compatible endpoint (OpenRouter, DeepSeek, a gateway on your network). You bring your own API key, which means your email data is sent directly to the provider's API — there's no middleman or third-party server involved. API keys are stored securely in your local database. AI features include thread summaries, smart replies, compose assistance, text transformation, and natural language inbox queries. You can enable or disable AI features globally, and choose which provider to use.",
         tips: [
           { text: "Add your API key in Settings > AI." },
-          { text: "Supported providers: Claude, OpenAI, and Gemini." },
+          { text: "Supported providers: Claude, OpenAI, Gemini, Copilot, xAI, a local server, and a custom OpenAI-compatible endpoint." },
+          {
+            text: "Custom endpoint: enter the base URL (for OpenRouter, https://openrouter.ai/api/v1; for DeepSeek, https://api.deepseek.com/v1), an API key if the service needs one, and the model name. The URL must be https, or http to this machine only; redirects are never followed.",
+          },
           {
             text: "Choose which model to use for each provider in Settings (e.g., Claude Haiku 4.5, GPT-4o Mini, Gemini 2.5 Flash).",
           },
@@ -1303,7 +1306,7 @@ export const CONTEXTUAL_TIPS: Record<string, ContextualTip> = {
   },
   "ai-provider": {
     title: "AI provider",
-    body: "Choose between Claude, OpenAI, or Gemini. Bring your own API key — your data is sent directly to the provider, never through a middleman.",
+    body: "Choose Claude, OpenAI, Gemini, Copilot, xAI, a local server, or a custom OpenAI-compatible endpoint such as OpenRouter. Bring your own API key — your data is sent directly to the provider, never through a middleman.",
     helpTopic: "ai-features",
   },
   "search-operators": {

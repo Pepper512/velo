@@ -34,12 +34,18 @@ vi.mock("./providers/copilotProvider", () => ({
   clearCopilotProvider: vi.fn(),
 }));
 
+vi.mock("./providers/customProvider", () => ({
+  createCustomProvider: vi.fn(() => createMockAiProvider("custom response")),
+  clearCustomProvider: vi.fn(),
+}));
+
 import { getSetting } from "@/services/db/settings";
 import { createClaudeProvider, clearClaudeProvider } from "./providers/claudeProvider";
 import { createOpenAIProvider } from "./providers/openaiProvider";
 import { createGeminiProvider } from "./providers/geminiProvider";
 import { createOllamaProvider } from "./providers/ollamaProvider";
 import { createCopilotProvider } from "./providers/copilotProvider";
+import { createCustomProvider, clearCustomProvider } from "./providers/customProvider";
 import {
   getActiveProvider,
   getActiveProviderName,
@@ -225,6 +231,80 @@ describe("providerManager", () => {
       await getActiveProvider();
       await getActiveProvider();
       expect(createOllamaProvider).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // SPEC-209 — the custom OpenAI-compatible endpoint.
+  describe("custom endpoint (SPEC-209)", () => {
+    function customSettings(overrides: Record<string, string | null> = {}) {
+      const values: Record<string, string | null> = {
+        ai_provider: "custom",
+        custom_base_url: "https://openrouter.ai/api/v1",
+        custom_api_key: "or-key",
+        custom_model: "openai/gpt-4o-mini",
+        ...overrides,
+      };
+      mockGetSetting.mockImplementation(async (key: string) => values[key] ?? null);
+    }
+
+    it("resolves the name", async () => {
+      customSettings();
+      expect(await getActiveProviderName()).toBe("custom");
+    });
+
+    it("creates the provider from base URL, key and model (REQ-1.1)", async () => {
+      customSettings();
+
+      await getActiveProvider();
+
+      expect(createCustomProvider).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "or-key", "openai/gpt-4o-mini");
+    });
+
+    it("a blank key and an unset model still build — placeholder key, default model", async () => {
+      customSettings({ custom_api_key: null, custom_model: null });
+
+      await getActiveProvider();
+
+      expect(createCustomProvider).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "", "gpt-4o-mini");
+    });
+
+    it("a saved empty model name means the default, not an empty request (#65 N3)", async () => {
+      customSettings({ custom_model: "" });
+
+      await getActiveProvider();
+
+      expect(createCustomProvider).toHaveBeenCalledWith("https://openrouter.ai/api/v1", "or-key", "gpt-4o-mini");
+    });
+
+    it("throws NOT_CONFIGURED without a base URL — never a silent local default (REQ-1.2)", async () => {
+      customSettings({ custom_base_url: null });
+
+      await expect(getActiveProvider()).rejects.toThrow("base URL not configured");
+      expect(createCustomProvider).not.toHaveBeenCalled();
+    });
+
+    it("isAiAvailable follows the base URL, not a key (REQ-1.2)", async () => {
+      customSettings({ custom_api_key: null });
+      expect(await isAiAvailable()).toBe(true);
+
+      customSettings({ custom_base_url: null });
+      expect(await isAiAvailable()).toBe(false);
+    });
+
+    it("caches on base URL, key and model, and clearProviderClients clears it", async () => {
+      customSettings();
+      await getActiveProvider();
+      await getActiveProvider();
+      expect(createCustomProvider).toHaveBeenCalledTimes(1);
+
+      customSettings({ custom_model: "deepseek-chat" });
+      await getActiveProvider();
+      expect(createCustomProvider).toHaveBeenCalledTimes(2);
+
+      clearProviderClients();
+      expect(clearCustomProvider).toHaveBeenCalled();
+      await getActiveProvider();
+      expect(createCustomProvider).toHaveBeenCalledTimes(3);
     });
   });
 

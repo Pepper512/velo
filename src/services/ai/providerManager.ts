@@ -9,8 +9,10 @@ import { createGeminiProvider } from "./providers/geminiProvider";
 import { createOllamaProvider, clearOllamaProvider } from "./providers/ollamaProvider";
 import { createCopilotProvider, clearCopilotProvider } from "./providers/copilotProvider";
 import { createXaiProvider, clearXaiProvider } from "./providers/xaiProvider";
+import { createCustomProvider, clearCustomProvider } from "./providers/customProvider";
+import type { FreeformProvider } from "./types";
 
-const API_KEY_SETTINGS: Record<Exclude<AiProvider, "ollama">, SecureSettingKey> = {
+const API_KEY_SETTINGS: Record<Exclude<AiProvider, FreeformProvider>, SecureSettingKey> = {
   claude: "claude_api_key",
   openai: "openai_api_key",
   gemini: "gemini_api_key",
@@ -27,7 +29,8 @@ export async function getActiveProviderName(): Promise<AiProvider> {
     setting === "gemini" ||
     setting === "ollama" ||
     setting === "copilot" ||
-    setting === "xai"
+    setting === "xai" ||
+    setting === "custom"
   ) {
     return setting;
   }
@@ -50,6 +53,27 @@ export async function getActiveProvider(): Promise<AiProviderClient> {
 
     const client = createOllamaProvider(serverUrl, model);
     cachedProvider = { name: "ollama", key: cacheKey, client };
+    return client;
+  }
+
+  if (providerName === "custom") {
+    // SPEC-209: the endpoint is the configuration; no URL means not configured
+    // — never a silent local default (that is the Ollama provider's job).
+    const baseUrl = await getSetting("custom_base_url");
+    if (!baseUrl) {
+      throw new AiError("NOT_CONFIGURED", "custom endpoint base URL not configured");
+    }
+    const apiKey = (await getSecureSetting("custom_api_key")) ?? "";
+    // `||`, not `??`: a saved empty string is "not chosen" (#65 review, Gemini N3).
+    const model = (await getSetting("custom_model")) || DEFAULT_MODELS.custom;
+    const cacheKey = `${baseUrl}|${apiKey}|${model}`;
+
+    if (cachedProvider && cachedProvider.name === "custom" && cachedProvider.key === cacheKey) {
+      return cachedProvider.client;
+    }
+
+    const client = createCustomProvider(baseUrl, apiKey, model);
+    cachedProvider = { name: "custom", key: cacheKey, client };
     return client;
   }
 
@@ -100,6 +124,9 @@ export async function isAiAvailable(): Promise<boolean> {
       const serverUrl = await getSetting("ollama_server_url");
       return !!serverUrl;
     }
+    if (providerName === "custom") {
+      return !!(await getSetting("custom_base_url"));
+    }
 
     const keySetting = API_KEY_SETTINGS[providerName];
     const key = await getSecureSetting(keySetting);
@@ -116,4 +143,5 @@ export function clearProviderClients(): void {
   clearOllamaProvider();
   clearCopilotProvider();
   clearXaiProvider();
+  clearCustomProvider();
 }

@@ -982,3 +982,93 @@
   thread without `INBOX` and with `SNOOZED` (`applySnoozeOverride`), so the count is exact;
   bulk actions loop over `executeEmailAction`, N events collapse into one debounced query.
   Raw output in `docs/reviews/2026-09-03-pr63-gemini-raw.md`.
+- **2026-09-03 — #209/#265 built (custom OpenAI-compatible endpoint through a validated Rust
+  fetch)** on Jim's instruction, bug-fix queue item 9, **Tier 2** (a new `#[tauri::command]`
+  taking a user-controlled URL; credentials in flight; the AI output boundary). Jim's decision 2
+  applied: **`ai_fetch` in Rust** (`src-tauri/src/ai_fetch.rs`) — `https:` to any host or
+  `http:` to loopback only (`localhost`, `127.0.0.0/8`, `::1`), no user-info, GET/POST only,
+  four request headers forwarded (`authorization`, `content-type`, `accept`, `user-agent`),
+  `redirect::Policy::none()` with a 3xx refused *without* its `Location`, three response
+  headers returned, 8 MiB body cap, 120 s timeout; errors and the log line carry the host and
+  status, never the URL's query (`reqwest::Error::without_url`). Verified first: every cloud
+  provider uses the OpenAI SDK through the webview's `fetch`, gated by the static CSP
+  `connect-src` — a user-typed host cannot be added at runtime; only Ollama uses the http
+  plugin, whose scope is `https://*` + loopback, checked on the given URL only, redirects
+  followed. Upstream PR #242 (`custom-provider`) reviewed: its provider/settings shape and key
+  names adopted; its transport (the plugin, redirects followed, no validation), its default
+  base URL `http://localhost:11434/v1` (a silent duplicate of Ollama — unset now means
+  `NOT_CONFIGURED`) and its interface change across every provider rejected; the API key made
+  optional (a LAN gateway; a placeholder is sent, the SDK refuses an empty string).
+  TypeScript: `rustFetch` (a `fetch`-shaped wrapper over `invoke`; the result is **zod-
+  validated** before a `Response` is built — an `invoke()` result is a boundary; 204/205/304
+  built with a null body), `customProvider` (SDK with `fetch: rustFetch`), `custom` in
+  `AiProvider`/settings keys/provider manager, a settings card mirroring Ollama's with an
+  inline pre-check of the same rule, help text naming OpenRouter (#265) and DeepSeek.
+  **No dependency added** (reqwest 0.12, serde, tokio, zod already direct). **No capability
+  entry** (app commands ride `core:default`, like `db_tx_*`); `tauri.conf.json` and
+  `capabilities/default.json` byte-identical. TDD: Rust — the URL table (accepts/refuses,
+  including `localhost.example.com` and the AWS metadata address) and five socket tests
+  against a `TcpListener` on 127.0.0.1 (302 refused and not disclosed, header allow-lists in
+  both directions, body cap, 401 relayed, connection error without the URL); TS — the
+  mirrored URL table, `rustFetch` shape/response/malformed/abort, the provider's config and
+  cache, the manager's six `custom` cases. Threat pass and rollback in the brief. Gates:
+  cargo test 143 (+10), clippy `-D warnings`, 168 files / 2,165 tests, tsc, graph, docs.
+  Both review legs to follow.
+- **2026-09-03 — PR #65 (#209/#265) review, three legs.** Gemini 3.7 Flash: APPROVE WITH
+  NITS (2L 3N). Grok 4.6: CHANGES REQUESTED (2M 5L 3N) — twelve minutes on a 1,400-line
+  prompt; **Jim (2026-09-02): "replace Grok with Gemini-2.7 from now on if Grok is slow"** —
+  no such model in `agy` (3.6/3.7/3.8 Flash, 3.1 Pro), so the second leg ran on
+  **Gemini 3.1 Pro (high)**, a different family from the first leg: APPROVE WITH NITS (2N).
+  A same-vendor second leg is weaker evidence than a cross-vendor one; Grok's late verdict
+  is taken as the third. **Adopted:** Gemini L1 — a socket test with no `content-length`
+  proves the cap holds in the chunk loop; L2 — one process-wide `reqwest::Client` in a
+  `OnceLock` carrying the redirect policy, timeout per request; N3 — `||` for a saved empty
+  model name; N4 — `rustFetch` races `invoke` against the `AbortSignal` (the Rust request
+  runs to its own timeout — IPC cannot be cancelled; Gemini 3.1 Pro N2 says the same and
+  accepts it); Grok 1/2 + Gemini N5 + Gemini 3.1 Pro N1 — the URL tables on both sides now
+  pin the parser-differential forms: `127.1`, `0177.0.0.1`, `2130706433`, `0x7f.1` accepted
+  as 127.0.0.1; `10.1`, `167772161`, `0x0a000001`, `0.0.0.0`, `[::]`, `[::ffff:127.0.0.1]`,
+  `[::ffff:10.0.0.1]`, `[::ffff:169.254.169.254]`, `[fe80::1]`, `[fd00::1]`, `127` (= 0.0.0.127),
+  `0127.0.0.1` (octal, = 87.0.0.1), `localhost.`, `localhost%2eexample.com`, `%0d%0a`
+  refused, whitespace cannot smuggle a host; Grok 3 — a **304 is not a redirect** and passes
+  with its empty body (socket test); Grok 5 — the **request** body and each header value are
+  capped too (8 MiB / 8 KiB, refused before any connection); Grok 6 — the three AI cards'
+  `catch` now goes through `describeError` (redaction) like the success path; Grok 8 — any
+  `@` in the authority as written is refused on both sides, so the empty `https://:@host/`
+  form cannot be normalised past the check, while `@` in a path or query is fine; Grok 9 —
+  a `Request` input's body is read when `init.body` is absent; Grok 10 — the card says Azure's
+  `api-key` header is not supported. **Declined with reasons:** Grok 4 (clamp `retry-after`,
+  `maxRetries` 0/1, reject non-UTF-8) — the OpenAI SDK ignores a `retry-after` above 60 s and
+  uses its own backoff, retries are the same two every provider makes, and a lossy body only
+  fails JSON parsing the same way a rejection would; Grok 7 (bind the command to the saved
+  base URL's origin, or an explicit capability) — Rust has no access to the settings table,
+  app commands cannot be permission-gated without generating permissions, and the reach is
+  strictly narrower than the http plugin's scope already granted to the same JavaScript —
+  recorded as the threat pass's residual; Grok Q3 (system proxy on loopback) — `reqwest`
+  honours `NO_PROXY`; a user's own proxy configuration intercepting their own loopback is
+  their configuration, not a boundary the app owns. **Questions answered:** plugin scope is
+  `http://*` + `https://*` at this pin (Grok Q1); https to a private address stays allowed and
+  a self-signed certificate must be in the OS trust store (`native-tls`) or the gateway used
+  over `http://127.0.0.1` (Gemini Q2, Grok Q2); 8 MiB of response text is far beyond any
+  chat completion (Gemini 3.1 Pro Q1). Raw outputs in `docs/reviews/2026-09-03-pr65-{gemini,
+  grok,gemini31pro}-raw.md`.
+- **2026-09-03 — PR #65: Gemini 3.8 Flash, two runs, and the comparison Jim asked for.**
+  Jim: *"see if gemini 3.8 flash is available"* — it is (`gemini-3.8-flash-high`), and it is
+  the standing second leg from now on when Grok is slow. Run A, on the tree after the
+  Gemini/Grok adoptions: APPROVE WITH NITS (1L 3N) — **adopted** hex IPv4 forms in the TS
+  table, octet bounds in the TS loopback check (never looser than Rust's parser), a
+  `retry-after` assertion in the socket echo test; the LOW (a trickle to the 120 s timeout
+  after the webview aborted) is the residual already recorded. Run B, on the **same diff
+  Grok and Gemini 3.1 Pro saw** (`fe67514..31574df`): APPROVE WITH NITS (1M 3L 2N) —
+  in-flight abort (its MEDIUM; the other legs' NIT), the chunk-loop cap test, `retry-after`,
+  `0.0.0.0`/`[::]` rows, client pooling, and one finding **nobody else made**: Test
+  Connection read the saved values, so a test before Save tested the old endpoint or failed
+  `NOT_CONFIGURED` — **adopted**: the custom card tests the fields as typed. **How it did
+  against Grok on the same diff:** it matched Grok on five items and was minutes rather than
+  twelve, but missed four code fixes Grok found — the 304 pass-through, the request body and
+  header caps, the unredacted `catch`, and the empty-user-info form — and the broader
+  parser-differential rows. It matched Gemini 3.7 Flash almost item for item. **Reading:**
+  Grok remains the deeper second leg when time allows; 3.8 Flash is the fast fallback Jim
+  asked for, not a replacement in depth — same-vendor evidence on top of that. Raw outputs
+  in `docs/reviews/2026-09-03-pr65-gemini38-raw.md` (run A) and `…-gemini38cmp-raw.md`
+  (run B).

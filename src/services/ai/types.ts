@@ -1,5 +1,8 @@
 import type { SettingKey } from "@/constants/settingsKeys";
-export type AiProvider = "claude" | "openai" | "gemini" | "ollama" | "copilot" | "xai";
+export type AiProvider = "claude" | "openai" | "gemini" | "ollama" | "copilot" | "xai" | "custom";
+
+/** Providers that take a free-text model name and no key list: their card is their own. */
+export type FreeformProvider = "ollama" | "custom";
 
 export interface AiCompletionRequest {
   systemPrompt: string;
@@ -35,6 +38,8 @@ export const DEFAULT_MODELS: Record<AiProvider, string> = {
   ollama: "llama3.2",
   copilot: "openai/gpt-4o-mini",
   xai: "grok-4.6",
+  // A user-typed endpoint: the most widely mirrored model id is the sane guess.
+  custom: "gpt-4o-mini",
 };
 
 export interface ModelOption {
@@ -42,7 +47,7 @@ export interface ModelOption {
   label: string;
 }
 
-export const PROVIDER_MODELS: Record<Exclude<AiProvider, "ollama">, ModelOption[]> = {
+export const PROVIDER_MODELS: Record<Exclude<AiProvider, FreeformProvider>, ModelOption[]> = {
   claude: [
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5 (fast)" },
     { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
@@ -81,4 +86,5 @@ export const MODEL_SETTINGS: Record<Exclude<AiProvider, "ollama">, SettingKey> =
   gemini: "gemini_model",
   copilot: "copilot_model",
   xai: "xai_model",
+  custom: "custom_model",
 };
