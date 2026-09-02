@@ -62,16 +62,16 @@ describe("xaiProvider", () => {
     await expect(provider.complete({ systemPrompt: "s", userContent: "u" })).resolves.toBe("");
   });
 
-  it("reports a failed connection as false rather than throwing", async () => {
+  it("reports a failed connection with its reason rather than throwing (SPEC-280 REQ-2.1)", async () => {
     mockCreate.mockRejectedValue(new Error("401 Unauthorized"));
     const provider = createXaiProvider("bad-key", "grok-4.6");
-    await expect(provider.testConnection()).resolves.toBe(false);
+    await expect(provider.testConnection()).resolves.toEqual({ ok: false, error: "401 Unauthorized" });
   });
 
-  it("reports a working connection as true", async () => {
+  it("reports a working connection", async () => {
     mockCreate.mockResolvedValue({ choices: [{ message: { content: "hi" } }] });
     const provider = createXaiProvider("good-key", "grok-4.6");
-    await expect(provider.testConnection()).resolves.toBe(true);
+    await expect(provider.testConnection()).resolves.toEqual({ ok: true });
   });
 
   it("reuses the client for the same key and rebuilds after a clear", () => {

@@ -13,8 +13,8 @@
  * validated before any field is read, and a reply with no text part is a typed
  * error rather than an `undefined` flowing into the compose path.
  */
-import type { AiProviderClient, AiCompletionRequest } from "../types";
-import { AiError } from "../errors";
+import type { AiProviderClient, AiCompletionRequest, ConnectionTestResult } from "../types";
+import { AiError, describeError } from "../errors";
 
 const API_BASE = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -122,7 +122,7 @@ export function createGeminiProvider(apiKey: string, modelId: string): AiProvide
       return text;
     },
 
-    async testConnection(): Promise<boolean> {
+    async testConnection(): Promise<ConnectionTestResult> {
       try {
         // A 2xx already proves the key works; do not require a text part —
         // on a thinking model this budget may be spent entirely on thinking.
@@ -130,9 +130,9 @@ export function createGeminiProvider(apiKey: string, modelId: string): AiProvide
           contents: [{ role: "user", parts: [{ text: "Say hi" }] }],
           generationConfig: { maxOutputTokens: CONNECTION_TEST_MAX_TOKENS },
         });
-        return true;
-      } catch {
-        return false;
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: describeError(err) };
       }
     },
   };

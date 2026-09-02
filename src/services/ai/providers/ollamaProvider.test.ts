@@ -46,6 +46,22 @@ describe("ollamaProvider", () => {
     });
   });
 
+  describe("localFetch", () => {
+    it("refuses redirects so a local server cannot send the request off loopback (SPEC-280, Grok Q3 on #56)", async () => {
+      const { fetch: pluginFetch } = await import("@tauri-apps/plugin-http");
+      const { localFetch } = await import("./ollamaProvider");
+      vi.mocked(pluginFetch).mockResolvedValue(new Response("{}"));
+
+      await localFetch("http://127.0.0.1:11434/v1/chat/completions", { method: "POST", body: "{}" });
+
+      expect(pluginFetch).toHaveBeenCalledWith("http://127.0.0.1:11434/v1/chat/completions", {
+        method: "POST",
+        body: "{}",
+        maxRedirections: 0,
+      });
+    });
+  });
+
   describe("complete", () => {
     it("calls chat.completions.create with correct model and messages", async () => {
       mockCreate.mockResolvedValue({
@@ -89,14 +105,15 @@ describe("ollamaProvider", () => {
       });
 
       const provider = createOllamaProvider("http://localhost:11434", "llama3.2");
-      expect(await provider.testConnection()).toBe(true);
+      expect(await provider.testConnection()).toEqual({ ok: true });
     });
 
     it("returns false when completion throws", async () => {
       mockCreate.mockRejectedValue(new Error("Connection refused"));
 
       const provider = createOllamaProvider("http://localhost:11434", "llama3.2");
-      expect(await provider.testConnection()).toBe(false);
+      // SPEC-280 REQ-2.1: the reason travels with the verdict.
+      expect(await provider.testConnection()).toEqual({ ok: false, error: "Connection refused" });
     });
   });
 

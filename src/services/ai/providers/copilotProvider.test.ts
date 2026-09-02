@@ -85,20 +85,27 @@ describe("copilotProvider", () => {
   });
 
   describe("testConnection", () => {
-    it("returns true on successful completion", async () => {
+    it("reports ok on successful completion", async () => {
       mockCreate.mockResolvedValue({
         choices: [{ message: { content: "hi" } }],
       });
 
       const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
-      expect(await provider.testConnection()).toBe(true);
+      expect(await provider.testConnection()).toEqual({ ok: true });
     });
 
-    it("returns false when completion throws", async () => {
+    it("reports the reason when completion throws (SPEC-280 REQ-2.1)", async () => {
       mockCreate.mockRejectedValue(new Error("Unauthorized"));
 
       const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
-      expect(await provider.testConnection()).toBe(false);
+      expect(await provider.testConnection()).toEqual({ ok: false, error: "Unauthorized" });
+    });
+
+    it("turns a non-Error rejection into text rather than throwing", async () => {
+      mockCreate.mockRejectedValue("url not allowed on the configured scope");
+
+      const provider = createCopilotProvider("ghp_test123", "openai/gpt-4o-mini");
+      expect(await provider.testConnection()).toEqual({ ok: false, error: "url not allowed on the configured scope" });
     });
   });
 

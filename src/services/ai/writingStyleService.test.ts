@@ -11,7 +11,7 @@ import type { DbMessage } from "@/services/db/messages";
 vi.mock("./providerManager", () => ({
   getActiveProvider: vi.fn().mockResolvedValue({
     complete: vi.fn().mockResolvedValue("Mocked AI response"),
-    testConnection: vi.fn().mockResolvedValue(true),
+    testConnection: vi.fn().mockResolvedValue({ ok: true }),
   }),
 }));
 
@@ -84,7 +84,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(getActiveProvider).mockResolvedValue({
     complete: vi.fn().mockResolvedValue("Mocked AI response"),
-    testConnection: vi.fn().mockResolvedValue(true),
+    testConnection: vi.fn().mockResolvedValue({ ok: true }),
   } as never);
   vi.mocked(getAiCache).mockResolvedValue(null);
   vi.mocked(getWritingStyleProfile).mockResolvedValue(null);
@@ -185,6 +185,14 @@ describe("writingStyleService", () => {
     it("returns true when AI is configured and enabled", async () => {
       const result = await isAutoDraftEnabled();
       expect(result).toBe(true);
+    });
+
+    it("returns false when the connection test fails — the result object is truthy, its ok field is not (Grok L4 on #56)", async () => {
+      vi.mocked(getActiveProvider).mockResolvedValue({
+        complete: vi.fn().mockResolvedValue(""),
+        testConnection: vi.fn().mockResolvedValue({ ok: false, error: "Connection refused" }),
+      } as never);
+      expect(await isAutoDraftEnabled()).toBe(false);
     });
   });
 });
