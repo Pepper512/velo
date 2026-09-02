@@ -862,6 +862,19 @@
   parses the CSP into directives and pins `img-src` exactly and every other directive exactly,
   so nothing else can move with it. TDD: the CSP test red first. The Rust image proxy stays
   queued as the privacy enhancement.
+- **2026-09-03 — PR #60 (#197) cross-vendor review, both legs.** Gemini 3.7 and Grok 4.6 both
+  CHANGES REQUESTED on the same point: once `img-src` is `https:`, the block is entirely the
+  sanitizer's, so every image-fetching vector must be neutralised by it. **Verified:** the
+  audit-P9 blocker is DOM-based and already removes every fetching attribute (`src`, `srcset`,
+  `poster`, `background`, `xlink:href`, …) and inline-style URLs; `<style>`/`<link>` are
+  forbidden. **One real gap, adopted:** `href` was excluded for links, and SVG `<image>`/`<use>`
+  fetch on render — the four-host CSP had hidden it; a remote `href` is now removed on every
+  element that is not `<a>`/`<area>`, with tests for every vector both reviews named. Also
+  adopted: the CSP test refuses duplicate directive names (browsers keep the first, a map keeps
+  the last), parses inside a helper, and asserts `blob:` absent. **Recorded:** the opted-in
+  cookie-bearing GET residual (Grok L4) — the webview holds bearer tokens, not provider
+  cookies. The brief's threat pass was corrected: it rests on the blocker's coverage, not on "no
+  `src` remains". Raw outputs in `docs/reviews/2026-09-03-pr60-{gemini,grok}-raw.md`.
 - **2026-09-02 ~22:30 UTC — #280 built (http scope for local AI; connection-test reason)** on
   Jim's instruction. Verified first: the Ollama client uses `@tauri-apps/plugin-http`'s `fetch`
   (`ollamaProvider.ts:2`), the plugin matches its scope with the `urlpattern` crate, and under
