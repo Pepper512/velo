@@ -24,6 +24,7 @@ import { withSession, invalidateAccountCredentials } from "../imap/sessionManage
 import { getAccount, type DbAccount } from "../db/accounts";
 import { findSpecialFolder, dropTombstonedMessageIds } from "../imap/messageHelper";
 import { settleMovedRows } from "../imap/moveHygiene";
+import { incrementFlaggedNotExpunged } from "../db/folderSyncState";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
@@ -360,6 +361,7 @@ export class ImapSmtpProvider implements EmailProvider {
 
     for (const [folder, uids] of grouped) {
       const result = await this.withImapSession((id) => imapDeleteMessages(id, folder, uids));
+      await this.countFlaggedNotExpunged(folder, uids.length, result);
       noticeIfNotExpunged(result, folder);
     }
   }
@@ -681,8 +683,28 @@ export class ImapSmtpProvider implements EmailProvider {
         result.mapping,
         result.dest_uidvalidity ?? null,
       );
+      await this.countFlaggedNotExpunged(sourceFolder, uids.length, result);
     } finally {
       noticeIfNotExpunged(result, sourceFolder);
+    }
+  }
+
+  /**
+   * F-4 REQ-2.2: mail flagged `\Deleted` but left on the server (no UIDPLUS)
+   * still counts toward the folder's EXISTS. Keep the per-folder counter in
+   * step so the reconciliation gate does not fire on every pass. Never fails
+   * the action: the counter is self-correcting on the next full list.
+   */
+  private async countFlaggedNotExpunged(
+    folder: string,
+    n: number,
+    result: { expunged: boolean },
+  ): Promise<void> {
+    if (result.expunged) return;
+    try {
+      await incrementFlaggedNotExpunged(this.accountId, folder, n);
+    } catch (err) {
+      console.warn(`[imapSmtpProvider] Could not update the flagged-not-expunged count for ${folder}:`, err);
     }
   }
 

@@ -388,6 +388,111 @@ export async function reapMovedTombstones(
   );
 }
 
+// ---------------------------------------------------------------------------
+// Vanished-UID reconciliation (F-4) — what a folder holds locally
+// ---------------------------------------------------------------------------
+
+/** A live IMAP row in a folder, as the reconciliation pass sees it. */
+export interface FolderMessageRef {
+  id: string;
+  imap_uid: number;
+  thread_id: string;
+  message_id_header: string | null;
+}
+
+/**
+ * The folder's live rows: what the server's full UID list is diffed against
+ * (REQ-1.1). Tombstones are excluded — they are already known to have left the
+ * folder — and so are rows without a UID.
+ */
+export async function getLiveMessagesInFolder(
+  accountId: string,
+  folder: string,
+): Promise<FolderMessageRef[]> {
+  const db = await getDb();
+  return db.select<FolderMessageRef[]>(
+    `SELECT id, imap_uid, thread_id, message_id_header FROM messages
+     WHERE account_id = $1 AND imap_folder = $2 AND moved_to IS NULL AND imap_uid IS NOT NULL
+     ORDER BY imap_uid ASC`,
+    [accountId, folder],
+  );
+}
+
+/** The folder's tombstones (F-5 rows moved out without a COPYUID mapping). */
+export async function getTombstonesInFolder(
+  accountId: string,
+  folder: string,
+): Promise<{ id: string; imap_uid: number }[]> {
+  const db = await getDb();
+  return db.select<{ id: string; imap_uid: number }[]>(
+    `SELECT id, imap_uid FROM messages
+     WHERE account_id = $1 AND imap_folder = $2 AND moved_to IS NOT NULL AND imap_uid IS NOT NULL`,
+    [accountId, folder],
+  );
+}
+
+/** Thread and Message-ID for a set of rows (REQ-3.2's log line, REQ-3.4's guard). */
+export async function getMessageRefsByIds(
+  accountId: string,
+  ids: string[],
+): Promise<FolderMessageRef[]> {
+  if (ids.length === 0) return [];
+  const db = await getDb();
+  const out: FolderMessageRef[] = [];
+  for (let i = 0; i < ids.length; i += REKEY_CHUNK) {
+    const chunk = ids.slice(i, i + REKEY_CHUNK);
+    const placeholders = chunk.map((_, j) => `$${j + 2}`).join(", ");
+    const rows = await db.select<FolderMessageRef[]>(
+      `SELECT id, imap_uid, thread_id, message_id_header FROM messages
+       WHERE account_id = $1 AND id IN (${placeholders})`,
+      [accountId, ...chunk],
+    );
+    out.push(...rows);
+  }
+  return out;
+}
+
+/**
+ * Delete rows only if they still are what the reconciliation observed: the
+ * same id, still in `folder` under `uid`, and live (not a tombstone). A row
+ * that was re-keyed, tombstoned, or replaced since the observation does not
+ * match and is left alone (Grok H1 on #47). Returns the ids actually deleted.
+ * Attachments cascade through the FK.
+ */
+export async function deleteObservedMessages(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  folder: string,
+  rows: { id: string; uid: number }[],
+): Promise<string[]> {
+  const deleted: string[] = [];
+  for (const row of rows) {
+    const result = await db.execute(
+      `DELETE FROM messages
+       WHERE account_id = $1 AND id = $2 AND imap_folder = $3 AND imap_uid = $4 AND moved_to IS NULL`,
+      [accountId, row.id, folder, row.uid],
+    );
+    if (result.rowsAffected > 0) deleted.push(row.id);
+  }
+  return deleted;
+}
+
+/** Delete rows by id, chunked. Attachments cascade through the FK. */
+export async function deleteMessagesByIds(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  ids: string[],
+): Promise<void> {
+  for (let i = 0; i < ids.length; i += REKEY_CHUNK) {
+    const chunk = ids.slice(i, i + REKEY_CHUNK);
+    const placeholders = chunk.map((_, j) => `$${j + 2}`).join(", ");
+    await db.execute(
+      `DELETE FROM messages WHERE account_id = $1 AND id IN (${placeholders})`,
+      [accountId, ...chunk],
+    );
+  }
+}
+
 export async function deleteMessage(
   accountId: string,
   messageId: string,

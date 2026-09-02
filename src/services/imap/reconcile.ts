@@ -282,6 +282,38 @@ export async function applySearchAll(obs: SearchAllObservation): Promise<void> {
   });
 }
 
+/**
+ * Every `confirmed_absent` row in a folder's current generation, regardless of
+ * pass — the set the REQ-3.1 stop asked the user about. Only the explicit
+ * user confirmation reads this; unattended passes use `confirmedOnPass`.
+ */
+export async function confirmedInFolder(
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+): Promise<SuspectRow[]> {
+  const db = await getDb();
+  return db.select<SuspectRow[]>(
+    `SELECT * FROM reconcile_suspects
+     WHERE account_id = $1 AND folder = $2 AND uidvalidity = $3 AND status = 'confirmed_absent'
+     ORDER BY first_seen_at ASC, uid ASC`,
+    [accountId, folder, uidvalidity],
+  );
+}
+
+/** Every suspect record in a folder's generation, whatever its status. */
+export async function suspectsInFolder(
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+): Promise<SuspectRow[]> {
+  const db = await getDb();
+  return db.select<SuspectRow[]>(
+    "SELECT * FROM reconcile_suspects WHERE account_id = $1 AND folder = $2 AND uidvalidity = $3 ORDER BY uid ASC",
+    [accountId, folder, uidvalidity],
+  );
+}
+
 /** Remove suspect records once their rows have been deleted (or on resync). */
 export async function forgetSuspects(
   accountId: string,
@@ -291,4 +323,16 @@ export async function forgetSuspects(
 ): Promise<void> {
   if (uids.length === 0) return;
   await deleteSuspects(await getDb(), accountId, folder, uidvalidity, uids);
+}
+
+/** `forgetSuspects` on the caller's transaction, so the rows and their records go together. */
+export async function forgetSuspectsWithin(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+  uids: number[],
+): Promise<void> {
+  if (uids.length === 0) return;
+  await deleteSuspects(db, accountId, folder, uidvalidity, uids);
 }

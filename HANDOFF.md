@@ -8,8 +8,9 @@
   `src-tauri/`). **The only SHA this file pins.** `git log --oneline a8b80dd..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
-- **Open PRs: none at writing** (the wrap-up docs PR this file ships in is the exception). Never
-  trust this line — run `gh pr list --repo Pepper512/velo`. #43 and #44 both landed 2026-09-02.
+- **Open PRs: #47 — F-4 part 2 (the deleting half), green, both cross-vendor reviews adopted,
+  waiting for Jim's merge.** Never trust this line — run `gh pr list --repo Pepper512/velo`.
+  #43, #44, #45, #46 landed 2026-09-02.
 - **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
   were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
@@ -40,10 +41,12 @@
 
 ## 1. Exact next step
 
-**Build F-4 part 2 from `docs/briefs/2026-09-02-f4-part2-plan.md` — after an opposite-line plan
-read.** Part 2 is the deleting half of F-4 (the gate, the attestation, end-of-pass deletion under
-the budget, the reconcile op, the ConfirmDialog stop). The plan was written at the end of the
-delegation window without a plan read; get one before code. Everything it depends on landed in #44.
+**Jim merges #47 (F-4 part 2), then the next seat builds the follow-up: REQ-2.3's `NOT DELETED`
+belt (one Rust command), REQ-4's reconcile queue op (`compactQueue` branch, 3-strike degrade,
+migration 27), and the "folder gone" path (a folder deleted on the server keeps its
+`folder_sync_state` row and now blocks attestation until it is removed).** Then run the live
+Dovecot Done-when in the part 2 plan — it has not been run. Also open from #47's reviews: a
+persistent per-folder hold for "Keep them" (today it is a threshold, not a hold).
 
 **Before that, read the Opus 5 full review** (`docs/reviews/2026-09-02-opus5-window-review.md`;
 verdicts and dispositions in LOG.md). Its HIGH 1 — permanent delete had become a server-side
@@ -186,10 +189,11 @@ part 1; the only SHA pinned — `git log --oneline a8b80dd..origin/main` shows w
 **no open PRs** · CI green · 157 files / 1,954 tests / Rust 95 + 1 ignored · 26 migrations ·
 npm audit 0.
 
-**Next action: read the Opus 5 review (`docs/reviews/`, dispositions in LOG.md) — its HIGH 1 is
-fixed, its HIGH 2 (pooled-connection transaction state under the re-key) is Jim's to scope — then
-build F-4 part 2 from `docs/briefs/2026-09-02-f4-part2-plan.md` after an opposite-line plan
-read.** Part 2 is the half that deletes local rows. Everything it needs landed in #44.
+**Next action: Jim merges #47 (F-4 part 2, green, both reviews adopted; the seat did not
+self-merge a Tier-2 deleting path). Then: the F-4 follow-up PR (REQ-2.3 belt, REQ-4 reconcile op,
+"folder gone" path) and the live Dovecot Done-when in `docs/briefs/2026-09-02-f4-part2-plan.md`,
+which has not been run.** Opus 5's HIGH 2 (pooled-connection transaction state) is still Jim's to
+scope.
 
 **Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
 (Grok is a named deviation from the roster, valid for the 2026-09-02 window only — ask Jim before
