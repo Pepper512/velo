@@ -40,7 +40,7 @@ cd src-tauri && cargo build
 - **Setup:** `src/test/setup.ts` (imports `@testing-library/jest-dom/vitest`)
 - **Config:** `globals: true` -- no imports needed for `describe`, `it`, `expect`
 - **Location:** Tests are colocated with source files (e.g., `uiStore.test.ts` next to `uiStore.ts`)
-- **Count:** 170 test files across services (94), components (37), utils (17), stores (9), constants (4), hooks (3), config (3), router (2), test (1) — measured by `npm run docs:check` (total and breakdown), not maintained by hand
+- **Count:** 171 test files across services (94), components (38), utils (17), stores (9), constants (4), hooks (3), config (3), router (2), test (1) — measured by `npm run docs:check` (total and breakdown), not maintained by hand
 
 ### Zustand test pattern
 

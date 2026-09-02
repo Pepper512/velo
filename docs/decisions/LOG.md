@@ -1172,3 +1172,37 @@
   **Comparison:** Grok and Gemini 3.8 each found the three MEDIUM-class defects Gemini 3.7
   missed; Grok alone found the drop-guard and duplicate-id leaks. Raw outputs in
   `docs/reviews/2026-09-03-pr68-{grok,gemini38}-raw.md`.
+- **2026-09-03 — #281 built (paste an image from the clipboard)** on Jim's instruction, the
+  last bug-fix queue item, **Tier 1** (composer only). Verified first: the triage's "M"
+  assumed two halves were missing; only one is — the TipTap image node (`allowBase64`) is
+  configured and `emailBuilder.extractInlineImages` already turns a data-URL `<img>` into a
+  `multipart/related` CID part; what nothing handled was an image *file* on the clipboard
+  (ProseMirror's default paste is text/HTML). **Change:** a pure `pasteImage.ts` boundary —
+  the image file wins over accompanying text; only `image/png|jpeg|gif|webp` (SVG refused:
+  it can carry script); 5 MiB cap; the `data:` URL built from the file's own bytes and
+  checked for its declared type — and an `editorProps.handlePaste` that inserts the image
+  node at the cursor or shows the refusal for five seconds in the composer's existing
+  status line; text/HTML pastes fall through unchanged, dropped files still go to
+  attachments by design. TDD: ten helper cases (null for text-only, PNG picked, file over
+  text, each admitted type, SVG/BMP refused with the reason, cap boundary, `files` fallback,
+  data-URL read) and a builder test pinning that a data-URL `<img>` ships as a CID part with
+  no data URL left in the HTML. Help card updated. Spec
+  `docs/briefs/2026-09-03-281-paste-inline-images.md`, committed before the code.
+  Gates: 171 files / 2,219 tests, tsc, graph, docs. One review leg (Tier 1): Gemini 3.7.
+- **2026-09-03 — PR #69 (#281) review, one leg (Tier 1).** Gemini 3.7 Flash: APPROVE WITH
+  NITS (1M 2L 1N). **Adopted all four:** M1 — the refusal notice reused the composer's
+  `saveError` line, which the 3 s draft auto-save clears on success and a real save error
+  owns: now a dedicated transient notice with its own five-second timer, and the save
+  error is never touched; L2 — the async insert after the read now checks
+  `view.isDestroyed` (composer closed mid-read) before dispatching; L3 — the declared type
+  is matched case-insensitively (`image/PNG` happens) **and the first bytes are sniffed**
+  against the type's magic numbers (PNG/JPEG/GIF/WebP), so a payload labelled `image/png`
+  that is really SVG or HTML is refused before it can become a `cid:` part — defence in
+  depth, since `<img>` executes nothing; the URL's type is normalised to lower case so the
+  extractor's `Content-Type` is canonical; N4 — tests for a non-image file (falls through
+  as `null`, not a refusal), an upper-case type, spoofed bytes, each type's magic, and empty
+  or truncated files. jsdom's `Blob` has no `arrayBuffer()`, so the head is read through
+  `FileReader` like the body. **Questions answered:** a non-image file falls through to the
+  default paste on purpose (attachments have their own button and drop path); Velo has no
+  toast system — hence the local notice. Raw output in
+  `docs/reviews/2026-09-03-pr69-gemini-raw.md`.

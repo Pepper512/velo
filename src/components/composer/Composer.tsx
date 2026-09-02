@@ -4,6 +4,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import Image from "@tiptap/extension-image";
+import { pickPastedImage, readImageAsDataUrl } from "./pasteImage";
 import { Clock, Maximize2, Minimize2, ExternalLink } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -71,6 +72,17 @@ export function Composer() {
   const dragCounterRef = useRef(0);
   const overlayRef = useRef<HTMLDivElement | null>(null);
 
+  // SPEC-281: a transient notice for a refused paste. Its own state, never the
+  // draft's `saveError` — auto-save clears that on success and a real save
+  // failure owns it (#69 review, Gemini M1).
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
+  const pasteNoticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showPasteNotice = (message: string) => {
+    setPasteNotice(message);
+    if (pasteNoticeTimer.current) clearTimeout(pasteNoticeTimer.current);
+    pasteNoticeTimer.current = setTimeout(() => setPasteNotice(null), 5_000);
+  };
+
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -137,6 +149,29 @@ export function Composer() {
           return true;
         }
         return false;
+      },
+      // SPEC-281: a screenshot on the clipboard becomes an inline image at the
+      // cursor. Text and HTML pastes fall through to the editor (`false`).
+      handlePaste: (view, event) => {
+        const picked = pickPastedImage(event.clipboardData);
+        if (!picked) return false;
+        event.preventDefault();
+        if (picked.kind === "refused") {
+          showPasteNotice(picked.reason);
+          return true;
+        }
+        readImageAsDataUrl(picked.file)
+          .then((src) => {
+            // The read is async; the composer may have closed meanwhile (#69 review, Gemini L2).
+            if (view.isDestroyed) return;
+            const { schema } = view.state;
+            const node = schema.nodes.image?.create({ src, alt: picked.file.name });
+            if (node) view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView());
+          })
+          .catch((err: unknown) => {
+            showPasteNotice(err instanceof Error ? err.message : "Could not read the pasted image.");
+          });
+        return true;
       },
     },
   });
@@ -570,6 +605,11 @@ export function Composer() {
                 title={saveError ?? undefined}
               >
                 {savedLabel}
+              </span>
+            )}
+            {pasteNotice && (
+              <span className="text-xs text-danger font-medium" role="status">
+                {pasteNotice}
               </span>
             )}
             <SignatureSelector />

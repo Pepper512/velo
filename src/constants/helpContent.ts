@@ -306,7 +306,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "Compose a new email",
         summary: "Rich text editor with formatting and attachments.",
         description:
-          "The composer uses a full rich text editor powered by TipTap. You can format text (bold, italic, lists, links, code blocks), add file attachments, insert a signature, and pick a template — all from one place. The composer opens as a panel at the bottom of the screen. Add recipients with autocomplete (ranked by how often you email them), set a subject, and compose your message.",
+          "The composer uses a full rich text editor powered by TipTap. You can format text (bold, italic, lists, links, code blocks), add file attachments, paste a screenshot straight into the body as an inline image (PNG, JPEG, GIF or WebP, up to 5 MB — it is sent as a proper inline part), insert a signature, and pick a template — all from one place. The composer opens as a panel at the bottom of the screen. Add recipients with autocomplete (ranked by how often you email them), set a subject, and compose your message.",
         tips: [
           { text: "Open the composer", shortcut: "c" },
           { text: "Send the email", shortcut: "Ctrl+Enter" },
