@@ -4,13 +4,12 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `a8b80dd`** (#45, the permanent-delete fix — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline a8b80dd..origin/main` —
+- **Code pin: `ef7c91c`** (#47, F-4 part 2 — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline ef7c91c..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
-- **Open PRs: #47 — F-4 part 2 (the deleting half), green, both cross-vendor reviews adopted,
-  waiting for Jim's merge.** Never trust this line — run `gh pr list --repo Pepper512/velo`.
-  #43, #44, #45, #46 landed 2026-09-02.
+- **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
+  `gh pr list --repo Pepper512/velo`. #43–#47 all landed 2026-09-02.
 - **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
   were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
@@ -33,7 +32,7 @@
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `a8b80dd`:** frontend **157** files / **1,954** tests · Rust **95** + 1 ignored
+- **State on `main` @ `ef7c91c`:** frontend **157** files / **1,954** tests · Rust **95** + 1 ignored
   (the live Dovecot test) · 26 migrations / 32 tables · npm audit 0 · 0 service import cycles. No
   dependency added or removed this session.
 
@@ -41,16 +40,17 @@
 
 ## 1. Exact next step
 
-**Jim merges #47 (F-4 part 2), then the next seat builds the follow-up: REQ-2.3's `NOT DELETED`
-belt (one Rust command), REQ-4's reconcile queue op (`compactQueue` branch, 3-strike degrade,
-migration 27), and the "folder gone" path (a folder deleted on the server keeps its
-`folder_sync_state` row and now blocks attestation until it is removed).** Then run the live
-Dovecot Done-when in the part 2 plan — it has not been run. Also open from #47's reviews: a
-persistent per-folder hold for "Keep them" (today it is a threshold, not a hold).
+**Build the F-4 follow-up: REQ-2.3's `NOT DELETED` belt (one Rust command), REQ-4's reconcile
+queue op (`compactQueue` branch, 3-strike degrade, migration 27), and the "folder gone" path (a
+folder deleted on the server keeps its `folder_sync_state` row and now blocks attestation until
+it is removed).** Then run the live Dovecot Done-when in the part 2 plan — it has not been run.
+Also open from #47's reviews: a persistent per-folder hold for "Keep them" (today it is a
+threshold, not a hold). **Merges are the build seat's** under the standing rule — Jim reaffirmed
+it on 2026-09-02 after the seat deferred #47 to him; Opus 5's Tier-2 carve-out was not adopted.
 
 **Before that, read the Opus 5 full review** (`docs/reviews/2026-09-02-opus5-window-review.md`;
 verdicts and dispositions in LOG.md). Its HIGH 1 — permanent delete had become a server-side
-no-op after F-5 — is **fixed (#45, `a8b80dd`)**. Its HIGH 2 — the re-key transaction depends on
+no-op after F-5 — is **fixed (#45, `ef7c91c`)**. Its HIGH 2 — the re-key transaction depends on
 per-connection SQLite state over a pooled, unpinned `tauri-plugin-sql` connection — is **open and
 Jim's to scope**: it is pre-existing for every `withTransaction` in Velo, but F-5 made it
 load-bearing for a destructive identity rewrite. Own brief; candidate fix is a Rust command owning
@@ -84,7 +84,7 @@ Expected on `main`: **157 test files, 1,954 tests; Rust 95 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline a8b80dd..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline ef7c91c..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
@@ -134,7 +134,7 @@ commissioned at the close as Jim asked.
 | PR | Merged | What |
 |---|---|---|
 | #43 `2792251` | build seat | **F-5, option A rev 2.** Rust drains `COPYUID` from `async-imap`'s unsolicited channel inside the pooled checkout (no parser owned; backlog discarded before `UID MOVE` — a defect the brief did not know about); TS re-keys the row + attachments + soft refs in one transaction (deferred FKs, per-pair savepoints), tombstones the rest (`messages.moved_to`, migration 25), hides tombstones from thread view/search/actions, reaps on destination sync (folder-scoped), refuses a mapping from the wrong UIDVALIDITY generation; every provider action filters to live rows first. Live Dovecot: `:11143` mapping on the same turn, `:11144` COPY path with none. Gemini CHANGES REQUESTED (1H 2M 2L 1N) + Grok CHANGES REQUESTED (15) → 9 adopted, rest answered/recorded/declined with reasons on the PR |
-| #44 `a8b80dd` | build seat | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/nullable `exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + generation-scoped suspect state machine + atomic `applySearchAll`) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N) and Grok CHANGES REQUESTED (11): everything adopted or already fixed, nothing declined. Nothing in it deletes; the part 2 plan is in `docs/briefs/` |
+| #44 `ef7c91c` | build seat | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/nullable `exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + generation-scoped suspect state machine + atomic `applySearchAll`) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N) and Grok CHANGES REQUESTED (11): everything adopted or already fixed, nothing declined. Nothing in it deletes; the part 2 plan is in `docs/briefs/` |
 
 **Findings worth remembering.** *Both cross-vendor legs found defects the author missed, and
 different ones* (#43: Gemini the reap scoping and the zombie race, Grok the whole-batch rollback
@@ -184,16 +184,15 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `a8b80dd`** (#44 F-4
-part 1; the only SHA pinned — `git log --oneline a8b80dd..origin/main` shows what is above it) ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `ef7c91c`** (#44 F-4
+part 1; the only SHA pinned — `git log --oneline ef7c91c..origin/main` shows what is above it) ·
 **no open PRs** · CI green · 157 files / 1,954 tests / Rust 95 + 1 ignored · 26 migrations ·
 npm audit 0.
 
-**Next action: Jim merges #47 (F-4 part 2, green, both reviews adopted; the seat did not
-self-merge a Tier-2 deleting path). Then: the F-4 follow-up PR (REQ-2.3 belt, REQ-4 reconcile op,
-"folder gone" path) and the live Dovecot Done-when in `docs/briefs/2026-09-02-f4-part2-plan.md`,
-which has not been run.** Opus 5's HIGH 2 (pooled-connection transaction state) is still Jim's to
-scope.
+**Next action: the F-4 follow-up PR (REQ-2.3 belt, REQ-4 reconcile op, "folder gone" path) and
+the live Dovecot Done-when in `docs/briefs/2026-09-02-f4-part2-plan.md`, which has not been
+run.** The build seat merges its own green PRs (Jim reaffirmed the standing rule 2026-09-02).
+Opus 5's HIGH 2 (pooled-connection transaction state) is still Jim's to scope.
 
 **Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
 (Grok is a named deviation from the roster, valid for the 2026-09-02 window only — ask Jim before

@@ -655,5 +655,7 @@
     `try/finally`. One semantic recorded rather than changed: **"Keep them" is a threshold, not a
     hold** — once the folder is no longer more than half gone, budgeted removal resumes; the copy
     says so now, and a persistent per-folder hold is an option for Jim.
-  - **Not merged by the seat.** Green CI on the final commit; the merge is Jim's (Opus 5's Tier-2
-    recommendation, pending his decision as a rule).
+  - **Merged by the seat as `ef7c91c`** after Jim corrected the deferral: *"read your rules, you
+    are in charge of the merges, commits, push, pr, etc."* The standing rule (*Agents perform the
+    merge*, with its preconditions) stands; Opus 5's recommended Tier-2 carve-out is **not
+    adopted**. Preconditions verified on `6e83323`: CI success, CLEAN, no unresolved conversation.
