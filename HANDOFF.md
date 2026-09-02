@@ -4,12 +4,12 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `64de404`** (#52, #297 Bcc strip — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 64de404..origin/main` —
+- **Code pin: `b95468e`** (#54, #240 pinned transactions — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline b95468e..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
-  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#52 all landed 2026-09-02.
+  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#54 all landed 2026-09-02.
 - **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
   were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
@@ -29,13 +29,14 @@
     tools. Grok gotcha: with a long prompt it "offloads" the text and reads it back with its own
     tools — takes 5–10 minutes, the output file stays near-empty until it finishes.
   - **Worktrees:** the session's own worktree `.claude/worktrees/f5-move-hygiene` (branch
-    `docs-post-52` checked out at the end) plus the **two dead ones from before**
+    `docs-post-54` checked out at the end) plus the **two dead ones from before**
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `64de404`:** frontend **160** files / **2,029** tests · Rust **112** + 1 ignored
-  (the live Dovecot test) · 27 migrations / 32 tables · npm audit 0 · 0 service import cycles. No
-  dependency added or removed this session — **#240's plan asks for one** (`sqlx` direct; §1).
+- **State on `main` @ `b95468e`:** frontend **160** files / **2,045** tests · Rust **123** + 1 ignored
+  (the live Dovecot test) · 27 migrations / 32 tables · npm audit 0 · 0 service import cycles.
+  **One dependency added, approved by Jim:** `sqlx = "=0.8.6"` direct (already in the graph via
+  `tauri-plugin-sql`; CI asserts one copy) — #54, LOG.md.
 
 ---
 
@@ -60,19 +61,25 @@ re-parses the outgoing bytes and refuses if a Bcc field is still present, Sent/D
 the header. Spec `docs/briefs/2026-09-02-297-bcc-strip.md`; Gemini and Grok both approve-with-nits,
 every finding adopted (LOG.md).
 
-**Next: #240 — pinned SQLite transactions. The plan is drafted and needs Jim before code:**
-`docs/briefs/2026-09-02-240-pinned-transactions.md`. The mechanism is verified against the
-vendored crates: `tauri-plugin-sql` opens a default sqlx pool of ten connections, and
-`withTransaction` sends `BEGIN`, the statements and `COMMIT` as separate IPC calls that can each
-take a different connection — so no transaction in Velo (sync batches, F-5's re-key, F-4's
-deletions, migrations) is actually atomic once a UI read runs concurrently. WAL and a 5 s busy
-timeout are already sqlx's defaults, so the reporter's fix changes nothing. Recommended option:
-hold one connection from the plugin's own public pool for the length of a transaction, five
-Tauri commands with an idle watchdog, `BEGIN IMMEDIATE`; **cost: `sqlx` as a direct dependency**
-(already compiled in via the plugin, zero new code, version must track the plugin's). Three
-things for Jim: the plan, the dependency, the 30 s watchdog. Also in that plan: the three
-`imapSync.ts` callbacks ignore the transaction handle today (helpers call `getDb()` themselves) —
-the audit is Task 0.
+**#240 landed as #54 (`b95468e`) — SQLite transactions are pinned.** Rust holds one connection
+from the plugin's own pool per transaction (`db/tx.rs`: `BEGIN IMMEDIATE`, single open
+transaction, 30 s idle watchdog, drop guard, binding parity with the plugin except booleans →
+INTEGER); `withTransaction` and the migration runner run on that handle; the nine helpers the
+Task 0 audit named take a trailing optional `DbExecutor`. Three review rounds (Gemini ×2, Grok)
+all adopted or declined with reasons in LOG.md, including **one author process slip**: the first
+diff sent to reviewers omitted the new Rust files. Closes upstream #264; #204 is unrelated
+(ledger corrected); #205 is "re-test", a half-applied migration can no longer be produced but an
+already-broken database is not repaired.
+
+**Next: bug-fix queue items 3 and 4 together — #280 (Tauri http scope must list
+`http://127.0.0.1:*` and `http://localhost:*`; un-swallow the `testConnection` error) and #241
+(parenthesise multi-item `uid_fetch`, three sites in `imap/client.rs`; Stalwart "no body").**
+Both half a day, both Tier 2 (`tauri.conf.json` and Rust IMAP). Spec each from the vault
+template into `docs/briefs/`, verify the bug in the tree first (the triage's line numbers are
+stale), plan → TDD → both legs → merge. Then #252/#253 (separate SMTP credentials) and #197
+(widen `img-src`, decided). **Manual, still open:** #240's Task 6 (initial IMAP sync against
+Dovecot with the UI browsing — no `database is locked`) and F-4's live Done-when; both need the
+running app.
 
 **Still open on F-4:** the live Dovecot Done-when (scenarios 1–5 in
 `docs/testing/dovecot/README.md`; manual, needs the running app — never run) and, Jim's call, a
@@ -111,11 +118,11 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected on `main`: **160 test files, 2,029 tests; Rust 112 passed, 1 ignored.**
+Expected on `main`: **160 test files, 2,045 tests; Rust 123 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline 64de404..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline b95468e..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
@@ -215,18 +222,17 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `64de404`** (#52,
-#297 Bcc strip; the only SHA pinned — `git log --oneline 64de404..origin/main` shows what is
-above it) · **no open PRs** · CI green · 160 files / 2,029 tests / Rust 112 + 1 ignored ·
-27 migrations · npm audit 0.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `b95468e`** (#54,
+#240 pinned transactions; the only SHA pinned — `git log --oneline b95468e..origin/main` shows
+what is above it) · **no open PRs** · CI green · 160 files / 2,045 tests / Rust 123 + 1 ignored ·
+27 migrations · npm audit 0 · `sqlx =0.8.6` is a direct dependency now (approved).
 
-**Next action: get Jim's decisions on #240, then build it.** The plan is
-`docs/briefs/2026-09-02-240-pinned-transactions.md` (pinned SQLite transactions: one connection
-held from the plugin's pool per transaction, five Tauri commands, idle watchdog, `BEGIN
-IMMEDIATE`). It needs (1) plan approval, (2) the `sqlx` direct dependency, (3) the 30 s watchdog
-value. Tier 2: TDD on Rust + harness, Gemini + Grok legs, merge on green. Open on F-4: the live
-Dovecot Done-when (manual, needs the running app) and the "Keep them" hold (Jim's call). The
-build seat merges its own green PRs.
+**Next action: #280 (http scope for local AI: `http://127.0.0.1:*` + `http://localhost:*`,
+un-swallow `testConnection`) and #241 (parenthesise multi-item `uid_fetch`), both Tier 2, half
+a day each.** Spec from the vault template into `docs/briefs/`, verify in the tree first, plan →
+TDD → Gemini + Grok → merge. Then #252/#253, then #197. Manual and open: #240 Task 6 (IMAP
+initial sync with the UI browsing, Dovecot) and F-4's live Done-when; the "Keep them" hold is
+Jim's call. The build seat merges its own green PRs.
 
 **Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
 (a standing second Tier-2 leg since ADR-004). Both found real defects on every PR this day —

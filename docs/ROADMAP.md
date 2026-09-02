@@ -1,6 +1,6 @@
 # Velo fork — roadmap
 
-> Pinned 2026-09-02 at `64de404` (#52). Sources: the vault build queues
+> Pinned 2026-09-02 at `b95468e` (#54). Sources: the vault build queues
 > (`~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/`), the 2026-09-01 issue ledger, parity
 > report and effort model, `docs/decisions/LOG.md` and `EXCEPTIONS.md`, and `HANDOFF.md`. Days are
 > the effort model's build-days for one credentialed seat, tests and Tier-2 overhead included.
@@ -20,7 +20,7 @@ Superhuman-parity enhancements have not started.
 | Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA) and **P19/F-3** (orphaned phishing dialog — Jim's product decision: wire or delete) |
 | Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
 | IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
-| Bug-fix queue (upstream triage) | **#297 landed** (#52, `64de404`). 12 items left, 20 days; #240's plan drafted, awaiting Jim |
+| Bug-fix queue (upstream triage) | **#297 (#52) and #240 (#54, `b95468e`) landed** — both P0s done. 11 items left, ~13 days; next #280 + #241 |
 | Enhancement queue (Superhuman parity) | **Nothing started.** 10 items in 3 waves, 33.5 days |
 
 ## Next up, in order
@@ -40,7 +40,7 @@ Superhuman-parity enhancements have not started.
 | Order | Id | What | Days |
 |---|---|---|---|
 | 1 | **#297** | **Landed #52 (`64de404`, 2026-09-02).** Rust strips `Bcc`/`Resent-Bcc` after the envelope, fail-closed guard, Sent/Drafts keep it | 1.0 ✓ |
-| 2 | **#240** | Pinned SQLite transactions — **plan drafted, `docs/briefs/2026-09-02-240-pinned-transactions.md`, needs Jim: approval + `sqlx` direct dependency + 30 s watchdog.** Closes #264, re-verify #204/#205. **Also Opus 5's HIGH 2 on #43.** Plan estimate 3–4 days (model: 7) | 7.0 |
+| 2 | **#240** | **Landed #54 (`b95468e`, 2026-09-02).** One Rust-held connection per transaction, `BEGIN IMMEDIATE`, idle watchdog; `sqlx =0.8.6` direct (approved). Closes #264; #204 unrelated (ledger corrected); #205 re-test. **Also Opus 5's HIGH 2 on #43 — closed.** Task 6 (manual sync check) open | 7.0 ✓ |
 | 3 | #280 | `http://127.0.0.1:*` / `localhost` in the http scope; un-swallow `testConnection` | 0.5 |
 | 4 | #241 | Parenthesise multi-item `uid_fetch` (Stalwart "no body") | 0.5 |
 | 5 | #252/#253 | Separate encrypted SMTP credentials | 2.0 |
@@ -101,6 +101,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-Then build #240 from its approved plan, docs/briefs/2026-09-02-240-pinned-transactions.md: I approve the plan, the sqlx direct dependency (option A, version tracking tauri-plugin-sql's), and the 30 s idle watchdog. Start with Task 0 (the imapSync helper audit) and post its result on the PR before the Rust work. Tier 2: TDD (Rust tests on an in-memory pool first, then the withTransaction seam with a mocked invoke), capability entries called out in the PR, Gemini 3.7 via agy AND Grok 4.6 via the grok CLI as review legs (diffs only), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges. After it lands, re-verify #264/#204/#205 against the tree and record what #240 actually closed.
-Do not run the F-4 live Dovecot Done-when unless the app can be driven; it is manual and recorded as open.
+Then take bug-fix queue items 3 and 4 as one PR each: #280 — the Tauri http scope is a URLPattern that does not match non-default ports, so local AI on http://127.0.0.1:11434 is blocked; add http://127.0.0.1:* and http://localhost:* (not *:*) and stop swallowing the testConnection error. #241 — multi-item uid_fetch is unparenthesised at three sites in src-tauri/src/imap/client.rs, so Stalwart returns "no body". For each: spec from the vault template into docs/briefs/, verify the bug in the tree first (the triage's line numbers are stale), Tier 2 (tauri.conf.json and Rust IMAP): plan in the PR before code, TDD, Gemini 3.7 via agy AND Grok 4.6 via the grok CLI (diffs only — generate the diff from committed SHAs, never from the working tree), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges.
+Do not run the manual checks (F-4 live Done-when, #240 Task 6) unless the app can be driven; they are recorded as open.
 ```
