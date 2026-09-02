@@ -405,3 +405,18 @@
     lost by waiting for him.
   - **Decision 4 (make `rust MSRV` a required check) — not made;** permission-gated, Jim only.
     **Until it lands, the MSRV is not enforced.**
+  - **Renewed at 2026-09-02 ~00:20 UTC → 03:20 UTC.** Jim repeated the instruction to the Fable
+    session verbatim ("tell him and keep him going, I will be gone the next 3 hours; try to
+    complete the project; you are in charge, you are me"), so the window above is superseded by
+    this one; the scope, the marking of every decision as *(delegated)*, the retroactive-review
+    condition and the permission-gate rule are unchanged. Two facts stated for the record because
+    they bear on how much this renewal can carry: it was typed into the Fable session, so it is
+    first-hand there and **still a relay everywhere else** — the Opus seat's hold on the E2 build
+    (pending Jim's direct confirmation to *it*) is unaffected by it and is its own to keep or lift;
+    and it arrived after Jim's session had received a status report naming the blocked merges, but
+    it does not mention them, so **no permission gate is read as lifted** — merges, the protection
+    append, and `git worktree remove` (blocked for the Opus seat at ~00:15 UTC — the fourth gate
+    tonight) all remain Jim's alone. What the renewal is used for: the next Tier-1 engineering item
+    that lands nothing on `main` by itself — **F-5** (move-time row hygiene; a live defect on
+    `main`, the prerequisite F-4 explicitly wants), briefed before code with the self-approval
+    hazard named as for PR C.
