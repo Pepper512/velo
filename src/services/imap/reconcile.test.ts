@@ -36,6 +36,7 @@ import {
   clearReappeared,
   purgeOtherGenerations,
   confirmedOnPass,
+  applySearchAll,
   type SuspectRow,
 } from "./reconcile";
 
@@ -71,6 +72,13 @@ describe("F-4 pure decisions", () => {
   it("lets a folder of at most 10 rows clear fully in one pass (stated decision, rev 5 MEDIUM)", () => {
     expect(planDeletions(10, 10)).toEqual({ budget: 10, stop: false });
     expect(planDeletions(6, 6)).toEqual({ budget: 6, stop: false });
+  });
+
+  it("treats inconsistent counts as a stop, never a budget (Grok L8)", () => {
+    expect(planDeletions(0, 8)).toEqual({ budget: 0, stop: true });
+    expect(planDeletions(-1, 1)).toEqual({ budget: 0, stop: true });
+    expect(planDeletions(5, 8)).toEqual({ budget: 0, stop: true });
+    expect(planDeletions(0, 0)).toEqual({ budget: 0, stop: false });
   });
 
   it("cannot re-cross the stop from below: batching strictly decreases the ratio", () => {
@@ -121,7 +129,7 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
     expect(rows()).toMatchObject([
       { uid: 5, status: "suspect", first_pass_id: "pass-1", last_verified_pass_id: null },
     ]);
-    await expect(confirmedOnPass(ACC, F, "pass-1")).resolves.toEqual([]);
+    await expect(confirmedOnPass(ACC, F, GEN, "pass-1")).resolves.toEqual([]);
   });
 
   it("does not promote on the same pass that first recorded it, even if reported twice", async () => {
@@ -142,7 +150,7 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
       { uid: 5, status: "confirmed_absent", last_verified_pass_id: "pass-2" },
       { uid: 6, status: "suspect", first_pass_id: "pass-2" },
     ]);
-    const confirmed = await confirmedOnPass(ACC, F, "pass-2");
+    const confirmed = await confirmedOnPass(ACC, F, GEN, "pass-2");
     expect(confirmed.map((r) => r.uid)).toEqual([5]);
   });
 
@@ -150,10 +158,10 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
     await recordMissing(ACC, F, GEN, "pass-1", [{ uid: 5, messageRowId: "m5" }]);
     await recordMissing(ACC, F, GEN, "pass-2", [{ uid: 5, messageRowId: "m5" }]);
     // pass-3: the gate skipped this folder's search — nothing recorded.
-    await expect(confirmedOnPass(ACC, F, "pass-3")).resolves.toEqual([]);
+    await expect(confirmedOnPass(ACC, F, GEN, "pass-3")).resolves.toEqual([]);
     // pass-4 searches again and still does not list it: verified this pass.
     await recordMissing(ACC, F, GEN, "pass-4", [{ uid: 5, messageRowId: "m5" }]);
-    expect((await confirmedOnPass(ACC, F, "pass-4")).map((r) => r.uid)).toEqual([5]);
+    expect((await confirmedOnPass(ACC, F, GEN, "pass-4")).map((r) => r.uid)).toEqual([5]);
   });
 
   it("a reappearing UID clears its record at any status (REQ-1.4)", async () => {
@@ -191,6 +199,62 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
     expect(rows()).toHaveLength(900);
   });
 
+  it("re-stamps a budget leftover on the next search so it stays eligible, and leaves a confirmed row alone when not reported (Grok NIT 10)", async () => {
+    await recordMissing(ACC, F, GEN, "pass-1", [
+      { uid: 5, messageRowId: "m5" },
+      { uid: 6, messageRowId: "m6" },
+    ]);
+    await recordMissing(ACC, F, GEN, "pass-2", [
+      { uid: 5, messageRowId: "m5" },
+      { uid: 6, messageRowId: "m6" },
+    ]);
+    // pass-3: the budget deleted 5 last time (simulated by forgetting nothing —
+    // 5 is still confirmed); the search still misses 6 only.
+    await recordMissing(ACC, F, GEN, "pass-3", [{ uid: 6, messageRowId: "m6" }]);
+
+    expect((await confirmedOnPass(ACC, F, GEN, "pass-3")).map((r) => r.uid)).toEqual([6]);
+    expect(rows()).toMatchObject([
+      { uid: 5, status: "confirmed_absent", last_verified_pass_id: "pass-2" },
+      { uid: 6, status: "confirmed_absent", last_verified_pass_id: "pass-3" },
+    ]);
+  });
+
+  it("scopes the deletion set to the current generation even when pass ids collide (Grok M4)", async () => {
+    await recordMissing(ACC, F, 6, "pass-1", [{ uid: 5, messageRowId: "m5" }]);
+    await recordMissing(ACC, F, 6, "pass-2", [{ uid: 5, messageRowId: "m5" }]);
+    expect(await confirmedOnPass(ACC, F, GEN, "pass-2")).toEqual([]);
+    expect((await confirmedOnPass(ACC, F, 6, "pass-2")).map((r) => r.uid)).toEqual([5]);
+  });
+
+  it("applySearchAll runs purge → clear → record atomically, and a resurrected UID needs two fresh observations again (Grok M4)", async () => {
+    const obs = (passId: string, present: number[], missing: number[]) =>
+      applySearchAll({
+        accountId: ACC,
+        folder: F,
+        uidvalidity: GEN,
+        passId,
+        presentUids: present,
+        missing: missing.map((uid) => ({ uid, messageRowId: `m${uid}` })),
+      });
+
+    await recordMissing(ACC, F, 6, "pass-0", [{ uid: 5, messageRowId: "m5" }]); // stale generation
+    await obs("pass-1", [1, 2], [5]);
+    expect(rows()).toMatchObject([{ uid: 5, uidvalidity: GEN, status: "suspect" }]); // purged gen 6
+    await obs("pass-2", [1, 2], [5]);
+    expect((await confirmedOnPass(ACC, F, GEN, "pass-2")).map((r) => r.uid)).toEqual([5]);
+
+    // It comes back (moved back by another client), then vanishes once more.
+    await obs("pass-3", [1, 2, 5], []);
+    expect(rows()).toEqual([]);
+    await obs("pass-4", [1, 2], [5]);
+    expect(rows()).toMatchObject([{ uid: 5, status: "suspect", first_pass_id: "pass-4" }]);
+    expect(await confirmedOnPass(ACC, F, GEN, "pass-4")).toEqual([]);
+
+    const s = harnessRef.current!.statements;
+    const lastBegin = s.lastIndexOf("BEGIN TRANSACTION");
+    expect(s.slice(lastBegin).filter((x) => x.startsWith("COMMIT"))).toHaveLength(1);
+  });
+
   it("a folder error clears nothing: suspects persist un-aged when no search runs (REQ-1.4, REQ-3.3)", async () => {
     await recordMissing(ACC, F, GEN, "pass-1", [{ uid: 5, messageRowId: "m5" }]);
     // Nothing is called for pass-2 (the folder errored). The row is untouched.
@@ -209,8 +273,8 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
     await recordMissing(ACC, "Sent", GEN, "pass-1", [{ uid: 5, messageRowId: "s5" }]);
     await recordMissing(ACC, F, GEN, "pass-2", [{ uid: 5, messageRowId: "m5" }]);
 
-    expect((await confirmedOnPass(ACC, F, "pass-2")).map((r) => r.folder)).toEqual([F]);
-    expect(await confirmedOnPass(ACC, "Sent", "pass-2")).toEqual([]);
+    expect((await confirmedOnPass(ACC, F, GEN, "pass-2")).map((r) => r.folder)).toEqual([F]);
+    expect(await confirmedOnPass(ACC, "Sent", GEN, "pass-2")).toEqual([]);
   });
 
   it("orders confirmed rows oldest-first for the batching cap (REQ-3.1)", async () => {
@@ -227,6 +291,6 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
       )
       .run(ACC, F, 10, GEN, "m10", 100);
 
-    expect((await confirmedOnPass(ACC, F, "p9")).map((r) => r.uid)).toEqual([10, 20]);
+    expect((await confirmedOnPass(ACC, F, GEN, "p9")).map((r) => r.uid)).toEqual([10, 20]);
   });
 });

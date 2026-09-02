@@ -552,3 +552,30 @@
   - **The vault is reachable from this machine** (`~/Vaults/Pepper Knowledge/...`); the F-4 spec's
     approval line, Task 13 and coupling note were reconciled there directly. HANDOFF's "not
     reachable from this checkout" was wrong and is corrected at wrap-up.
+- **2026-09-02 — F-4 built as "part 1", the substrate only (#44) — *(delegated)*.** With ~70 minutes
+  of the window left after F-5 landed, the seat cut F-4 (a 4–5 day, 13-task spec) to the pieces
+  that delete nothing and that part 2 cannot do without: per-folder attestation from
+  `delta_check_folders` (REQ-1.2b, spec Task 8), `exists` on the wire (Task 5), boundary validation
+  on `imapSearchAllUids` (the command itself already existed — the spec's Task 5 citation was
+  stale), migration 26 (Task 6), and `reconcile.ts` — the pure budget/cap/diff decisions and the
+  REQ-1.5 suspect state machine on the harness (Tasks 9 and 11). **The deleting half is deferred
+  to part 2 with a written plan** (`docs/briefs/2026-09-02-f4-part2-plan.md`) that itself needs an
+  opposite-line read before code; rushing the path that deletes mail into a window's last forty
+  minutes was judged the wrong trade.
+  - **A defect the seat found in its own code before either review arrived:** the timeout path in
+    `delta_check_folders` returned `Ok` after the session was desynchronised, which handed the
+    poisoned connection back to the pool (the pre-F-4 code did the same by `continue`ing). Fixed to
+    `Err`, which is the pool's eviction signal. Both reviewers then filed it as their HIGH.
+  - **Gemini 3.7:** CHANGES REQUESTED (1H 2M 1L 2N), all six adopted — the timeout, the fallback
+    `catch` omitting failed folders (the exact omission REQ-1.2b forbids), `clearReappeared` pushing
+    the whole server list through DELETEs, `recordMissing` outside a transaction, the index, the
+    dedupe.
+  - **Grok 4.6:** CHANGES REQUESTED (11). Three duplicated fixes already made. Adopted: `checked`
+    redefined (it never meant "a `UID SEARCH ALL` ran" — the part 2 plan attests from two bits);
+    `confirmedOnPass` generation-scoped and a single atomic `applySearchAll` as the documented
+    entry point (its resurrection scenario — a UID that comes back and vanishes once more — would
+    have deleted on one observation if part 2 called the pieces separately); `exists` nullable on
+    unchecked rows (`0` reads as "emptied" to the gate); `planDeletions` stops on inconsistent
+    counts; `first_seen_at` NOT NULL; `CHECK` on `status`; leftover re-stamp tests and the re-stamp
+    documented as required.
+  - **Nothing declined this time.** Every finding on #44 was either already fixed or adopted.

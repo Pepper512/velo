@@ -1069,7 +1069,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
             uidvalidity: savedState.uidvalidity ?? 0,
             new_uids: [],
             uidvalidity_changed: false,
-            exists: 0,
+            exists: null,
             checked: false,
             error: folderErr instanceof Error ? folderErr.message : String(folderErr),
           });

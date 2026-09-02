@@ -892,7 +892,7 @@ pub async fn delta_check_folders(
                 uidvalidity: current_uidvalidity,
                 new_uids: vec![],
                 uidvalidity_changed: true,
-                exists,
+                exists: Some(exists),
                 checked: true,
                 error: None,
             });
@@ -926,7 +926,7 @@ pub async fn delta_check_folders(
             uidvalidity: current_uidvalidity,
             new_uids,
             uidvalidity_changed: false,
-            exists,
+            exists: Some(exists),
             checked: true,
             error: None,
         });
@@ -2215,13 +2215,14 @@ mod tests {
         assert!(!r.checked);
         assert!(r.new_uids.is_empty(), "no UIDs a caller could act on");
         assert!(!r.uidvalidity_changed, "no resync claim either");
-        assert_eq!(r.exists, 0);
+        assert_eq!(r.exists, None, "no count either — 0 would read as 'emptied'");
         assert_eq!(r.uidvalidity, 5, "echoes the requested generation, claims nothing new");
         assert_eq!(r.error.as_deref(), Some("SELECT failed: NO"));
 
         // The wire shape the frontend's `!checked` guard reads.
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["checked"], false);
+        assert!(json["exists"].is_null());
         assert!(json["error"].is_string());
     }
 }

@@ -99,16 +99,18 @@ export interface DeltaCheckRequest {
  * in `src-tauri/src/imap/types.rs`.
  *
  * F-4 REQ-1.2b: every requested folder comes back, `checked: false` with an
- * `error` when SELECT or the UID SEARCH did not complete. A pass may only
- * attest completeness when every syncable folder is `checked`.
+ * `error` when the check did not produce a usable observation. `checked` is
+ * NOT "a `UID SEARCH ALL` ran" — part 2's attestation keeps a separate
+ * per-folder bit for that and evaluates it against the syncable-folder set,
+ * treating a folder missing from the results as unchecked.
  */
 export interface DeltaCheckResult {
   folder: string;
   uidvalidity: number;
   new_uids: number[];
   uidvalidity_changed: boolean;
-  /** The server's EXISTS at SELECT (F-4 REQ-2.1 gate input). */
-  exists: number;
+  /** The server's EXISTS at SELECT (F-4 REQ-2.1 gate input); `null` when unchecked. */
+  exists: number | null;
   checked: boolean;
   error: string | null;
 }

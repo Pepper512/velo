@@ -9,6 +9,13 @@
  * end-of-pass deletion) is part 2 and is not in this file.
  *
  * Everything here fails toward "keep".
+ *
+ * **Hard invariant for callers (part 2):** every successful `UID SEARCH ALL`
+ * in a folder runs the whole trio — purge other generations, clear the UIDs
+ * that are present, record the UIDs that are missing — atomically, under one
+ * pass id that is stable for the entire account pass. `applySearchAll` is
+ * that trio; calling the pieces separately is the unusual path. A skipped
+ * gate or a folder error calls none of them (REQ-1.4, REQ-3.3).
  */
 import { getDb, withTransaction } from "../db/connection";
 
@@ -54,8 +61,12 @@ export interface DeletionPlan {
  */
 export function planDeletions(localRows: number, confirmedCount: number): DeletionPlan {
   if (confirmedCount <= 0) return { budget: 0, stop: false };
+  // Inconsistent inputs — more confirmed suspects than the folder has rows, or
+  // no rows at all — are a miscount somewhere, and a miscount is a human
+  // decision, not a budget (Grok L8).
+  if (localRows <= 0 || confirmedCount > localRows) return { budget: 0, stop: true };
   if (localRows > 10 && confirmedCount * 2 > localRows) return { budget: 0, stop: true };
-  return { budget: Math.min(deletionCap(localRows), confirmedCount), stop: false };
+  return { budget: Math.min(deletionCap(localRows), confirmedCount, localRows), stop: false };
 }
 
 // ---------------------------------------------------------------------------
@@ -83,10 +94,14 @@ const CHUNK = 400;
  *
  * Newly missing UIDs are inserted as `suspect`. UIDs that were already
  * suspect from an *earlier* pass are promoted to `confirmed_absent` with
- * `last_verified_pass_id = passId`; ones already confirmed are re-stamped so
- * the end-of-pass deletion (`confirmedOnPass`) sees them as verified *this*
- * pass. A UID first seen suspect on this same pass is not promoted: two
- * observations means two passes (REQ-1.2(a)).
+ * `last_verified_pass_id = passId`. Ones already confirmed are **re-stamped**
+ * with this pass id — that is required, not incidental: REQ-3.1's budget
+ * leaves confirmed leftovers for the next pass, and `confirmedOnPass(N)` only
+ * returns rows verified on pass N, so a leftover that is still missing must
+ * be re-verified each pass to stay eligible. A confirmed row that is *not*
+ * reported missing this pass is left alone (and, if it reappeared, the
+ * caller's `clearReappeared` removes it). A UID first seen suspect on this
+ * same pass is not promoted: two observations means two passes (REQ-1.2(a)).
  */
 export async function recordMissing(
   accountId: string,
@@ -101,31 +116,42 @@ export async function recordMissing(
   // the record must be all-or-nothing — a half-recorded pass would confirm
   // some suspects on the next pass and not others (Gemini L4).
   await withTransaction(async (db) => {
-    for (let i = 0; i < missing.length; i += CHUNK) {
-      const chunk = missing.slice(i, i + CHUNK);
-      // Promote first: an INSERT OR IGNORE afterwards cannot touch these rows,
-      // and a row inserted on this pass keeps first_pass_id = passId, which
-      // the promotion below excludes. `$n` once each, in order (the SQLite
-      // harness translator depends on it), so the pass id is bound twice.
-      const uidPlaceholders = chunk.map((_, j) => `$${j + 6}`).join(", ");
-      await db.execute(
-        `UPDATE reconcile_suspects
-         SET status = 'confirmed_absent', last_verified_pass_id = $1
-         WHERE account_id = $2 AND folder = $3 AND uidvalidity = $4
-           AND first_pass_id <> $5
-           AND uid IN (${uidPlaceholders})`,
-        [passId, accountId, folder, uidvalidity, passId, ...chunk.map((m) => m.uid)],
-      );
-      for (const m of chunk) {
-        await db.execute(
-          `INSERT OR IGNORE INTO reconcile_suspects
-             (account_id, folder, uid, uidvalidity, message_row_id, status, first_pass_id)
-           VALUES ($1, $2, $3, $4, $5, 'suspect', $6)`,
-          [accountId, folder, m.uid, uidvalidity, m.messageRowId, passId],
-        );
-      }
-    }
+    await recordMissingWithin(db, accountId, folder, uidvalidity, passId, missing);
   });
+}
+
+async function recordMissingWithin(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+  passId: string,
+  missing: { uid: number; messageRowId: string }[],
+): Promise<void> {
+  for (let i = 0; i < missing.length; i += CHUNK) {
+    const chunk = missing.slice(i, i + CHUNK);
+    // Promote first: an INSERT OR IGNORE afterwards cannot touch these rows,
+    // and a row inserted on this pass keeps first_pass_id = passId, which the
+    // promotion below excludes. `$n` once each, in order (the SQLite harness
+    // translator depends on it), so the pass id is bound twice.
+    const uidPlaceholders = chunk.map((_, j) => `$${j + 6}`).join(", ");
+    await db.execute(
+      `UPDATE reconcile_suspects
+       SET status = 'confirmed_absent', last_verified_pass_id = $1
+       WHERE account_id = $2 AND folder = $3 AND uidvalidity = $4
+         AND first_pass_id <> $5
+         AND uid IN (${uidPlaceholders})`,
+      [passId, accountId, folder, uidvalidity, passId, ...chunk.map((m) => m.uid)],
+    );
+    for (const m of chunk) {
+      await db.execute(
+        `INSERT OR IGNORE INTO reconcile_suspects
+           (account_id, folder, uid, uidvalidity, message_row_id, status, first_pass_id)
+         VALUES ($1, $2, $3, $4, $5, 'suspect', $6)`,
+        [accountId, folder, m.uid, uidvalidity, m.messageRowId, passId],
+      );
+    }
+  }
 }
 
 /**
@@ -191,22 +217,69 @@ export async function purgeOtherGenerations(
 }
 
 /**
- * The rows the end-of-pass deletion may touch: `confirmed_absent` AND verified
- * on *this* pass (REQ-1.5), oldest confirmation first (REQ-3.1's batching
- * order). Suspects in a folder the gate let skip this pass are not here.
+ * The rows the end-of-pass deletion may touch: `confirmed_absent`, in the
+ * folder's *current* generation, AND verified on *this* pass (REQ-1.5), oldest
+ * confirmation first (REQ-3.1's batching order). Suspects in a folder the
+ * gate let skip this pass are not here; neither is anything from another
+ * UIDVALIDITY, whatever pass id it carries (Grok M4).
  */
 export async function confirmedOnPass(
   accountId: string,
   folder: string,
+  uidvalidity: number,
   passId: string,
 ): Promise<SuspectRow[]> {
   const db = await getDb();
   return db.select<SuspectRow[]>(
     `SELECT * FROM reconcile_suspects
-     WHERE account_id = $1 AND folder = $2 AND status = 'confirmed_absent' AND last_verified_pass_id = $3
+     WHERE account_id = $1 AND folder = $2 AND uidvalidity = $3
+       AND status = 'confirmed_absent' AND last_verified_pass_id = $4
      ORDER BY first_seen_at ASC, uid ASC`,
-    [accountId, folder, passId],
+    [accountId, folder, uidvalidity, passId],
   );
+}
+
+export interface SearchAllObservation {
+  accountId: string;
+  folder: string;
+  /** The folder's UIDVALIDITY as SELECTed for this search. */
+  uidvalidity: number;
+  /** Stable for the whole account pass. */
+  passId: string;
+  /** Every UID the server listed. */
+  presentUids: Iterable<number>;
+  /** Local UIDs the list did not contain, with their row ids. */
+  missing: { uid: number; messageRowId: string }[];
+}
+
+/**
+ * Apply one successful `UID SEARCH ALL` to the suspect table, atomically:
+ * purge suspects from other generations, clear the ones that reappeared,
+ * record the ones still missing. This is the entry point part 2 calls; the
+ * three pieces are exported for tests and for resync paths, not for routine
+ * use (Grok M4 — calling them separately makes two-pass confirmation and
+ * generation isolation caller-optional).
+ */
+export async function applySearchAll(obs: SearchAllObservation): Promise<void> {
+  const { accountId, folder, uidvalidity, passId, presentUids, missing } = obs;
+  await withTransaction(async (db) => {
+    await db.execute(
+      "DELETE FROM reconcile_suspects WHERE account_id = $1 AND folder = $2 AND uidvalidity <> $3",
+      [accountId, folder, uidvalidity],
+    );
+
+    const suspects = await db.select<{ uid: number }[]>(
+      "SELECT uid FROM reconcile_suspects WHERE account_id = $1 AND folder = $2 AND uidvalidity = $3",
+      [accountId, folder, uidvalidity],
+    );
+    if (suspects.length > 0) {
+      const present = new Set(presentUids);
+      const reappeared = suspects.map((s) => s.uid).filter((uid) => present.has(uid));
+      await deleteSuspects(db, accountId, folder, uidvalidity, reappeared);
+    }
+
+    await recordMissingWithin(db, accountId, folder, uidvalidity, passId, missing);
+  });
 }
 
 /** Remove suspect records once their rows have been deleted (or on resync). */

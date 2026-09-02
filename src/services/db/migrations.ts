@@ -841,10 +841,10 @@ const MIGRATIONS = [
         uid INTEGER NOT NULL,
         uidvalidity INTEGER NOT NULL,
         message_row_id TEXT NOT NULL,
-        status TEXT NOT NULL DEFAULT 'suspect',
+        status TEXT NOT NULL DEFAULT 'suspect' CHECK (status IN ('suspect', 'confirmed_absent')),
         first_pass_id TEXT NOT NULL,
         last_verified_pass_id TEXT,
-        first_seen_at INTEGER DEFAULT (unixepoch()),
+        first_seen_at INTEGER NOT NULL DEFAULT (unixepoch()),
         PRIMARY KEY (account_id, folder, uid, uidvalidity)
       );
       CREATE INDEX IF NOT EXISTS idx_reconcile_suspects_status
