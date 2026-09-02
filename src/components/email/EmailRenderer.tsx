@@ -1,6 +1,9 @@
 import { useRef, useCallback, useLayoutEffect, useMemo, useState, useEffect } from "react";
 import { ImageOff } from "lucide-react";
-import { openEmailLink } from "@/services/links/openLink";
+import { openEmailLink, isOpenableHref, isWebHref } from "@/services/links/openLink";
+import { assessLinkForConfirmation } from "@/services/links/linkGuard";
+import { LinkConfirmDialog } from "./LinkConfirmDialog";
+import type { LinkAnalysis } from "@/utils/phishingDetector";
 import { stripRemoteImages, hasBlockedImages } from "@/utils/imageBlocker";
 import { addToAllowlist } from "@/services/db/imageAllowlist";
 import { escapeHtml, sanitizeHtml } from "@/utils/sanitize";
@@ -34,6 +37,8 @@ export function EmailRenderer({
   const rafRef = useRef<number>(0);
   const [overrideShow, setOverrideShow] = useState(false);
   const [cidMap, setCidMap] = useState<Map<string, string>>(new Map());
+  // SPEC-F-3: a click the phishing gate flagged, waiting for the user's word.
+  const [pendingLink, setPendingLink] = useState<{ href: string; analysis: LinkAnalysis } | null>(null);
 
   const theme = useUIStore((s) => s.theme);
   const isDark = theme === "dark"
@@ -190,16 +195,53 @@ export function EmailRenderer({
       const anchor = target.closest("a");
       if (!anchor) return;
       e.preventDefault();
-      void openEmailLink(anchor.getAttribute("href") ? anchor.href : null, window.location.origin);
+      const href = anchor.getAttribute("href") ? anchor.href : null;
+      const origin = window.location.origin;
+      // In-page and empty anchors keep their silent no-op (F-2 REQ-2.4), and
+      // only web links are analysed — mailto:/tel: go straight to the seam
+      // (#71 review, Gemini M3). Everything else passes the phishing gate
+      // (SPEC-F-3): a flagged link waits in the dialog.
+      if (!isOpenableHref(href, origin) || !isWebHref(href)) {
+        void openEmailLink(href, origin);
+        return;
+      }
+      const displayText = anchor.textContent ?? "";
+      void assessLinkForConfirmation(href!, displayText, { accountId, senderAddress })
+        .then((analysis) => {
+          if (analysis) setPendingLink({ href: href!, analysis });
+          else void openEmailLink(href, origin);
+        })
+        .catch((err: unknown) => {
+          // The gate itself failed (a detector bug): neither a dead click nor
+          // an unchecked open (#71 review, Gemini H1). Say so, offer the URL.
+          console.error("[EmailRenderer] link check failed:", err instanceof Error ? err.message : String(err));
+          useUIStore.getState().addNotice({
+            text: "Couldn't check this link for phishing — copy it to open it yourself",
+            action: { label: "Copy link", onClick: () => navigator.clipboard.writeText(href!) },
+          });
+        });
     };
     doc.addEventListener("click", handleClick);
+    // A middle click is `auxclick`, not `click`; the sandbox allows no popups,
+    // but it must not slip past the gate either (#71 review, Gemini L4).
+    const handleAuxClick = (e: MouseEvent) => {
+      if (e.button === 1) handleClick(e);
+    };
+    doc.addEventListener("auxclick", handleAuxClick);
 
     return () => {
       doc.removeEventListener("click", handleClick);
+      doc.removeEventListener("auxclick", handleAuxClick);
       observerRef.current?.disconnect();
       cancelAnimationFrame(rafRef.current);
     };
-  }, [bodyHtml, isDark, isPlainText]);
+  }, [bodyHtml, isDark, isPlainText, accountId, senderAddress]);
+
+  // A dialog left open belongs to the message it was opened on. When the
+  // message changes, it goes (#71 review, Gemini M2).
+  useEffect(() => {
+    setPendingLink(null);
+  }, [messageId, bodyHtml]);
 
   const handleLoadImages = useCallback(() => {
     setOverrideShow(true);
@@ -243,6 +285,17 @@ export function EmailRenderer({
         style={{ overflow: "hidden" }}
         title="Email content"
       />
+      {pendingLink && (
+        <LinkConfirmDialog
+          linkAnalysis={pendingLink.analysis}
+          onCancel={() => setPendingLink(null)}
+          onConfirm={() => {
+            const { href } = pendingLink;
+            setPendingLink(null);
+            void openEmailLink(href, window.location.origin);
+          }}
+        />
+      )}
     </div>
   );
 }

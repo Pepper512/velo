@@ -40,12 +40,13 @@ Velo is a desktop application. Your emails, tokens, and settings are stored loca
 
 - HTML emails are sanitized with **DOMPurify** and rendered in a **sandboxed iframe** (`allow-same-origin` only -- no scripts)
 - Remote images are **blocked by default** and replaced with placeholders. Users can allowlist specific senders.
-- Phishing link detection (10 heuristic rules) ships in the codebase but is
-  **not currently surfaced in the UI** -- the banner and link-confirmation dialog
-  that would display its results are not reachable from any rendered component
-  (audit P19, verified 2026-09-01). **Do not rely on Velo screening links for
-  you.** This line previously claimed the feature flagged links "before you click
-  them", which was not true of any shipped build.
+- Phishing link detection (10 heuristic rules) has two surfaces (wired
+  2026-09-03, SPEC-F-3, after audit P19 found them unreachable): a **warning
+  banner** above a message whose links score past the sensitivity threshold, and
+  a **confirmation dialog** that stops a click on a flagged link and shows the
+  destination and the tripped rules before anything opens. Safe links open
+  directly. Heuristics are not a guarantee -- **read the destination yourself**;
+  the allowlist and the sensitivity setting are yours to adjust.
 
 ### Network
 

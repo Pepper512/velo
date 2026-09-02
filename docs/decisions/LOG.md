@@ -1206,3 +1206,41 @@
   default paste on purpose (attachments have their own button and drop path); Velo has no
   toast system — hence the local notice. Raw output in
   `docs/reviews/2026-09-03-pr69-gemini-raw.md`.
+- **2026-09-03 — F-3 / P19 built (phishing interstitial and banner wired)** on Jim's
+  instruction and decision 5, **Tier 1** (email components, the link seam, a pure detector
+  helper; no Rust, CSP, capability or dependency). Verified first: every anchor click already
+  funnels through `openEmailLink` (F-2), while `LinkConfirmDialog`, `PhishingBanner` and
+  `scanMessageLinks` had no caller — the help page promised a confirmation on *every* click
+  and `SECURITY.md` said the feature was not surfaced. **Decisions:** the gate analyses the
+  exact `href` the DOM resolved with the detector's own `analyzeLink` (plain-text linkified
+  anchors included) and asks only when the score crosses the *same* per-sensitivity line the
+  banner uses (`linkNeedsConfirmation`, 60/40/20) — not on every click; detection-off and an
+  allowlisted sender open directly; a setting or allowlist read that fails **fails closed**
+  (gate on, sender unknown); in-page anchors keep F-2's silent no-op and are never analysed
+  (`isOpenableHref` extracted from the seam). The banner is wired too, because the scan
+  result exists once the gate reads the same settings and audit P19's acceptance names it —
+  Jim can strike it. "Trust this sender" allowlists and hides. TDD: `linkGuard.test.ts`
+  (thresholds, fixtures pinned against the detector's rule scores, sensitivity moves the
+  line, disabled, allowlisted, no-context, fail-closed), renderer click tests (flagged →
+  dialog and no opener; Go Back / Open Anyway; safe → opens; `#top` never analysed), banner
+  tests (shown, clean, trust, scan error). Two F-2 click tests now `waitFor` the opener,
+  since the gate awaits its settings first. Help card and `SECURITY.md` rewritten to what is
+  true. Spec `docs/briefs/2026-09-03-f3-link-confirm.md`, committed before the code.
+  One review leg (Tier 1): Gemini 3.7.
+- **2026-09-03 — PR #71 (F-3) review, one leg (Tier 1).** Gemini 3.7 Flash: CHANGES
+  REQUESTED (1H 2M 3L 1N). **Adopted:** H1 — the gate's promise had no `.catch`, so a
+  detector exception would have left a dead click; now a visible notice with a Copy-link
+  action and **no open** (a security gate fails closed, and a dead click is also a failure);
+  M2 — a dialog left open survived a message change and "Open Anyway" would have opened the
+  previous message's URL: cleared whenever the message changes (test); M3 — `mailto:`/`tel:`
+  reached the detector: only web schemes are analysed (`isWebHref`), the rest go straight
+  to the seam (test); L4 — a middle click (`auxclick`) routes through the same gate (test);
+  L5 — a collapsed message is not scanned until expanded (a 50-message thread must not fire
+  50 scans; test); N7 — tests for the rejection path, `mailto:`, the message change, the
+  middle click. **Declined, documented:** L6 — the banner fires on a *message* (max score
+  OR suspicious-link count), the dialog on a *link* (score only), so three 30-point links
+  show a banner and no dialog. Intentional: the count rule is a message-level smell, and a
+  dialog on a link the detector rates below the line would nag; recorded in the spec. **Questions
+  recorded for follow-up:** disable "Trust this sender" when SPF/DKIM failed (a spoofed
+  `From:` could allowlist a real address); a trust from one message should dismiss sibling
+  banners in the thread. Raw output in `docs/reviews/2026-09-03-pr71-gemini-raw.md`.
