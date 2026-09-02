@@ -124,6 +124,56 @@ hides MOVE along with UIDPLUS, so that server takes the COPY fallback, whose
 its own messages and deletes its own destination folder; the `\Deleted` copy
 it leaves in INBOX on `:11144` is harmless in a disposable server.
 
+## F-4: vanished-UID reconciliation, end to end (manual, needs the running app)
+
+The reconciliation logic is proved on the SQLite harness (`reconcilePass.test.ts`,
+`reconcileOp.test.ts`), but the Done-when in `docs/briefs/2026-09-02-f4-part2-plan.md` asks for the
+real pipeline — server → Rust → sync → SQLite → UI — which only the running app exercises. Run the
+containers, add an IMAP account in Velo against `127.0.0.1:11143` (user `velo`, password
+`velo-test-only`, no TLS), let the initial sync finish, then:
+
+**Scenario 1 — a message moved elsewhere disappears after two passes, never one.**
+1. In the second client: `a1 LOGIN velo velo-test-only` · `a2 SELECT INBOX` · note a UID `Y` ·
+   `a3 UID MOVE Y Archive` (create `Archive` first with `a0 CREATE Archive` if needed).
+2. In Velo: trigger a sync. **Pass 1:** the message is still shown (it is a *suspect*; check
+   `reconcile_suspects` has one row with `status = 'suspect'`). Trigger a second sync. **Pass 2:**
+   the message is gone from INBOX locally; the log carries
+   `[reconcile] deleted INBOX/<Y> (<Message-ID>): confirmed absent on the server`.
+3. Fail condition: gone after pass 1.
+
+**Scenario 2 — an archive done in Velo is never deleted prematurely.**
+1. In Velo, archive a message while the second client holds `Archive` open. Do **not** let Velo
+   sync `Archive` (temporarily rename the folder on the server after the move, or pause the sync
+   timer). Trigger two INBOX syncs.
+2. The INBOX row is either re-keyed (`:11143` reports COPYUID) or tombstoned (`moved_to = 'Archive'`);
+   in neither case does a reconciliation deletion appear in the log. Fail condition: a
+   `[reconcile] deleted` line for that UID.
+
+**Scenario 3 — the no-UIDPLUS server idles with no extra searches.**
+1. Repeat the account against `:11144`. Permanently delete one message in Velo (it stays on the
+   server flagged `\Deleted`; `folder_sync_state.flagged_not_expunged` for INBOX becomes 1).
+2. Trigger five syncs with nothing else happening. The log shows **no** `UID SEARCH ALL` for INBOX
+   after the first recompute — the gate agrees (`EXISTS = live + flagged`). On the 10th pass the
+   belt runs `UID SEARCH NOT DELETED` once instead. Fail condition: a full list on every pass.
+
+**Scenario 4 — the reconcile op after an unknown outcome (part 3).**
+1. Make a move time out after it completes: in the second client, `a4 UID MOVE Z Archive` while
+   Velo is archiving the same message, or point Velo at a deliberately slow proxy. Velo shows the
+   *"may already have completed"* notice; `pending_operations` gains a row with
+   `operation_type = 'reconcile'`, `resource_id = 'reconcile:INBOX'`, `max_retries = 3`.
+2. Let the queue drain (30 s). The op runs `UID SEARCH UID <Z>`; `reconcile_suspects` gains `Z` as
+   a `suspect`. Two attested syncs later the row is gone. Fail condition: the row deleted before
+   the second pass, or the op retrying the MOVE.
+
+**Scenario 5 — a folder deleted on the server (part 3).**
+1. In the second client: `a5 DELETE Projects` (a folder Velo has synced). Trigger a sync: nothing
+   is deleted, `folder_sync_state.missing_passes = 1` for `Projects`. Trigger another: the sync
+   state row is gone, the notice says the folder no longer exists and its messages are kept, and
+   the label still lists them. Fail condition: the messages disappear.
+
+Attach to the PR: the `UID SEARCH` / `MOVE` transcript from the second client, the relevant
+`[reconcile]` log lines, and `SELECT * FROM reconcile_suspects` before and after each pass.
+
 ## Evidence already on the record
 
 PR #26 carries a passing run of all three scenarios, produced with the Alpine
