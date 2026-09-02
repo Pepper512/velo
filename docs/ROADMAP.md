@@ -1,6 +1,6 @@
 # Velo fork — roadmap
 
-> Pinned 2026-09-03 at `c90d1f0` (#65). Sources: the vault build queues
+> Pinned 2026-09-03 at `66a9355` (#69). Sources: the vault build queues
 > (`~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/`), the 2026-09-01 issue ledger, parity
 > report and effort model, `docs/decisions/LOG.md` and `EXCEPTIONS.md`, and `HANDOFF.md`. Days are
 > the effort model's build-days for one credentialed seat, tests and Tier-2 overhead included.
@@ -11,8 +11,8 @@
 Velo is a local-first Tauri v2 (Rust) + React 19 desktop email client, forked from
 `avihaymenahem/velo` v0.4.21 and being hardened under Jim's methodology before any feature work.
 The hardening line is most of the way through; the correctness line for IMAP is done in code (one
-manual live check outstanding); the bug-fix queue from the upstream triage has its whole P0/P1
-tier landed and a P2/P3 tail left; the Superhuman-parity enhancements have not started.
+manual live check outstanding); the bug-fix queue from the upstream triage is done (only #278,
+macOS signing, waits on a decision); the Superhuman-parity enhancements have not started.
 
 | Line | State |
 |---|---|
@@ -20,7 +20,7 @@ tier landed and a P2/P3 tail left; the Superhuman-parity enhancements have not s
 | Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA) and **P19/F-3** (orphaned phishing dialog — Jim's product decision: wire or delete) |
 | Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
 | IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
-| Bug-fix queue (upstream triage) | **P0/P1 tier done; #276, #243, #209/#265 (#65, `c90d1f0`) landed.** 4 P2/P3 items left (~4.25 days, #278 "not yet"); next #233, #204, #281 |
+| Bug-fix queue (upstream triage) | **Done.** Every queued item landed (#297 … #281 as #69, `66a9355`); only #278 (macOS signing) remains, "not yet" by decision 6 |
 | Enhancement queue (Superhuman parity) | **Nothing started.** 10 items in 3 waves, 33.5 days |
 
 ## Next up, in order
@@ -48,7 +48,10 @@ tier landed and a P2/P3 tail left; the Superhuman-parity enhancements have not s
 | 7 | #276 | **Landed #62 (`4630e31`, 2026-09-03).** Upstream PR #275 reviewed, design adopted; one strict parser for `sync_period_days`; `0` = no date filter on Gmail and IMAP; 2 y / 5 y / All time | 1.0 ✓ |
 | 8 | #243 | **Landed #63 (`7e767e5`, 2026-09-03).** Grouped unread-per-label query, pills beside Inbox/Spam/user labels, `velo-threads-changed` fired after every local update; first `Sidebar` render test | 1.0 ✓ |
 | 9 | #209/#265 | **Landed #65 (`c90d1f0`, 2026-09-03).** Custom OpenAI-compatible endpoint through the Rust `ai_fetch` command (https or loopback only, no redirects, allow-listed headers, caps); OpenRouter/DeepSeek named in the card; four review passes | 3.0 ✓ |
-| 10–13 | #278, #233, #204, #281 | P2/P3: macOS signing (not yet), Flatpak bump, cancel test, paste images | 4.25 |
+| 10 | #278 | macOS signing — **not yet** (decision 6), tied to the release/signing ADR (EX-007) | 0.25 |
+| 11 | #233 | **Landed #67 (`1ea767e`, 2026-09-03).** GNOME 50 runtime, Node 24 extension, `--runtime-repo` on the bundle, dispatchable packaging job with gated uploads; proven by a green dispatched Flatpak build | 0.5 ✓ |
+| 12 | #204 | **Landed #68 (`2dfc1b2`, 2026-09-03), Tier 2.** Cancellable connection tests: Rust abort-handle registry (tombstone, drop guard, duplicate-id abort), `connection_test_cancel`, the form's Cancel; three review legs | 0.5 ✓ |
+| 13 | #281 | **Landed #69 (`66a9355`, 2026-09-03).** Paste a screenshot into the composer: type allow-list + magic-byte sniff, 5 MiB cap, shipped as the existing CID part | 0.5 ✓ |
 
 ### 3. Carried hardening items
 - **E2 part 3** (#39's carry list): redundant `Arc` + `logout_arc`'s `try_unwrap` skipping LOGOUT,
@@ -104,6 +107,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-Then take bug-fix queue items 11 and 12, one PR each: #233 (Flatpak runtime bump — read the vault ledger entry and the upstream issue, verify the current runtime/SDK pins in the tree; Tier 1 unless it touches capabilities or a dependency, in which case ask) and #204 (cancel an in-flight connection test — verify how the IMAP/SMTP test commands run in Rust and how the add-account form awaits them; Tier 2 if it reaches the Rust IMAP/SMTP client: plan with threat pass and rollback before code). For each: spec from the vault template into docs/briefs/, TDD, first review leg Gemini 3.7 via agy; second leg Grok 4.6 via the grok CLI when its ~12 minutes are affordable, otherwise gemini-3.8-flash-high via agy (my rule of 2026-09-02) — diffs from committed SHAs, fake credentials never in literal form, rebase before expecting CI (a conflicting PR gets no run), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges. Then #281 (paste inline images in the composer, Tier 1).
+The bug-fix queue is done (only #278 stays "not yet"). Take the carried hardening items in order, one PR each. First P19/F-3 — wire LinkConfirmDialog on the email link path (my decision 5, 2026-09-02): read audit P19 and the F-2 brief's risk note, verify in the tree where email links open today (the link-click path in EmailRenderer/ThreadView and the phishing scan results in link_scan_results) and that the dialog is currently unreachable; Tier 1 (components + the phishing service); spec from the vault template into docs/briefs/, TDD, one review leg Gemini 3.7 via agy. Then E2 part 3 — the IMAP session-pool carry list from PR #39 (Arc/logout_arc try_unwrap skipping LOGOUT, evictions without LOGOUT, bump_credential_version by ident regardless of version, the cross-window invalidation race, the unvalidated session-id wrapper, Done-when 9 and the live halves of 2/10): Tier 2 (Rust IMAP pool) — plan with threat pass and rollback before code, TDD, Gemini 3.7 via agy AND a second leg (Grok 4.6 via the grok CLI when its ~12 minutes are affordable, otherwise gemini-3.8-flash-high) — diffs from committed SHAs, fake credentials never in literal form, rebase before expecting CI (a conflicting PR gets no run), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges.
 Do not run the manual checks (F-4 live Done-when, #240 Task 6) unless the app can be driven; they are recorded as open. The urlpattern dev-dependency for SPEC-280's test oracle is my decision — ask me before adding it.
 ```
