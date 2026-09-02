@@ -9,9 +9,10 @@
   approved before code; threat pass and rollback below; both cross-vendor legs.
 - **Base:** `main` @ `e6f3eb9` (code pin `9bec56a`; will be re-pinned after #297 lands). Every
   citation below was grepped at that pin or in the vendored crate sources named.
-- **Status:** **APPROVED by Jim (2026-09-02, by instruction: the plan, the `sqlx` direct
-  dependency — option A, version tracking the plugin's — and the 30 s idle watchdog). BUILDING**
-  on branch `f240-pinned-tx`. Task 0's audit result is below (§Task 0 result).
+- **Status:** **LANDED `b95468e`** (Pepper512/velo #54, 2026-09-02) after Jim's approval (the
+  plan, the `sqlx` direct dependency — option A, pinned `=0.8.6` — and the 30 s idle watchdog) and
+  three review rounds (LOG.md). Task 0's audit result is below (§Task 0 result). Open: Task 6
+  (manual sync check) and the #205 re-test.
 - **Source:** upstream avihaymenahem/velo#240 (with #264 duplicate, #192/#186/#196 symptoms;
   the ledger says it closes #204 and re-tests #205 — re-verify those two before claiming them);
   the fork's 2026-09-01 triage ranked it **P0**; **Opus 5's HIGH 2 on #43**: F-5's identity re-key
