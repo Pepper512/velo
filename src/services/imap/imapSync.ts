@@ -1062,6 +1062,17 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           }
         } catch (folderErr) {
           console.error(`[imapSync] Per-folder check failed for ${folder.path}:`, folderErr);
+          // F-4 REQ-1.2b: an omission would let part 2's attestation read a
+          // failed folder as never requested. Record it as unchecked.
+          deltaResultMap.set(folder.raw_path, {
+            folder: folder.raw_path,
+            uidvalidity: savedState.uidvalidity ?? 0,
+            new_uids: [],
+            uidvalidity_changed: false,
+            exists: 0,
+            checked: false,
+            error: folderErr instanceof Error ? folderErr.message : String(folderErr),
+          });
         }
       }
     }

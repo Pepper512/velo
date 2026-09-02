@@ -848,7 +848,7 @@ const MIGRATIONS = [
         PRIMARY KEY (account_id, folder, uid, uidvalidity)
       );
       CREATE INDEX IF NOT EXISTS idx_reconcile_suspects_status
-        ON reconcile_suspects(account_id, status, last_verified_pass_id);
+        ON reconcile_suspects(account_id, folder, status, last_verified_pass_id);
       ALTER TABLE folder_sync_state ADD COLUMN flagged_not_expunged INTEGER NOT NULL DEFAULT 0;
     `,
   },

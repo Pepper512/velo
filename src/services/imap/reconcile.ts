@@ -10,20 +10,20 @@
  *
  * Everything here fails toward "keep".
  */
-import { getDb } from "../db/connection";
+import { getDb, withTransaction } from "../db/connection";
 
 // ---------------------------------------------------------------------------
 // Pure decisions
 // ---------------------------------------------------------------------------
 
-/** UIDs present locally that the server's full list does not contain (REQ-1.1). */
+/** UIDs present locally that the server's full list does not contain (REQ-1.1). Deduplicated, sorted. */
 export function diffVanished(localUids: Iterable<number>, serverUids: Iterable<number>): number[] {
   const server = new Set(serverUids);
-  const vanished: number[] = [];
+  const vanished = new Set<number>();
   for (const uid of localUids) {
-    if (!server.has(uid)) vanished.push(uid);
+    if (!server.has(uid)) vanished.add(uid);
   }
-  return vanished.sort((a, b) => a - b);
+  return [...vanished].sort((a, b) => a - b);
 }
 
 /**
@@ -96,49 +96,74 @@ export async function recordMissing(
   missing: { uid: number; messageRowId: string }[],
 ): Promise<void> {
   if (missing.length === 0) return;
-  const db = await getDb();
 
-  for (let i = 0; i < missing.length; i += CHUNK) {
-    const chunk = missing.slice(i, i + CHUNK);
-    // Promote first: an INSERT OR IGNORE afterwards cannot touch these rows,
-    // and a row inserted on this pass keeps first_pass_id = passId, which the
-    // promotion below excludes.
-    // `$n` once each, in order (the SQLite harness translator depends on it),
-    // so the pass id is bound twice rather than referenced twice.
-    const uidPlaceholders = chunk.map((_, j) => `$${j + 6}`).join(", ");
-    await db.execute(
-      `UPDATE reconcile_suspects
-       SET status = 'confirmed_absent', last_verified_pass_id = $1
-       WHERE account_id = $2 AND folder = $3 AND uidvalidity = $4
-         AND first_pass_id <> $5
-         AND uid IN (${uidPlaceholders})`,
-      [passId, accountId, folder, uidvalidity, passId, ...chunk.map((m) => m.uid)],
-    );
-    for (const m of chunk) {
+  // One transaction: a bulk server-side removal reports hundreds of UIDs, and
+  // the record must be all-or-nothing — a half-recorded pass would confirm
+  // some suspects on the next pass and not others (Gemini L4).
+  await withTransaction(async (db) => {
+    for (let i = 0; i < missing.length; i += CHUNK) {
+      const chunk = missing.slice(i, i + CHUNK);
+      // Promote first: an INSERT OR IGNORE afterwards cannot touch these rows,
+      // and a row inserted on this pass keeps first_pass_id = passId, which
+      // the promotion below excludes. `$n` once each, in order (the SQLite
+      // harness translator depends on it), so the pass id is bound twice.
+      const uidPlaceholders = chunk.map((_, j) => `$${j + 6}`).join(", ");
       await db.execute(
-        `INSERT OR IGNORE INTO reconcile_suspects
-           (account_id, folder, uid, uidvalidity, message_row_id, status, first_pass_id)
-         VALUES ($1, $2, $3, $4, $5, 'suspect', $6)`,
-        [accountId, folder, m.uid, uidvalidity, m.messageRowId, passId],
+        `UPDATE reconcile_suspects
+         SET status = 'confirmed_absent', last_verified_pass_id = $1
+         WHERE account_id = $2 AND folder = $3 AND uidvalidity = $4
+           AND first_pass_id <> $5
+           AND uid IN (${uidPlaceholders})`,
+        [passId, accountId, folder, uidvalidity, passId, ...chunk.map((m) => m.uid)],
       );
+      for (const m of chunk) {
+        await db.execute(
+          `INSERT OR IGNORE INTO reconcile_suspects
+             (account_id, folder, uid, uidvalidity, message_row_id, status, first_pass_id)
+           VALUES ($1, $2, $3, $4, $5, 'suspect', $6)`,
+          [accountId, folder, m.uid, uidvalidity, m.messageRowId, passId],
+        );
+      }
     }
-  }
+  });
 }
 
 /**
  * A UID that reappears clears its suspect record (REQ-1.4). Called with the
  * UIDs a full server list *did* contain.
+ *
+ * Reads the folder's few suspect rows and intersects in memory, rather than
+ * pushing the whole server list (tens of thousands of UIDs on a big folder)
+ * through chunked DELETEs — the common case is zero suspects and zero writes
+ * (Gemini M2).
  */
 export async function clearReappeared(
   accountId: string,
   folder: string,
   uidvalidity: number,
-  presentUids: number[],
+  presentUids: Iterable<number>,
 ): Promise<void> {
-  if (presentUids.length === 0) return;
   const db = await getDb();
-  for (let i = 0; i < presentUids.length; i += CHUNK) {
-    const chunk = presentUids.slice(i, i + CHUNK);
+  const suspects = await db.select<{ uid: number }[]>(
+    "SELECT uid FROM reconcile_suspects WHERE account_id = $1 AND folder = $2 AND uidvalidity = $3",
+    [accountId, folder, uidvalidity],
+  );
+  if (suspects.length === 0) return;
+
+  const present = new Set(presentUids);
+  const reappeared = suspects.map((s) => s.uid).filter((uid) => present.has(uid));
+  await deleteSuspects(db, accountId, folder, uidvalidity, reappeared);
+}
+
+async function deleteSuspects(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+  uids: number[],
+): Promise<void> {
+  for (let i = 0; i < uids.length; i += CHUNK) {
+    const chunk = uids.slice(i, i + CHUNK);
     const placeholders = chunk.map((_, j) => `$${j + 4}`).join(", ");
     await db.execute(
       `DELETE FROM reconcile_suspects
@@ -191,5 +216,6 @@ export async function forgetSuspects(
   uidvalidity: number,
   uids: number[],
 ): Promise<void> {
-  await clearReappeared(accountId, folder, uidvalidity, uids);
+  if (uids.length === 0) return;
+  await deleteSuspects(await getDb(), accountId, folder, uidvalidity, uids);
 }

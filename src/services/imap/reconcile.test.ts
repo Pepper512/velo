@@ -9,6 +9,21 @@ const harnessRef: { current: ReturnType<typeof createSqliteHarness> | null } = {
 
 vi.mock("@/services/db/connection", () => ({
   getDb: () => Promise.resolve(harnessRef.current!.db),
+  withTransaction: async (fn: (db: unknown) => Promise<void>) => {
+    const db = harnessRef.current!.db;
+    await db.execute("BEGIN TRANSACTION", []);
+    try {
+      await fn(db);
+      await db.execute("COMMIT", []);
+    } catch (err) {
+      try {
+        await db.execute("ROLLBACK", []);
+      } catch {
+        // already rolled back
+      }
+      throw err;
+    }
+  },
 }));
 
 import { createSqliteHarness } from "@/test/sqliteHarness";
@@ -25,10 +40,11 @@ import {
 } from "./reconcile";
 
 describe("F-4 pure decisions", () => {
-  it("diffVanished lists local UIDs the server no longer has, sorted", () => {
+  it("diffVanished lists local UIDs the server no longer has, sorted and deduplicated", () => {
     expect(diffVanished([5, 1, 9, 3], [1, 3, 7])).toEqual([5, 9]);
     expect(diffVanished([], [1])).toEqual([]);
     expect(diffVanished([1, 2], [])).toEqual([1, 2]);
+    expect(diffVanished([9, 9, 5], [])).toEqual([5, 9]);
   });
 
   it("deletionCap binds at every folder size (REQ-3.1: min(500, max(10, ⌈10%⌉)))", () => {
@@ -148,6 +164,31 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
     await recordMissing(ACC, F, GEN, "pass-2", [{ uid: 5, messageRowId: "m5" }]);
     await clearReappeared(ACC, F, GEN, [5, 6]);
     expect(rows()).toEqual([]);
+  });
+
+  it("clearReappeared consults the folder's suspects, not the server list: zero suspects means zero writes", async () => {
+    const before = harnessRef.current!.statements.length;
+    const bigServerList = Array.from({ length: 20_000 }, (_, i) => i + 1);
+    await clearReappeared(ACC, F, GEN, bigServerList);
+
+    const ran = harnessRef.current!.statements.slice(before);
+    expect(ran).toHaveLength(1);
+    expect(ran[0]).toMatch(/^SELECT uid FROM reconcile_suspects/);
+  });
+
+  it("recordMissing is one transaction: a bulk removal is recorded whole or not at all", async () => {
+    const before = harnessRef.current!.statements.length;
+    await recordMissing(
+      ACC,
+      F,
+      GEN,
+      "pass-1",
+      Array.from({ length: 900 }, (_, i) => ({ uid: i + 1, messageRowId: `m${i + 1}` })),
+    );
+    const ran = harnessRef.current!.statements.slice(before);
+    expect(ran.filter((s) => s.startsWith("BEGIN"))).toHaveLength(1);
+    expect(ran.filter((s) => s.startsWith("COMMIT"))).toHaveLength(1);
+    expect(rows()).toHaveLength(900);
   });
 
   it("a folder error clears nothing: suspects persist un-aged when no search runs (REQ-1.4, REQ-3.3)", async () => {

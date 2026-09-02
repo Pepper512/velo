@@ -861,16 +861,15 @@ pub async fn delta_check_folders(
 ) -> Result<Vec<DeltaCheckResult>, String> {
     let mut results = Vec::with_capacity(folders.len());
 
-    // F-4 REQ-1.2b: a folder that cannot be checked is reported as unchecked,
-    // never dropped. A *timeout* additionally ends the pass: the session is
-    // desynchronised mid-protocol, so every later folder is unchecked too and
-    // nothing further is sent on this connection (the caller's `Err` path
-    // evicts it).
-    let mut idx = 0;
-    while idx < folders.len() {
-        let req = &folders[idx];
-        idx += 1;
-
+    // F-4 REQ-1.2b: a folder the server refuses (a `NO` to SELECT or SEARCH)
+    // is reported as unchecked, never dropped — the session is still in
+    // protocol. A *timeout* is different: the session is desynchronised
+    // mid-command, so the whole call fails with `Err`, which is what makes
+    // `with_pooled_session` evict the connection instead of returning it to
+    // the pool. The frontend then falls back to per-folder checks on a fresh
+    // session. (Before F-4 a timeout `continue`d and the poisoned session went
+    // back into the pool.)
+    for req in folders {
         let mailbox = match net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {}", req.folder), session.select(&req.folder)).await {
             Ok(Ok(m)) => m,
             Ok(Err(e)) => {
@@ -878,12 +877,8 @@ pub async fn delta_check_folders(
                 results.push(DeltaCheckResult::unchecked(&req.folder, req.uidvalidity, format!("SELECT failed: {e}")));
                 continue;
             }
-            Err(_) => {
-                let reason = format!("SELECT timed out after {}s", IMAP_CMD_TIMEOUT.as_secs());
-                log::warn!("delta_check: {} {reason}; abandoning the pass", req.folder);
-                results.push(DeltaCheckResult::unchecked(&req.folder, req.uidvalidity, reason));
-                mark_rest_unchecked(&mut results, &folders[idx..]);
-                return Ok(results);
+            Err(e) => {
+                return Err(format!("delta check abandoned — {e}; the session is desynchronised"));
             }
         };
 
@@ -918,11 +913,11 @@ pub async fn delta_check_folders(
                 continue;
             }
             Err(_) => {
-                let reason = format!("UID SEARCH timed out after {}s", IMAP_SEARCH_TIMEOUT.as_secs());
-                log::warn!("delta_check: {} {reason}; abandoning the pass", req.folder);
-                results.push(DeltaCheckResult::unchecked(&req.folder, current_uidvalidity, reason));
-                mark_rest_unchecked(&mut results, &folders[idx..]);
-                return Ok(results);
+                return Err(format!(
+                    "delta check abandoned — UID SEARCH {} timed out after {}s; the session is desynchronised",
+                    req.folder,
+                    IMAP_SEARCH_TIMEOUT.as_secs()
+                ));
             }
         };
 
@@ -938,17 +933,6 @@ pub async fn delta_check_folders(
     }
 
     Ok(results)
-}
-
-/// After a timeout, the folders this pass never reached.
-fn mark_rest_unchecked(results: &mut Vec<DeltaCheckResult>, rest: &[DeltaCheckRequest]) {
-    for req in rest {
-        results.push(DeltaCheckResult::unchecked(
-            &req.folder,
-            req.uidvalidity,
-            "not checked: an earlier folder timed out and the session was abandoned".to_string(),
-        ));
-    }
 }
 
 /// Search a folder: SELECT → UID SEARCH, returning UIDs and folder status without fetching bodies.
@@ -2221,28 +2205,23 @@ mod tests {
         assert!(scrubbed.contains("[redacted]"));
     }
 
-    // ---------- F-4 REQ-1.2b: every requested folder gets a row ----------
+    // ---------- F-4 REQ-1.2b: an unchecked folder is a row, not an omission ----------
 
     #[test]
-    fn folders_after_a_timeout_are_reported_unchecked_not_dropped() {
-        let requests = vec![
-            DeltaCheckRequest { folder: "INBOX".into(), last_uid: 10, uidvalidity: 5 },
-            DeltaCheckRequest { folder: "Sent".into(), last_uid: 3, uidvalidity: 6 },
-        ];
-        let mut results = vec![DeltaCheckResult::unchecked("Archive", 4, "SELECT timed out".into())];
+    fn an_unchecked_row_carries_no_observation() {
+        let r = DeltaCheckResult::unchecked("INBOX", 5, "SELECT failed: NO".into());
 
-        mark_rest_unchecked(&mut results, &requests);
+        assert_eq!(r.folder, "INBOX");
+        assert!(!r.checked);
+        assert!(r.new_uids.is_empty(), "no UIDs a caller could act on");
+        assert!(!r.uidvalidity_changed, "no resync claim either");
+        assert_eq!(r.exists, 0);
+        assert_eq!(r.uidvalidity, 5, "echoes the requested generation, claims nothing new");
+        assert_eq!(r.error.as_deref(), Some("SELECT failed: NO"));
 
-        assert_eq!(results.len(), 3, "one row per folder, including the ones never reached");
-        for r in &results {
-            assert!(!r.checked);
-            assert!(r.new_uids.is_empty(), "an unchecked row carries no observation");
-            assert!(!r.uidvalidity_changed);
-            assert_eq!(r.exists, 0);
-            assert!(r.error.as_deref().is_some_and(|e| !e.is_empty()));
-        }
-        assert_eq!(results[1].folder, "INBOX");
-        assert_eq!(results[1].uidvalidity, 5, "echoes the requested generation, claims nothing new");
-        assert!(results[2].error.as_deref().unwrap().contains("earlier folder timed out"));
+        // The wire shape the frontend's `!checked` guard reads.
+        let json = serde_json::to_value(&r).unwrap();
+        assert_eq!(json["checked"], false);
+        assert!(json["error"].is_string());
     }
 }
