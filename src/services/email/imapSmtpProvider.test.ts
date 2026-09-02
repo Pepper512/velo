@@ -327,9 +327,9 @@ describe("ImapSmtpProvider", () => {
       expect(settleMovedRows).not.toHaveBeenCalled();
     });
 
-    it("drops ids that no longer name a live local row before touching the server", async () => {
-      // The stale id points at INBOX/100 — a UID the server no longer has
-      // there. Sending it is the wrong-target bug F-5 exists to remove.
+    it("drops ids whose local rows are tombstoned before touching the server", async () => {
+      // The mock drops INBOX/100 as a tombstone — a COPY-fallback row whose
+      // old folder/UID is the wrong target F-5 exists to stop acting on.
       vi.mocked(dropTombstonedMessageIds).mockResolvedValue(["imap-acc-1-INBOX-200"]);
       vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [] });
 

@@ -326,7 +326,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
     const archiveFolder =
       (await findSpecialFolder(this.accountId, "\\Archive")) ?? "Archive";
 
@@ -341,7 +341,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
     const trashFolder =
       (await findSpecialFolder(this.accountId, "\\Trash")) ?? "Trash";
 
@@ -356,7 +356,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _threadId: string,
     _messageIds: string[],
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       const result = await this.withImapSession((id) => imapDeleteMessages(id, folder, uids));
@@ -369,7 +369,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     read: boolean,
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       await this.withImapSession((id) => imapSetFlags(id, folder, uids, ["Seen"], read));
@@ -381,7 +381,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     starred: boolean,
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       await this.withImapSession((id) => imapSetFlags(id, folder, uids, ["Flagged"], starred));
@@ -393,7 +393,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     isSpam: boolean,
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
     const junkFolder =
       (await findSpecialFolder(this.accountId, "\\Junk")) ?? "Junk";
     const destination = isSpam ? junkFolder : "INBOX";
@@ -410,7 +410,7 @@ export class ImapSmtpProvider implements EmailProvider {
     _messageIds: string[],
     folderPath: string,
   ): Promise<void> {
-    const grouped = await this.groupLiveByFolder(_messageIds);
+    const grouped = await this.groupNonTombstonedByFolder(_messageIds);
 
     for (const [folder, uids] of grouped) {
       if (folder === folderPath) continue;
@@ -656,7 +656,7 @@ export class ImapSmtpProvider implements EmailProvider {
   // ---- Helpers ----
 
   /** `groupByFolder` over the ids that are not tombstoned locally. */
-  private async groupLiveByFolder(messageIds: string[]): Promise<Map<string, number[]>> {
+  private async groupNonTombstonedByFolder(messageIds: string[]): Promise<Map<string, number[]>> {
     return this.groupByFolder(await dropTombstonedMessageIds(this.accountId, messageIds));
   }
 
