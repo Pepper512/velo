@@ -72,6 +72,7 @@ describe("getUnreadCountsByLabel (SPEC-243)", () => {
     await seedThread(ACC, "t1", false, ["INBOX"]);
     await seedThread(ACC, "t2", true, ["INBOX"]);
     await seedThread(ACC, "t3", false, ["INBOX", "SPAM"]);
+    await seedThread(OTHER, "t8", false, ["INBOX"]); // the folder list is per account; so is the count
 
     const counts = await getUnreadCountsByLabel(ACC);
     const inboxUnread = (await getThreadsForAccount(ACC, "INBOX")).filter((t) => t.is_read === 0);

@@ -156,17 +156,20 @@ describe("Sidebar unread counts (SPEC-243)", () => {
     expect(screen.queryByLabelText("4 unread")).toBeNull();
   });
 
-  it("refreshes on velo-threads-changed and velo-sync-done through the 500 ms debounce (REQ-2.1, 2.2)", async () => {
+  // One event per test (#63 review, Gemini M1): dispatching both would let an
+  // unwired `velo-threads-changed` listener pass on the strength of sync-done.
+  it("refreshes the counts on velo-threads-changed through the 500 ms debounce, without reloading labels (REQ-2.2)", async () => {
     vi.useFakeTimers();
     mockCounts.mockResolvedValue({ INBOX: 4 });
     renderSidebar();
     await act(async () => {});
     expect(mockCounts).toHaveBeenCalledTimes(1); // the account-change load
+    expect(getLabelsForAccount).toHaveBeenCalledTimes(1);
 
     mockCounts.mockResolvedValue({ INBOX: 3 });
     act(() => {
       window.dispatchEvent(new Event("velo-threads-changed"));
-      window.dispatchEvent(new Event("velo-sync-done"));
+      window.dispatchEvent(new Event("velo-threads-changed"));
     });
     expect(mockCounts).toHaveBeenCalledTimes(1); // nothing yet: debounced
 
@@ -175,7 +178,47 @@ describe("Sidebar unread counts (SPEC-243)", () => {
     });
     await act(async () => {});
 
-    expect(mockCounts).toHaveBeenCalledTimes(2); // both events, one query
+    expect(mockCounts).toHaveBeenCalledTimes(2); // two events, one query
+    expect(getLabelsForAccount).toHaveBeenCalledTimes(1); // a user action does not reload the label list
+    expect(smartFolderState.refreshUnreadCounts).toHaveBeenCalledWith("acc-1");
     expect(screen.getByLabelText("3 unread")).toBeInTheDocument();
+  });
+
+  it("refreshes the counts and reloads labels on velo-sync-done (REQ-2.1)", async () => {
+    vi.useFakeTimers();
+    mockCounts.mockResolvedValue({ INBOX: 4 });
+    renderSidebar();
+    await act(async () => {});
+
+    mockCounts.mockResolvedValue({ INBOX: 5 });
+    act(() => {
+      window.dispatchEvent(new Event("velo-sync-done"));
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    await act(async () => {});
+
+    expect(mockCounts).toHaveBeenCalledTimes(2);
+    expect(getLabelsForAccount).toHaveBeenCalledTimes(2);
+    expect(screen.getByLabelText("5 unread")).toBeInTheDocument();
+  });
+
+  it("a sync-done inside a user action's debounce window still reloads labels", async () => {
+    vi.useFakeTimers();
+    renderSidebar();
+    await act(async () => {});
+
+    act(() => {
+      window.dispatchEvent(new Event("velo-sync-done"));
+      window.dispatchEvent(new Event("velo-threads-changed")); // last in the window
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+    });
+    await act(async () => {});
+
+    expect(getLabelsForAccount).toHaveBeenCalledTimes(2);
+    expect(mockCounts).toHaveBeenCalledTimes(2);
   });
 });

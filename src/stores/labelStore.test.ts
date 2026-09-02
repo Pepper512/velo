@@ -247,6 +247,21 @@ describe("labelStore unread counts (SPEC-243)", () => {
     errorSpy.mockRestore();
   });
 
+  it("a refresh that resolves after a newer one is discarded (account switch race, #63 M2)", async () => {
+    let resolveOld: (v: Record<string, number>) => void = () => {};
+    mockCounts.mockImplementationOnce(() => new Promise((r) => { resolveOld = r; }));
+    const oldRefresh = useLabelStore.getState().refreshUnreadCounts("acc1");
+
+    mockCounts.mockResolvedValueOnce({ INBOX: 7 });
+    await useLabelStore.getState().refreshUnreadCounts("acc2");
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 7 });
+
+    resolveOld({ INBOX: 3, Label_1: 1 });
+    await oldRefresh;
+
+    expect(useLabelStore.getState().unreadCounts).toEqual({ INBOX: 7 });
+  });
+
   it("clearLabels clears the counts too, so a switched account never shows the old ones", () => {
     useLabelStore.setState({ unreadCounts: { INBOX: 2 } });
 

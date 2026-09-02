@@ -963,3 +963,22 @@
   for both events through the debounce). Spec `docs/briefs/2026-09-03-243-sidebar-unread-counts.md`,
   committed before the code. Gates: 166 files / 2,119 tests, tsc, graph, docs. One review leg
   (Tier 1): Gemini 3.7.
+- **2026-09-03 — PR #63 (#243) review, one leg (Tier 1).** Gemini 3.7: CHANGES REQUESTED
+  (2M 2L 1N). **Adopted:** M1 — the sidebar test dispatched both events in one block, so an
+  unwired `velo-threads-changed` listener would have passed on the strength of sync-done;
+  split into one test per event (plus one for a sync-done inside a user action's window).
+  M2 — `refreshUnreadCounts` for the previous account could resolve after the new account's
+  and overwrite its map; a module-level sequence makes the newest request the only one that
+  sets state (a test races two refreshes and resolves the old one last). L4 — the shared
+  handler re-queried the label list and the smart-folder searches on every user action; the
+  debounce now takes a flag: a sync reloads labels, a user action refreshes counts only
+  (smart-folder counts included — they are unread counts too and had the same lag), with
+  the flag OR-ed across the window. N5 — the folder-list agreement test now seeds a second
+  account. **Declined with reason:** L3 — "fire again after the optimistic revert": the
+  revert changes the store, not the database (`revertOptimisticUpdate`), so a re-query
+  would return the same map; the real gap is pre-existing — on a permanent provider error
+  the local rows keep the change while the store reverts — and belongs to `emailActions`,
+  not to this PR (recorded here as a carry). **Questions answered:** snoozing stores the
+  thread without `INBOX` and with `SNOOZED` (`applySnoozeOverride`), so the count is exact;
+  bulk actions loop over `executeEmailAction`, N events collapse into one debounced query.
+  Raw output in `docs/reviews/2026-09-03-pr63-gemini-raw.md`.

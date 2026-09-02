@@ -306,26 +306,35 @@ export function Sidebar({ collapsed, onAddAccount }: SidebarProps) {
     }
   }, [activeAccountId, loadSmartFolders, refreshSmartFolderCounts]);
 
-  // Reload labels and counts on sync completion and after the user's own
-  // actions (SPEC-243) — debounced to avoid a waterfall from multiple emitters
+  // Refresh on sync completion and after the user's own actions (SPEC-243),
+  // debounced to avoid a waterfall from multiple emitters. A sync can change
+  // the label list itself; a user action only changes counts, so it skips the
+  // label reload (#63 review, Gemini L4). Both share one timer: whichever
+  // fired inside the window, the label reload happens if a sync asked for it.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
-    const handler = () => {
+    let reloadLabels = false;
+    const schedule = (labelsToo: boolean) => {
+      reloadLabels = reloadLabels || labelsToo;
       if (timer) clearTimeout(timer);
       timer = setTimeout(() => {
+        const withLabels = reloadLabels;
+        reloadLabels = false;
         if (activeAccountId) {
-          loadLabels(activeAccountId);
+          if (withLabels) loadLabels(activeAccountId);
           refreshSmartFolderCounts(activeAccountId);
           refreshUnreadCounts(activeAccountId);
         }
         useUIStore.getState().setSyncingFolder(null);
       }, 500);
     };
-    window.addEventListener("velo-sync-done", handler);
-    window.addEventListener("velo-threads-changed", handler);
+    const onSyncDone = () => schedule(true);
+    const onThreadsChanged = () => schedule(false);
+    window.addEventListener("velo-sync-done", onSyncDone);
+    window.addEventListener("velo-threads-changed", onThreadsChanged);
     return () => {
-      window.removeEventListener("velo-sync-done", handler);
-      window.removeEventListener("velo-threads-changed", handler);
+      window.removeEventListener("velo-sync-done", onSyncDone);
+      window.removeEventListener("velo-threads-changed", onThreadsChanged);
       if (timer) clearTimeout(timer);
     };
   }, [activeAccountId, loadLabels, refreshSmartFolderCounts, refreshUnreadCounts]);

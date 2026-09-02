@@ -49,14 +49,22 @@ interface LabelState {
   reorderLabels: (accountId: string, labelIds: string[]) => Promise<void>;
 }
 
+/** Sequence of `refreshUnreadCounts` calls; only the newest may set state. */
+let unreadRefreshSeq = 0;
+
 export const useLabelStore = create<LabelState>((set, get) => ({
   labels: [],
   isLoading: false,
   unreadCounts: {},
 
   refreshUnreadCounts: async (accountId: string) => {
+    // Latest request wins: a refresh for the previous account (or an earlier
+    // one for this account) that resolves late must not overwrite a newer map
+    // (#63 review, Gemini M2).
+    const seq = ++unreadRefreshSeq;
     try {
       const unreadCounts = await getUnreadCountsByLabel(accountId);
+      if (seq !== unreadRefreshSeq) return;
       set({ unreadCounts });
     } catch (err) {
       console.error("Failed to refresh label unread counts:", err);
