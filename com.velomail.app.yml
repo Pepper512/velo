@@ -1,12 +1,16 @@
 app-id: com.velomail.app
+# SPEC-233: GNOME 50 (46 and 48 are end-of-life on Flathub); the Node extension
+# follows the app's `engines.node` floor and the runtime's freedesktop base
+# (49/50 → 25.08). `src/config/flatpakManifest.test.ts` keeps this file, the
+# packaging workflow and CONTRIBUTING.md in agreement.
 runtime: org.gnome.Platform
-runtime-version: "46"
+runtime-version: "50"
 sdk: org.gnome.Sdk
 sdk-extensions:
-  - org.freedesktop.Sdk.Extension.node20
+  - org.freedesktop.Sdk.Extension.node24
 command: velo
 build-options:
-  append-path: /usr/lib/sdk/node20/bin
+  append-path: /usr/lib/sdk/node24/bin
   env:
     CARGO_HOME: /run/build/velo/flatpak-cargo
     RUSTUP_HOME: /run/build/velo/flatpak-rustup

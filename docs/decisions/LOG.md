@@ -1072,3 +1072,37 @@
   asked for, not a replacement in depth — same-vendor evidence on top of that. Raw outputs
   in `docs/reviews/2026-09-03-pr65-gemini38-raw.md` (run A) and `…-gemini38cmp-raw.md`
   (run B).
+- **2026-09-03 — #233 built (Flatpak runtime)** on Jim's instruction, bug-fix queue item
+  11, **Tier 1** (packaging files only; the runtime pin bump named in the brief for Jim to
+  object to — no Cargo/npm dependency, no capability). Verified first: manifest and
+  packaging workflow pin `org.gnome.Platform` **46** (Flathub EOL 2025-04-17; 48 followed
+  2026-03-24; **50** is current) and `node20//23.08` while the app requires Node ≥ 24;
+  `build-bundle` had no `--runtime-repo`, so `flatpak install velo.flatpak` could not
+  fetch a missing runtime — the reporter's error; the job was `workflow_call` only.
+  **Decisions:** GNOME **50** (49 dies on GNOME 51's release in weeks; bare freedesktop
+  lacks webkit2gtk-4.1); `org.freedesktop.Sdk.Extension.node24//25.08` (Node 24.20.0, the
+  base GNOME 49/50 are built on — confirmed from the extension's Flathub manifest);
+  `--runtime-repo=https://flathub.org/repo/flathub.flatpakrepo` on the bundle;
+  `workflow_dispatch` with an optional tag and an upload step gated on it, so a bump can be
+  proven on a branch. TDD: `src/config/flatpakManifest.test.ts` red (6/6) against the old
+  files — manifest, workflow, CONTRIBUTING and architecture must agree on runtime and
+  extension, the extension major must equal `package.json` `engines.node`'s floor, the
+  bundle must carry `--runtime-repo`, the job must be dispatchable with a gated upload.
+  **Not doing:** Flathub publication / `.flatpakref` (distribution decision, EX-007).
+  Proof of the build: one dispatched packaging run on the branch, recorded on the PR.
+- **2026-09-03 — PR #67 (#233) review, one leg (Tier 1).** Gemini 3.7 Flash: APPROVE WITH
+  NITS (1M 2L 1N); it confirmed GNOME 50 sits on freedesktop-sdk 25.08, the node24 path,
+  webkit2gtk-4.1 on 50, and that `--runtime-repo` is what makes `flatpak install` of the
+  file offer the runtime (`--repo-url` is for OSTree update remotes; `.flatpakref` needs a
+  hosted repo — correctly deferred). **Adopted all four:** M1 — the test asserted only that
+  the upload `if:` mentioned `tag_name`; it now matches the exact gate; L2 — the version
+  lookaheads were hard-coded to 50/24 and would have failed the next legitimate bump; now
+  interpolated; L3 — a branch dispatch naming a shipped tag could `--clobber` a release
+  asset: the gate is now `tag given AND (release workflow OR dispatched from that tag's own
+  ref)`, applied to **both** upload steps (the SRPM upload had no gate at all — the first
+  dispatched run showed it failing on the empty tag); N4 — the extension is read from under
+  `sdk-extensions:` only. A bug in the test itself surfaced while doing M1: the `m` flag
+  made `$` match a line end, so the step capture stopped at the first line — fixed, and
+  every `Upload … to release` step is now enumerated and checked. **Questions:** no aarch64
+  bundle is planned (runners are x86_64; recorded); release checksums are a follow-up for
+  the release ADR. Raw output in `docs/reviews/2026-09-03-pr67-gemini-raw.md`.

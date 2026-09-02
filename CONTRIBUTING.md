@@ -131,14 +131,14 @@ These steps guide you through building the Flatpak package locally using `flatpa
 
 2.  **Install the Build Runtimes**
 
-    The build requires the GNOME 46 SDK and the Node.js extension. Rust is installed via rustup during the build, so no Rust SDK extension is needed.
+    The build requires the GNOME 50 SDK and the Node 24 extension (the same pins as `com.velomail.app.yml` and the packaging workflow — `src/config/flatpakManifest.test.ts` keeps them in step). Rust is installed via rustup during the build, so no Rust SDK extension is needed.
 
     ```bash
     flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
     flatpak install -y flathub \
-      org.gnome.Platform/x86_64/46 \
-      org.gnome.Sdk/x86_64/46 \
-      org.freedesktop.Sdk.Extension.node20/x86_64/23.08
+      org.gnome.Platform/x86_64/50 \
+      org.gnome.Sdk/x86_64/50 \
+      org.freedesktop.Sdk.Extension.node24/x86_64/25.08
     ```
 
 3.  **Build and Install the Application**
