@@ -182,13 +182,68 @@ describe("withTransaction (pinned, SPEC-240)", () => {
   });
 
   it("unblocks the queue when begin itself is refused", async () => {
-    mockInvoke.mockRejectedValueOnce(new Error("VELO_TX_BUSY: a transaction is already open"));
-    await expect(withTransaction(async () => {})).rejects.toThrow("VELO_TX_BUSY");
+    mockInvoke.mockRejectedValueOnce(new Error("VELO_TX_NO_DB: sqlite:velo.db is not loaded"));
+    await expect(withTransaction(async () => {})).rejects.toThrow("VELO_TX_NO_DB");
 
     const log: string[] = [];
     fakeRust(log);
     await withTransaction(async () => {});
     expect(log).toEqual(["begin", "commit tx-1"]);
+  });
+
+  it("returns the callback's value (Gemini NIT 6 on #54)", async () => {
+    const log: string[] = [];
+    fakeRust(log);
+    const rows = await withTransaction(async (tx) => tx.select<{ id: string }[]>("SELECT id FROM t"));
+    expect(rows).toEqual([{ id: "row-1" }]);
+    expect(log).toEqual(["begin", "select tx-1 SELECT id FROM t", "commit tx-1"]);
+  });
+
+  it("waits out VELO_TX_BUSY from another window's transaction instead of failing (Gemini M4 on #54)", async () => {
+    vi.useFakeTimers();
+    try {
+      const log: string[] = [];
+      let refusals = 2;
+      mockInvoke.mockImplementation(async (cmd: string, args?: Record<string, unknown>) => {
+        if (cmd === "db_tx_begin") {
+          if (refusals > 0) {
+            refusals -= 1;
+            log.push("busy");
+            throw new Error("VELO_TX_BUSY: a transaction is already open");
+          }
+          log.push("begin");
+          return "tx-1";
+        }
+        log.push(`${cmd.replace("db_tx_", "")} ${args?.id}`);
+        return null;
+      });
+
+      const run = withTransaction(async () => {});
+      await vi.advanceTimersByTimeAsync(250);
+      await run;
+
+      expect(log).toEqual(["busy", "busy", "begin", "commit tx-1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("propagates VELO_TX_EXPIRED from a statement and does not warn about the rollback that follows", async () => {
+    const log: string[] = [];
+    fakeRust(log, { failRollback: `${TX_EXPIRED}: idle` });
+    mockInvoke.mockImplementationOnce(async () => "tx-1").mockImplementationOnce(async () => {
+      throw new Error(`${TX_EXPIRED}: the transaction was idle for more than 30s and was rolled back`);
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(
+      withTransaction(async (tx) => {
+        await tx.execute("UPDATE t SET v = 1");
+      }),
+    ).rejects.toThrow(TX_EXPIRED);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("validates what comes back over IPC (ADR-000 boundary)", async () => {

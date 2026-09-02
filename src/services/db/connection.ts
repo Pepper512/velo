@@ -75,7 +75,7 @@ let txQueue: Promise<void> = Promise.resolve();
  * handle passed to `fn` goes to it. Statements issued through `getDb()` inside
  * `fn` are **not** part of the transaction; pass the handle down.
  */
-export async function withTransaction(fn: (db: DbExecutor) => Promise<void>): Promise<void> {
+export async function withTransaction<T = void>(fn: (db: DbExecutor) => Promise<T>): Promise<T> {
   // Queue this transaction behind any currently-running one.
   const prev = txQueue;
   let resolve!: () => void;
@@ -90,11 +90,12 @@ export async function withTransaction(fn: (db: DbExecutor) => Promise<void>): Pr
   }
 
   try {
-    const id = expectTxId(await invoke("db_tx_begin"));
+    const id = expectTxId(await beginWithRetry());
     const handle = transactionHandle(id);
     try {
-      await fn(handle);
+      const result = await fn(handle);
       await invoke("db_tx_commit", { id });
+      return result;
     } catch (err) {
       // Roll back on the same connection. A rollback that fails because the
       // watchdog already reaped the transaction is not the error to report.
@@ -109,6 +110,26 @@ export async function withTransaction(fn: (db: DbExecutor) => Promise<void>): Pr
     }
   } finally {
     resolve(); // always unblock the next queued transaction
+  }
+}
+
+/**
+ * The queue above lives in one webview. A thread pop-out window has its own,
+ * so it can meet the Rust side's single-transaction rule while the main window
+ * is mid-sync. That is a wait, not an error: retry `VELO_TX_BUSY` with a
+ * bounded backoff before giving up (Gemini M4 on #54).
+ */
+const BUSY_RETRY_DELAY_MS = 100;
+const BUSY_RETRY_LIMIT = 50; // ≈ 5 s, well under the 30 s idle watchdog
+
+async function beginWithRetry(): Promise<unknown> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await invoke("db_tx_begin");
+    } catch (err) {
+      if (!String(err).includes(TX_BUSY) || attempt >= BUSY_RETRY_LIMIT) throw err;
+      await new Promise((r) => setTimeout(r, BUSY_RETRY_DELAY_MS));
+    }
   }
 }
 
