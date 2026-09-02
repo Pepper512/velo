@@ -7,6 +7,15 @@ on:
         description: "Release tag name"
         type: string
         required: true
+  # SPEC-233: run on a branch to prove a manifest or runtime change before a
+  # release cuts an artefact. Without a tag nothing is uploaded.
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Release tag to upload to (leave empty to only build)"
+        type: string
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -27,16 +36,19 @@ jobs:
       - name: Setup Flatpak remote and install SDK
         run: |
           flatpak --user remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
-          flatpak --user install -y flathub org.gnome.Platform/x86_64/46
-          flatpak --user install -y flathub org.gnome.Sdk/x86_64/46
-          flatpak --user install -y flathub org.freedesktop.Sdk.Extension.node20/x86_64/23.08
+          flatpak --user install -y flathub org.gnome.Platform/x86_64/50
+          flatpak --user install -y flathub org.gnome.Sdk/x86_64/50
+          flatpak --user install -y flathub org.freedesktop.Sdk.Extension.node24/x86_64/25.08
 
       - name: Build Flatpak bundle
+        # --runtime-repo lets `flatpak install velo.flatpak` fetch the runtime from
+        # Flathub instead of failing with "runtime not found" (#233).
         run: |
           flatpak-builder --user --force-clean --repo=repo build-dir com.velomail.app.yml
-          flatpak build-bundle repo velo.flatpak com.velomail.app
+          flatpak build-bundle --runtime-repo=https://flathub.org/repo/flathub.flatpakrepo repo velo.flatpak com.velomail.app
 
       - name: Upload Flatpak to release
+        if: ${{ inputs.tag_name != '' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "${{ inputs.tag_name }}" velo.flatpak --clobber

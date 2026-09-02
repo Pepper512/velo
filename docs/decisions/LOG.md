@@ -1072,3 +1072,21 @@
   asked for, not a replacement in depth — same-vendor evidence on top of that. Raw outputs
   in `docs/reviews/2026-09-03-pr65-gemini38-raw.md` (run A) and `…-gemini38cmp-raw.md`
   (run B).
+- **2026-09-03 — #233 built (Flatpak runtime)** on Jim's instruction, bug-fix queue item
+  11, **Tier 1** (packaging files only; the runtime pin bump named in the brief for Jim to
+  object to — no Cargo/npm dependency, no capability). Verified first: manifest and
+  packaging workflow pin `org.gnome.Platform` **46** (Flathub EOL 2025-04-17; 48 followed
+  2026-03-24; **50** is current) and `node20//23.08` while the app requires Node ≥ 24;
+  `build-bundle` had no `--runtime-repo`, so `flatpak install velo.flatpak` could not
+  fetch a missing runtime — the reporter's error; the job was `workflow_call` only.
+  **Decisions:** GNOME **50** (49 dies on GNOME 51's release in weeks; bare freedesktop
+  lacks webkit2gtk-4.1); `org.freedesktop.Sdk.Extension.node24//25.08` (Node 24.20.0, the
+  base GNOME 49/50 are built on — confirmed from the extension's Flathub manifest);
+  `--runtime-repo=https://flathub.org/repo/flathub.flatpakrepo` on the bundle;
+  `workflow_dispatch` with an optional tag and an upload step gated on it, so a bump can be
+  proven on a branch. TDD: `src/config/flatpakManifest.test.ts` red (6/6) against the old
+  files — manifest, workflow, CONTRIBUTING and architecture must agree on runtime and
+  extension, the extension major must equal `package.json` `engines.node`'s floor, the
+  bundle must carry `--runtime-repo`, the job must be dispatchable with a gated upload.
+  **Not doing:** Flathub publication / `.flatpakref` (distribution decision, EX-007).
+  Proof of the build: one dispatched packaging run on the branch, recorded on the PR.
