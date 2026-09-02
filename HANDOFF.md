@@ -11,9 +11,12 @@
   rewrote `commands.rs` twice: the E2 brief cites the pre-pool version, and the F-5 brief cites
   `client.rs:540` and `imapSmtpProvider.ts:638`, which the pooling rewrite moved. F-5's build must
   re-derive its citations first — that is not optional, it is what §6 is about.
-- **Open PRs:** never trust this line — run `gh pr list --repo Pepper512/velo`. At writing: only
-  this file's own PR. **#39 and #40 have landed**, so any instruction below that refers to them as
-  pending is describing a queue that no longer exists.
+- **Open PRs: none.** Never trust this line — run `gh pr list --repo Pepper512/velo`. The whole
+  queue landed on 2026-09-02: #33 through #41. `main` is `1205ef4`, CI green, Release Please
+  **skipped** (EX-007 guard holding).
+- **Branches: cleaned.** 18 merged local branches deleted and remote refs pruned. Every branch that
+  ever existed maps to a **merged** PR except #28, closed deliberately. What remains locally is
+  `main` plus the two branches pinned by the dead worktrees below — those disappear with them.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
 - **One seat, as of 2026-09-02.** Jim wound the second (Fable) seat down after this session. Name
@@ -91,11 +94,15 @@ Expected on `main`: **154 test files, 1,843 tests; 78 Rust.** #39 will move all 
 
 ### Re-verify before acting — these may have gone stale
 
-- `git log --oneline 33c87a5..origin/main` — a non-docs commit means the code pin and every brief
-  line number are stale. #39 is expected to be that commit.
-- `gh pr list` — this file was written with #39 and #40 open.
-- `ls velo/.claude/settings.local.json` — if it exists, comms are two-way; if not, see above.
+- `git log --oneline 9e991bb..origin/main` — **a non-`docs:` commit there means the code pin and
+  every brief line number in this repo are stale.** Re-grep before citing anything.
+- `gh pr list --repo Pepper512/velo` — none open at writing; this line ages faster than any other.
+- `git worktree list` — **two dead worktrees were still present at writing** (see §2). If they are
+  gone, ignore the §2 item; if they are there, do not work in them and do not trust a bare
+  `npx vitest run`, which globs into them.
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
+- **`ListAgents` before assuming any peer seat exists.** There is one seat as of 2026-09-02, and
+  every session id this file has ever pinned went stale within a day.
 - The F-4 spec's own approval line **in the vault** still needs Jim's mark — #40 records the
   approval in LOG but could not reach the vault from the checkout. Reconcile when he is next there.
 
@@ -111,9 +118,18 @@ tarball used to verify a wire format was unpacked in a scratchpad and never inst
    `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`.
    Until it lands the MSRV is not enforced. This has been open since 2026-09-01 and is the only
    gate in the ledger that passes on every PR while enforcing nothing.
-2. **Remove both worktrees** — `git worktree remove .claude/worktrees/f2-email-links-open` and
-   `.claude/worktrees/f1-decisions` (**locked**; `git worktree unlock` it first). Both verified
-   clean, nothing uncommitted, nothing unpushed, every branch's content landed by squash merge.
+2. **Remove both worktrees** — the last piece of cleanup the agent seat could not finish. Both
+   verified clean: nothing uncommitted, nothing unpushed, and every branch's content landed by
+   squash merge. `f1-decisions` is **locked**, so it needs unlocking first. Paste:
+   ```bash
+   git worktree unlock .claude/worktrees/f1-decisions
+   git worktree remove .claude/worktrees/f1-decisions
+   git worktree remove .claude/worktrees/f2-email-links-open
+   git branch -D docs/handoff-wrapup docs/handoff-refresh-eod
+   ```
+   The two branches only still exist because a worktree pins them. After this, `git branch` is
+   `main` alone and `git worktree list` is one line — which is what makes the next session's
+   *"trust `git worktree list`"* rule cheap instead of confusing.
 3. **Mark the F-4 approval in the vault spec** (`Build Queue/10-Bug-Fixes/SPEC-F-4_…`, §Approval).
    The repo-side record is in `LOG.md` via #40; the vault is not reachable from this checkout, so
    the two records are deliberately not claimed to be in sync.
@@ -216,8 +232,8 @@ gate the number, don't trust the merge. Trust backlogs, verify numbers, includin
 
 **Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `9e991bb`** (#39; the
 only SHA pinned — `git log --oneline 9e991bb..origin/main` shows what is above it; a non-docs
-commit there means brief line numbers are stale) · CI green · 155 files / 1,875 tests / 78 Rust ·
-npm audit 0.
+commit there means brief line numbers are stale) · **no open PRs, branches pruned** · CI green ·
+155 files / 1,875 tests / 78 Rust · npm audit 0.
 
 **Next action: build F-5 (option A, rev 2), then F-4 (rev 5).** Both Jim-approved directly in #40,
 both were parked behind E2, and E2 has landed. **Re-grep their citations first** — F-5's brief
