@@ -206,6 +206,22 @@ describe("pendingOperations DB service", () => {
       );
       expect(mockDb.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE"), ["r-1"]);
     });
+
+    it("merges by created_at, leaves malformed and other-generation reconcile rows alone, and labels the merge a repair (Grok L9/H3 on #50)", async () => {
+      mockDb.select.mockResolvedValueOnce([
+        { id: "r-new", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[9],"uidvalidity":7}', status: "pending", retry_count: 0, created_at: 4 },
+        { id: "r-old-gen", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[1],"uidvalidity":6,"kind":"repair"}', status: "pending", retry_count: 1, created_at: 1 },
+        { id: "r-bad", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: "not json", status: "pending", retry_count: 2, created_at: 2 },
+        { id: "r-same", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[5],"uidvalidity":7,"kind":"repair"}', status: "pending", retry_count: 1, created_at: 3 },
+      ]);
+      const removed = await compactQueue();
+      expect(removed).toBe(1);
+      expect(mockDb.execute).toHaveBeenCalledWith(
+        "UPDATE pending_operations SET params = $1, retry_count = $2 WHERE id = $3",
+        [JSON.stringify({ folder: "INBOX", uids: [5, 9], uidvalidity: 7, kind: "repair" }), 1, "r-new"],
+      );
+      expect(mockDb.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE"), ["r-same"]);
+    });
   });
 
   describe("F-4 part 3 queue shape", () => {

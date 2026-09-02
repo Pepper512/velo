@@ -39,6 +39,7 @@ import {
   finishReconcilePass,
   invalidateFolderSuspects,
   beltDue,
+  folderListLooksPartial,
   noteFolderMissing,
   markFetchCompleted,
   reconcileFolderList,
@@ -148,9 +149,18 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
       expect(shouldListFolder(13, 10, 0, 3)).toBe(false);
     });
 
-    it("opens when something vanished, and never for an unchecked folder", () => {
+    it("opens when something vanished", () => {
       expect(shouldListFolder(9, 10, 0, 0)).toBe(true);
-      expect(shouldListFolder(null, 10, 0, 0)).toBe(false);
+      // An unchecked folder never reaches the gate: the sync treats a missing
+      // EXISTS as "unchecked" before calling it (Grok M4 on #50).
+    });
+
+    it("a LIST that drops most known folders, or every syncable one, looks partial (Grok H2 on #50)", () => {
+      expect(folderListLooksPartial(0, 5, 5)).toBe(false);
+      expect(folderListLooksPartial(1, 2, 1)).toBe(false); // one of two gone: a deletion
+      expect(folderListLooksPartial(2, 3, 1)).toBe(true); // two of three gone: a short LIST
+      expect(folderListLooksPartial(1, 1, 0)).toBe(true); // nothing syncable came back
+      expect(folderListLooksPartial(1, 10, 0)).toBe(true);
     });
   });
 
@@ -506,6 +516,20 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
     expect(liveUids()).toHaveLength(3); // cached mail kept
     expect(useUIStore.getState().notices[0]?.text).toContain("no longer exists on the server");
     expect(useUIStore.getState().notices[0]?.text).toContain("3 cached messages are kept");
+  });
+
+  it("a folder still listed but no longer selectable is told apart in the notice, and its suspects of every generation go", async () => {
+    seedFolder(2);
+    raw()
+      .prepare(
+        "INSERT INTO reconcile_suspects (account_id, folder, uid, uidvalidity, message_row_id, status, first_pass_id) VALUES (?, ?, 9, ?, 'x', 'suspect', 'pass-old')",
+      )
+      .run(ACC, INBOX, GEN + 1);
+    expect(await noteFolderMissing(ACC, INBOX, true)).toBe("counted");
+    expect(await noteFolderMissing(ACC, INBOX, true)).toBe("removed");
+    expect(suspects()).toEqual([]);
+    expect(useUIStore.getState().notices[0]?.text).toContain("can no longer be opened on the server");
+    expect(liveUids()).toHaveLength(2);
   });
 
   // ---------- F-5 interaction ----------

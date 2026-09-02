@@ -74,6 +74,7 @@ vi.mock("../db/messages", () => ({
 vi.mock("./reconcilePass", () => ({
   invalidateFolderSuspects: vi.fn(async () => {}),
   beltDue: vi.fn(() => false),
+  folderListLooksPartial: vi.fn(() => false),
   noteFolderMissing: vi.fn(async () => "counted"),
   beginReconcilePass: vi.fn((accountId: string) => ({
     accountId,
@@ -907,12 +908,14 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     mockImapListFolders.mockResolvedValue([inbox()]);
     // Implementations persist across `clearAllMocks`; pin the defaults so one
     // test's gate/list/attestation setup cannot leak into the next.
-    const { shouldListFolder, attestPass, beltDue, noteFolderMissing } = await import("./reconcilePass");
+    const { shouldListFolder, attestPass, beltDue, noteFolderMissing, folderListLooksPartial } =
+      await import("./reconcilePass");
     const { imapSearchAllUids, imapCountNotDeleted } = await import("./tauriCommands");
     const { bumpReconcilePasses } = await import("../db/folderSyncState");
     vi.mocked(shouldListFolder).mockReturnValue(false);
     vi.mocked(attestPass).mockReturnValue(true);
     vi.mocked(beltDue).mockReturnValue(false);
+    vi.mocked(folderListLooksPartial).mockReturnValue(false);
     vi.mocked(noteFolderMissing).mockResolvedValue("counted");
     vi.mocked(bumpReconcilePasses).mockResolvedValue(1);
     vi.mocked(imapSearchAllUids).mockReset();
@@ -1068,9 +1071,37 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     await imapDeltaSync("acc-1");
 
     expect(clearFolderMissing).toHaveBeenCalledWith("acc-1", "INBOX");
-    expect(noteFolderMissing).toHaveBeenCalledWith("acc-1", "Gone");
+    expect(noteFolderMissing).toHaveBeenCalledWith("acc-1", "Gone", false);
     const known = [...vi.mocked(attestPass).mock.calls[0]![1]];
     expect(known).not.toContain("Gone");
+  });
+
+  it("a LIST that looks partial counts nothing as missing and keeps every known folder in the attestation set (Grok H2 on #50)", async () => {
+    const { noteFolderMissing, attestPass, folderListLooksPartial } = await import("./reconcilePass");
+    const { getAllFolderSyncStates, clearFolderMissing } = await import("../db/folderSyncState");
+    const state = (folder_path: string) => ({ account_id: "acc-1", folder_path, uidvalidity: 7, last_uid: 5, modseq: null, last_sync_at: 1 });
+    vi.mocked(getAllFolderSyncStates).mockResolvedValue([state("INBOX"), state("A"), state("B")]);
+    vi.mocked(folderListLooksPartial).mockReturnValue(true);
+    mockImapDeltaCheck.mockResolvedValue([checkedInbox()]);
+
+    await imapDeltaSync("acc-1");
+
+    expect(folderListLooksPartial).toHaveBeenCalledWith(2, 3, 1);
+    expect(noteFolderMissing).not.toHaveBeenCalled();
+    expect(clearFolderMissing).not.toHaveBeenCalled();
+    const known = [...vi.mocked(attestPass).mock.calls[0]![1]];
+    expect(known).toEqual(expect.arrayContaining(["INBOX", "A", "B"]));
+  });
+
+  it("a checked folder without EXISTS is treated as unchecked: no gate, no attestation (Grok M4 on #50)", async () => {
+    const { shouldListFolder, attestPass } = await import("./reconcilePass");
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), exists: null }]);
+
+    await imapDeltaSync("acc-1");
+
+    expect(shouldListFolder).not.toHaveBeenCalled();
+    const checked = vi.mocked(attestPass).mock.calls[0]![2];
+    expect(checked.has("INBOX")).toBe(false);
   });
 
   it("a UIDVALIDITY change invalidates the folder's suspects and stop, and skips the gate for that folder", async () => {

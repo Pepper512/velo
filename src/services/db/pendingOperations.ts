@@ -238,22 +238,44 @@ export async function compactQueue(accountId?: string): Promise<number> {
     // the UID sets merged and the attempt count carried as the max — a
     // newest-wins-with-reset would be an infinite-retry loophole. Only pending
     // rows are read above, so an executing op is never touched.
-    const reconcileOps = resourceOps.filter((o) => o.operation_type === "reconcile");
+    // A row whose params do not parse is left alone (the handler drops it);
+    // a row from another UIDVALIDITY generation is left alone too (the
+    // handler drops it once it sees the generation moved) — merging it would
+    // carry its UIDs into a generation they never belonged to (Grok L9/H3
+    // on #50).
+    const reconcileOps = resourceOps
+      .filter((o) => o.operation_type === "reconcile")
+      .sort((a, b) => a.created_at - b.created_at);
     if (reconcileOps.length > 1) {
-      const newest = reconcileOps[reconcileOps.length - 1]!;
-      const uids = new Set<number>();
-      let attempts = 0;
-      for (const op of reconcileOps) {
-        const p = JSON.parse(op.params) as { uids?: unknown };
-        if (Array.isArray(p.uids)) for (const u of p.uids) if (Number.isInteger(u)) uids.add(u as number);
-        attempts = Math.max(attempts, op.retry_count);
-        if (op.id !== newest.id) toDelete.push(op.id);
+      const parsed = reconcileOps.map((op) => {
+        try {
+          const p = JSON.parse(op.params) as unknown;
+          return typeof p === "object" && p !== null ? (p as Record<string, unknown>) : null;
+        } catch {
+          return null;
+        }
+      });
+      const newestIdx = parsed.map((p) => p !== null).lastIndexOf(true);
+      if (newestIdx >= 0) {
+        const newest = reconcileOps[newestIdx]!;
+        const newestParams = parsed[newestIdx]!;
+        const uids = new Set<number>();
+        let attempts = 0;
+        for (let i = 0; i < reconcileOps.length; i++) {
+          const op = reconcileOps[i]!;
+          const p = parsed[i];
+          if (!p) continue;
+          if (i !== newestIdx && p.uidvalidity !== newestParams.uidvalidity) continue;
+          if (Array.isArray(p.uids)) for (const u of p.uids) if (Number.isInteger(u)) uids.add(u as number);
+          attempts = Math.max(attempts, op.retry_count);
+          if (op.id !== newest.id) toDelete.push(op.id);
+        }
+        const merged = { ...newestParams, uids: [...uids].sort((a, b) => a - b), kind: "repair" };
+        await db.execute(
+          "UPDATE pending_operations SET params = $1, retry_count = $2 WHERE id = $3",
+          [JSON.stringify(merged), attempts, newest.id],
+        );
       }
-      const merged = { ...(JSON.parse(newest.params) as Record<string, unknown>), uids: [...uids].sort((a, b) => a - b) };
-      await db.execute(
-        "UPDATE pending_operations SET params = $1, retry_count = $2 WHERE id = $3",
-        [JSON.stringify(merged), attempts, newest.id],
-      );
     }
   }
 

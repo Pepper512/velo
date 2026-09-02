@@ -107,9 +107,20 @@ describe("reconcile op (F-4 REQ-4)", () => {
       )
       .all();
     expect(ops).toEqual([
-      { operation_type: RECONCILE_OP, resource_id: reconcileResourceId("INBOX"), params: JSON.stringify({ folder: "INBOX", uids: [5, 6], kind: "repair" }), max_retries: RECONCILE_MAX_RETRIES },
-      { operation_type: RECONCILE_OP, resource_id: reconcileResourceId("Sent"), params: JSON.stringify({ folder: "Sent", uids: [2], kind: "repair" }), max_retries: RECONCILE_MAX_RETRIES },
+      { operation_type: RECONCILE_OP, resource_id: reconcileResourceId("INBOX"), params: JSON.stringify({ folder: "INBOX", uids: [5, 6], uidvalidity: 7, kind: "repair" }), max_retries: RECONCILE_MAX_RETRIES },
+      { operation_type: RECONCILE_OP, resource_id: reconcileResourceId("Sent"), params: JSON.stringify({ folder: "Sent", uids: [2], uidvalidity: 0, kind: "repair" }), max_retries: RECONCILE_MAX_RETRIES },
     ]);
+  });
+
+  it("drops an op whose generation moved since it was queued, without searching (Grok H3 on #50)", async () => {
+    seedMessage(5);
+    await runReconcileOp(ACC, { folder: "INBOX", uids: [5], uidvalidity: 6, kind: "repair" });
+    await runReconcileOp(ACC, { folder: "INBOX", uids: [5], uidvalidity: 0, kind: "repair" });
+    await runReconcileOp(ACC, { folder: "Nowhere", uids: [5], uidvalidity: 7, kind: "repair" });
+
+    expect(imapSearchUidsPresent).not.toHaveBeenCalled();
+    expect(raw().prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM reconcile_suspects").get()!.n).toBe(0);
+    expect(useUIStore.getState().notices).toEqual([]);
   });
 
   it("records absent UIDs as suspects — never deletes — and notices about present ones (REQ-4.5)", async () => {
@@ -118,13 +129,15 @@ describe("reconcile op (F-4 REQ-4)", () => {
     seedMessage(7);
     vi.mocked(imapSearchUidsPresent).mockResolvedValue([6]);
 
-    await runReconcileOp(ACC, { folder: "INBOX", uids: [5, 6, 7], kind: "repair" });
+    await runReconcileOp(ACC, { folder: "INBOX", uids: [5, 6, 7], uidvalidity: 7, kind: "repair" });
 
     expect(imapSearchUidsPresent).toHaveBeenCalledWith("s", "INBOX", [5, 6, 7]);
-    const suspects = raw().prepare<[], { uid: number; status: string }>("SELECT uid, status FROM reconcile_suspects ORDER BY uid").all();
+    const suspects = raw()
+      .prepare<[], { uid: number; status: string; first_pass_id: string }>("SELECT uid, status, first_pass_id FROM reconcile_suspects ORDER BY uid")
+      .all();
     expect(suspects).toEqual([
-      { uid: 5, status: "suspect" },
-      { uid: 7, status: "suspect" },
+      { uid: 5, status: "suspect", first_pass_id: expect.stringMatching(/^reconcile:/) },
+      { uid: 7, status: "suspect", first_pass_id: expect.stringMatching(/^reconcile:/) },
     ]);
     expect(raw().prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM messages").get()!.n).toBe(3);
     expect(useUIStore.getState().notices[0]?.text).toContain("1 message in INBOX was not moved or deleted");
@@ -132,7 +145,7 @@ describe("reconcile op (F-4 REQ-4)", () => {
 
   it("ignores absent UIDs with no live local row, and drops malformed params instead of retrying", async () => {
     vi.mocked(imapSearchUidsPresent).mockResolvedValue([]);
-    await runReconcileOp(ACC, { folder: "INBOX", uids: [99], kind: "repair" });
+    await runReconcileOp(ACC, { folder: "INBOX", uids: [99], uidvalidity: 7, kind: "repair" });
     expect(raw().prepare<[], { n: number }>("SELECT COUNT(*) AS n FROM reconcile_suspects").get()!.n).toBe(0);
 
     await runReconcileOp(ACC, { folder: "", uids: "nope" });
@@ -145,5 +158,16 @@ describe("reconcile op (F-4 REQ-4)", () => {
       raw().prepare<[], { force_list: number }>("SELECT force_list FROM folder_sync_state WHERE folder_path = 'INBOX'").get(),
     ).toEqual({ force_list: 1 });
     expect(useUIStore.getState().notices[0]?.text).toContain("re-check the whole folder");
+  });
+
+  it("degrades from the resource id when the params do not parse, so a malformed op never vanishes (Grok M6 on #50)", async () => {
+    await degradeReconcileOp(ACC, null, reconcileResourceId("INBOX"));
+    expect(
+      raw().prepare<[], { force_list: number }>("SELECT force_list FROM folder_sync_state WHERE folder_path = 'INBOX'").get(),
+    ).toEqual({ force_list: 1 });
+    expect(useUIStore.getState().notices[0]?.text).toContain("Could not verify some messages in INBOX");
+
+    await degradeReconcileOp(ACC, null, "archive:t1");
+    expect(useUIStore.getState().notices).toHaveLength(1);
   });
 });

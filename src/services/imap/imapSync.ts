@@ -37,6 +37,7 @@ import {
   shouldListFolder,
   invalidateFolderSuspects,
   beltDue,
+  folderListLooksPartial,
   noteFolderMissing,
 } from "./reconcilePass";
 import { upsertAttachment } from "../db/attachments";
@@ -959,14 +960,27 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   // LIST did not return. One miss leaves it unchecked (this pass cannot
   // attest); a second consecutive miss removes its sync state so attestation
   // can resume, keeping its messages. A folder the LIST did return resets.
+  // A LIST that drops most known folders is short, not a mass deletion, and
+  // counts nothing (Grok H2 on #50). A folder still in the raw LIST but no
+  // longer syncable is told apart in the notice only: it cannot be checked
+  // either way, so it leaves the known set the same way.
   const listedPaths = new Set(syncableFolders.map((f) => f.raw_path));
-  for (const state of syncStates) {
-    if (listedPaths.has(state.folder_path)) {
-      if ((state.missing_passes ?? 0) > 0) await clearFolderMissing(accountId, state.folder_path);
-      continue;
-    }
-    if ((await noteFolderMissing(accountId, state.folder_path)) === "removed") {
-      syncStateMap.delete(state.folder_path);
+  const serverPaths = new Set(allFolders.map((f) => f.raw_path));
+  const omitted = syncStates.filter((s) => !listedPaths.has(s.folder_path));
+  if (folderListLooksPartial(omitted.length, syncStates.length, syncableFolders.length)) {
+    console.warn(
+      `[imapSync] LIST omitted ${omitted.length} of ${syncStates.length} synced folder(s); treating it as partial — nothing counted or removed`,
+    );
+  } else {
+    for (const state of syncStates) {
+      if (listedPaths.has(state.folder_path)) {
+        if ((state.missing_passes ?? 0) > 0) await clearFolderMissing(accountId, state.folder_path);
+        continue;
+      }
+      const stillListed = serverPaths.has(state.folder_path);
+      if ((await noteFolderMissing(accountId, state.folder_path, stillListed)) === "removed") {
+        syncStateMap.delete(state.folder_path);
+      }
     }
   }
 
@@ -1123,6 +1137,14 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
       // An unchecked folder carries no observation to act on (F-4 REQ-1.2b).
       if (!deltaResult || !deltaResult.checked) continue;
+      // A checked folder always carries EXISTS from Rust. Without it the gate
+      // cannot judge anything, so the folder counts as unchecked rather than
+      // as "nothing vanished" (Grok M4 on #50).
+      const exists = deltaResult.exists;
+      if (exists === null || exists === undefined) {
+        console.warn(`[imapSync] ${folder.path}: delta check reported no EXISTS; treating the folder as unchecked`);
+        continue;
+      }
       checkedFolders.add(folder.raw_path);
 
       try {
@@ -1182,7 +1204,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
         let gateOpen =
           forced ||
           shouldListFolder(
-            deltaResult.exists,
+            exists,
             liveCount,
             deltaResult.new_uids.length,
             savedState.flagged_not_expunged ?? 0,
@@ -1198,7 +1220,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           const notDeleted = await withSession(accountId, "sync", {}, (id) =>
             imapCountNotDeleted(id, folder.raw_path),
           );
-          const ghosts = Math.max(0, (deltaResult.exists ?? 0) - notDeleted);
+          const ghosts = Math.max(0, exists - notDeleted);
           await setFlaggedNotExpunged(accountId, folder.raw_path, ghosts);
           if (notDeleted === liveCount + deltaResult.new_uids.length) {
             gateOpen = false;
@@ -1216,7 +1238,7 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
             folder.raw_path,
             deltaResult.uidvalidity,
             serverUids,
-            deltaResult.exists,
+            exists,
           );
           if (forced) await setForceList(accountId, folder.raw_path, false);
         }

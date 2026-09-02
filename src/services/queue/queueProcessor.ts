@@ -52,22 +52,32 @@ async function processQueue(): Promise<void> {
         await updateOperationStatus(op.id, "pending", classified.message);
         await incrementRetry(op.id);
       } else {
-        // Permanent failure
-        await updateOperationStatus(op.id, "failed", classified.message);
         // F-4 REQ-4.3: a reconcile op that gives up must not vanish — the
         // folder gets a forced full list on the next pass and the user hears.
+        // Degrade *before* the row is marked failed, with the folder taken
+        // from the resource id when the params do not parse (Grok M6 on #50).
         if (op.operation_type === RECONCILE_OP) {
           try {
-            await degradeReconcileOp(op.account_id, JSON.parse(op.params));
+            await degradeReconcileOp(op.account_id, safeParse(op.params), op.resource_id);
           } catch (degradeErr) {
-            console.warn("[queueProcessor] Could not degrade a reconcile op:", degradeErr);
+            console.error("[queueProcessor] Could not degrade a reconcile op; marking it failed regardless:", degradeErr);
           }
         }
+        // Permanent failure
+        await updateOperationStatus(op.id, "failed", classified.message);
       }
     }
   }
 
   await updatePendingCount();
+}
+
+function safeParse(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 async function updatePendingCount(): Promise<void> {

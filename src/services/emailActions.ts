@@ -413,7 +413,22 @@ export async function executeQueuedAction(
     return;
   }
   const action = { type: operationType, ...params } as EmailAction;
-  await executeViaProvider(accountId, action);
+  try {
+    await executeViaProvider(accountId, action);
+  } catch (err) {
+    // F-4 REQ-4.1 on the queued path too (Grok M5 on #50): a queued move or
+    // delete whose outcome is unknown gets the same observer as an online
+    // one. The error still propagates — it is not retryable, so the queue
+    // fails the op once and never replays the move.
+    if (classifyError(err).type === "indeterminate" && isMoveOrDelete(action)) {
+      try {
+        await enqueueReconcileOps(accountId, action.messageIds);
+      } catch (queueErr) {
+        console.warn("[emailActions] Could not queue a reconcile op:", queueErr);
+      }
+    }
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

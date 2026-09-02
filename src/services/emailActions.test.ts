@@ -174,6 +174,30 @@ describe("emailActions", () => {
       expect(enqueueReconcileOps).not.toHaveBeenCalled();
     });
 
+    it("gives a queued move the same observer when its outcome is unknown, and still fails the op (Grok M5 on #50)", async () => {
+      const { enqueueReconcileOps } = await import("@/services/imap/reconcileOp");
+      const { executeQueuedAction } = await import("./emailActions");
+      mockProvider.archive.mockRejectedValueOnce(new Error("VELO_OUTCOME_UNKNOWN: UID MOVE timed out after 30s."));
+
+      await expect(
+        executeQueuedAction("acct-1", "archive", { threadId: "t1", messageIds: ["imap-acct-1-INBOX-5"] }),
+      ).rejects.toThrow(/VELO_OUTCOME_UNKNOWN/);
+
+      expect(enqueueReconcileOps).toHaveBeenCalledWith("acct-1", ["imap-acct-1-INBOX-5"]);
+      expect(mockProvider.archive).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not queue a re-check for a queued move that fails for an ordinary reason", async () => {
+      const { enqueueReconcileOps } = await import("@/services/imap/reconcileOp");
+      const { executeQueuedAction } = await import("./emailActions");
+      mockProvider.archive.mockRejectedValueOnce(new Error("Failed to fetch"));
+
+      await expect(
+        executeQueuedAction("acct-1", "archive", { threadId: "t1", messageIds: ["imap-acct-1-INBOX-5"] }),
+      ).rejects.toThrow();
+      expect(enqueueReconcileOps).not.toHaveBeenCalled();
+    });
+
     it("routes a queued reconcile op to its handler instead of a provider action", async () => {
       const { runReconcileOp } = await import("@/services/imap/reconcileOp");
       const { executeQueuedAction } = await import("./emailActions");

@@ -690,3 +690,27 @@
     are in charge of the merges, commits, push, pr, etc."* The standing rule (*Agents perform the
     merge*, with its preconditions) stands; Opus 5's recommended Tier-2 carve-out is **not
     adopted**. Preconditions verified on `6e83323`: CI success, CLEAN, no unresolved conversation.
+- **2026-09-02 ~16:30 UTC — PR #50 (F-4 part 3) cross-vendor review, both legs.** Gemini 3.7:
+  APPROVE WITH NITS (3, all recorded/declined). Grok 4.6: CHANGES REQUESTED — 3 HIGH, 4 MEDIUM,
+  2 LOW, 2 NIT; every finding re-derived against the tree. **Adopted (one follow-up commit on the
+  PR):** H1 the reconcile op wrote through `recordMissing`, whose promotion rule ("first sight on
+  an earlier pass") would have confirmed a suspect on the *next* list — one targeted SEARCH plus one
+  list, and two ops in a row with no list at all; now `insertSuspects` inserts only, under a
+  `reconcile:` source id that the next full list *adopts* as first sight, so two list observations
+  are still required. H2 a short LIST could count folders as gone — `folderListLooksPartial`
+  (> 50 % of known folders omitted, or no syncable folder at all) treats the LIST as partial and
+  counts nothing; a folder still in the raw LIST but no longer selectable gets an honest notice.
+  H3 the op carries the folder's UIDVALIDITY from enqueue and is dropped if the generation moved
+  (compaction no longer merges across generations). M4 a checked folder without EXISTS is treated
+  as unchecked rather than gating on `?? 0`; `shouldListFolder` takes a number. M5 the queued
+  (offline) move/delete path now enqueues the reconcile op on an unknown outcome, like the online
+  one. M6 the queue processor degrades a spent reconcile op *before* marking it failed, and from
+  the resource id when its params do not parse. L9 compaction sorts by `created_at`, tolerates a
+  malformed sibling, labels the merge `repair`. NIT 11 `purgeAllSuspects` replaces the
+  generation-0 sentinel. **Declined with reasons:** M7 (run the op on the `sync` session — there
+  are only two kinds; a short SEARCH on `interactive` costs the user nothing visible, whereas
+  sharing the sync session would spend a strike on every busy fetch; the H1 fix removes the race
+  that made the kind matter), L8 (belt every pass instead of listing — lists more often than the
+  spec's letter, never delays a vanish; the counter-only trigger is the no-UIDPLUS signature the
+  belt exists for), NIT 10 (`SEARCH RETURN (COUNT)` is an ESEARCH capability, later). Raw outputs
+  in `docs/reviews/2026-09-02-pr50-{gemini,grok}-raw.md`.

@@ -33,8 +33,11 @@ import {
   deletionCap,
   planDeletions,
   recordMissing,
+  insertSuspects,
+  RECONCILE_OP_PASS_PREFIX,
   clearReappeared,
   purgeOtherGenerations,
+  purgeAllSuspects,
   confirmedOnPass,
   applySearchAll,
   type SuspectRow,
@@ -275,6 +278,43 @@ describe("F-4 suspect state machine (SQLite harness)", () => {
 
     expect((await confirmedOnPass(ACC, F, GEN, "pass-2")).map((r) => r.folder)).toEqual([F]);
     expect(await confirmedOnPass(ACC, "Sent", GEN, "pass-2")).toEqual([]);
+  });
+
+  // ---------- Part 3: the reconcile op's write (Grok H1 on #50) ----------
+
+  it("a reconcile op inserts a suspect that the next list adopts and only the list after that confirms", async () => {
+    await insertSuspects(ACC, F, GEN, `${RECONCILE_OP_PASS_PREFIX}op-a`, [{ uid: 5, messageRowId: "m5" }]);
+    expect(rows()).toMatchObject([{ uid: 5, status: "suspect", first_pass_id: `${RECONCILE_OP_PASS_PREFIX}op-a` }]);
+
+    // First list observation: adopted, still a suspect, not deletable.
+    await recordMissing(ACC, F, GEN, "pass-1", [{ uid: 5, messageRowId: "m5" }]);
+    expect(rows()).toMatchObject([{ uid: 5, status: "suspect", first_pass_id: "pass-1" }]);
+    await expect(confirmedOnPass(ACC, F, GEN, "pass-1")).resolves.toEqual([]);
+
+    // Second list observation: confirmed.
+    await recordMissing(ACC, F, GEN, "pass-2", [{ uid: 5, messageRowId: "m5" }]);
+    expect(rows()).toMatchObject([{ uid: 5, status: "confirmed_absent", last_verified_pass_id: "pass-2" }]);
+  });
+
+  it("two reconcile ops in a row confirm nothing, and an op never touches a row a list pass already holds", async () => {
+    await insertSuspects(ACC, F, GEN, `${RECONCILE_OP_PASS_PREFIX}op-a`, [{ uid: 5, messageRowId: "m5" }]);
+    await insertSuspects(ACC, F, GEN, `${RECONCILE_OP_PASS_PREFIX}op-b`, [{ uid: 5, messageRowId: "m5" }]);
+    expect(rows()).toMatchObject([{ uid: 5, status: "suspect", first_pass_id: `${RECONCILE_OP_PASS_PREFIX}op-a` }]);
+
+    await recordMissing(ACC, F, GEN, "pass-1", [{ uid: 6, messageRowId: "m6" }]);
+    await insertSuspects(ACC, F, GEN, `${RECONCILE_OP_PASS_PREFIX}op-c`, [{ uid: 6, messageRowId: "m6" }]);
+    expect(rows().find((r) => r.uid === 6)).toMatchObject({ status: "suspect", first_pass_id: "pass-1" });
+
+    await expect(insertSuspects(ACC, F, GEN, "pass-9", [{ uid: 7, messageRowId: "m7" }])).rejects.toThrow(/source id/);
+  });
+
+  it("purgeAllSuspects clears every generation of a folder and nothing else", async () => {
+    await recordMissing(ACC, F, GEN, "pass-1", [{ uid: 5, messageRowId: "m5" }]);
+    await recordMissing(ACC, F, GEN + 1, "pass-1", [{ uid: 5, messageRowId: "m5" }]);
+    await recordMissing(ACC, "Sent", GEN, "pass-1", [{ uid: 1, messageRowId: "s1" }]);
+
+    await purgeAllSuspects(ACC, F);
+    expect(rows()).toMatchObject([{ uid: 1, folder: "Sent" }]);
   });
 
   it("orders confirmed rows oldest-first for the batching cap (REQ-3.1)", async () => {
