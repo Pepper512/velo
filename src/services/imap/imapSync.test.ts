@@ -70,6 +70,9 @@ vi.mock("../db/messages", () => ({
 // F-4: the reconciliation pass is exercised on the SQLite harness in
 // reconcilePass.test.ts. Here it is a recorder, so these tests keep asserting
 // sync behaviour; the F-4 wiring block below asserts the calls it receives.
+vi.mock("./reconcile", () => ({
+  purgeOtherGenerations: vi.fn(async () => {}),
+}));
 vi.mock("./reconcilePass", () => ({
   beginReconcilePass: vi.fn((accountId: string) => ({
     accountId,
@@ -963,6 +966,18 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     expect(reconcileFolderList).not.toHaveBeenCalled();
     expect(attestPass).toHaveBeenCalledWith(expect.anything(), ["INBOX"], new Set(["INBOX"]), 1);
     expect(finishReconcilePass).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it("a UIDVALIDITY change purges the old generation's suspects and skips the gate for that folder", async () => {
+    const { shouldListFolder } = await import("./reconcilePass");
+    const { purgeOtherGenerations } = await import("./reconcile");
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), uidvalidity: 8, uidvalidity_changed: true }]);
+    vi.mocked(imapSearchFolder).mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ exists: 0 }) });
+
+    await imapDeltaSync("acc-1");
+
+    expect(purgeOtherGenerations).toHaveBeenCalledWith("acc-1", "INBOX", 8);
+    expect(shouldListFolder).not.toHaveBeenCalled();
   });
 
   it("an unchecked folder never opens the gate and is missing from the checked set", async () => {

@@ -35,6 +35,7 @@ import {
   reconcileFolderList,
   shouldListFolder,
 } from "./reconcilePass";
+import { purgeOtherGenerations } from "./reconcile";
 import { upsertAttachment } from "../db/attachments";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
 import { withTransaction } from "../db/connection";
@@ -1110,6 +1111,12 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               `(was ${savedState.uidvalidity}, now ${deltaResult.uidvalidity}). ` +
               `Doing full resync of this folder.`,
           );
+          // F-4 REQ-1.4/1.5: a regenerated mailbox reuses UIDs, so every
+          // suspect recorded under the old generation is void. The gate does
+          // not run for this folder this pass (the resync below is the
+          // observation); the next opened gate would purge these anyway, but
+          // there is no reason to carry a stale generation until then.
+          await purgeOtherGenerations(accountId, folder.raw_path, deltaResult.uidvalidity);
           const sinceDate = computeSinceDate(daysBack);
           const searchResult = await withSession(accountId, "sync", {}, (id) =>
         imapSearchFolder(id, folder.raw_path, sinceDate),
