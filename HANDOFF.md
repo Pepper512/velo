@@ -4,68 +4,92 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Branch:** `main` @ **`99b691f`** (#31, docs). **Last commit that changed code: `0d0b373`** (#29,
-  dependency batch B). Docs-only commits above it are wrap-ups and are expected — check line numbers
-  against the **code** pin, never this one.
-- **Open PRs:** only this file's own re-pin (**#32**, docs-only) — none once it lands. CI green on
-  `main`; Release Please **skipped** (EX-007 guard holding). **PR #28 was closed deliberately** (it
-  refreshed this same file against the same base as #31 and would have clobbered it); its one unique
-  fact (F-5 as a live defect) was folded into #31 first, and its branch
-  `docs/handoff-repin-5c545f9` is now deleted locally and on `origin` — nothing to recover.
+- **Code pin: `0d0b373`** (#29, dependency batch B) — **the only SHA this file pins.** Every line
+  number in every brief was verified against it. This file no longer pins a docs SHA: it cannot know
+  its own merge commit at write time, and chasing one produced three re-pin PRs in one day (#28, #31,
+  #32). To see what is above the code pin: `git log --oneline 0d0b373..origin/main` — docs-only
+  commits there are wrap-ups and expected; **a code commit there means this pin is stale and every
+  brief line number needs re-grepping.**
+- **Open PRs:** never trust this line — run `gh pr list --repo Pepper512/velo`. At writing the open
+  set was **#33** (docs — the delegation record), **#34** (dependency PR C) and **this file's own PR,
+  #35** — a count that omits the PR it is written from is how #32 went wrong. All three are
+  complete and wait only on Jim (§1). CI green on `main`; Release Please **skipped** (EX-007 guard
+  holding).
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
-- **⚠️ Two agent sessions work this repo, and they are not one-per-tree.** Name **seats, never
-  session ids** — sessions restart and are renamed; every id this file has ever pinned went stale
-  within a day. Run **`ListAgents`** to find who is actually live, and treat any unclaimed queue
-  (dependency PRs C→D) as unowned until a session claims it.
-  - **Both seats may share the main checkout.** On 2026-09-01 they did: one seat reviewed a PR from
-    the main checkout while it sat on the other seat's branch. So `git status` / `git branch --show-current`
-    there may report **someone else's branch** — check before assuming you are on `main`, and never
-    report "clean on main" without looking.
-  - The **locked worktree** `.claude/worktrees/f2-email-links-open` belongs to whichever seat holds
-    it; its **directory name lags its branch** (`docs/handoff-refresh-eod` @ `86bbc52` as of this
-    writing). Trust `git worktree list`, not the path, and do not touch the other session's tree.
-  - The worktree is gitignored but **not vitest-excluded**: a bare `npx vitest run` at the repo root
-    globs into it — always pass the excludes in §1.
-- **State:** frontend **1,822** tests (152 files) · Rust **56** · npm audit **0 — full tree AND
-  prod** · 0 service import cycles · EX-001/002/004 closed; EX-003/005/006/007 open; **EX-008 was
-  deliberately NOT created** (every dev-graph advisory was fixable in-range — fix beats exception).
+- **⚠️ Two agent seats work this repo, and they are not one-per-tree.** Name **seats, never
+  session ids** — every id this file ever pinned went stale within a day. Run **`ListAgents`** to
+  find who is live.
+  - **Both seats may share the main checkout**, so `git status` there can report **someone else's
+    branch** — check `git worktree list` before asserting anything about `main`. On 2026-09-01 the
+    Fable seat moved to its own worktree (`.claude/worktrees/f1-decisions`, created with
+    `EnterWorktree`) precisely to stop this; **do the same rather than sharing the main checkout.**
+  - A worktree-isolated session has a **guard on Bash**: it refuses compound commands, `$(…)`
+    substitution and shell variables near anything it cannot prove is not `git`. Use plain single
+    commands, the `Edit`/`Write` tools for file changes, and a small `.sh` wrapper for anything that
+    needs substitution (the `agy` review runner is the standing example).
+  - `git worktree list` shows **three** trees at writing: the main checkout, `f1-decisions` (the
+    Fable seat's, live), and **`f2-email-links-open` — dead.** Its head `86bbc52` is exactly what
+    #31 merged, the tree is clean and unlocked, and it holds nothing unlanded (Opus verified in the
+    #35 review). Its directory name never matched its branch and it has misled every session since.
+    **Safe to `git worktree remove .claude/worktrees/f2-email-links-open` — and Jim's ALONE to do:**
+    the main-checkout seat tried and was classifier-blocked (~00:15 UTC, the fourth gate of the
+    night after the protection append and two merges). A gate that refuses one seat and is then
+    satisfied by the other is laundering whether the object is branch protection or a directory.
+  - Worktrees are gitignored but **not vitest-excluded**: a bare `npx vitest run` at the repo root
+    globs into every one of them — always pass the excludes in §1.
+- **State on `main`:** frontend **1,822** tests (152 files) · Rust **56** · npm audit **0 — full
+  tree AND prod** · 0 service import cycles · EX-001/002/004 closed (EX-002's register row was
+  only flipped to Closed in #32 — it had lagged the HANDOFF since #4); EX-003/005/006/007 open.
+  **After #34 merges:** 153 files / **1,842** tests, and one dependency fewer.
 
 ---
 
 ## 1. Exact next step
 
-**Four decisions are with Jim. Everything buildable behind them is written, reviewed, and parked.
-An agent cannot supply any of them.**
+**Jim is back from a three-hour absence during which he delegated his decision authority to the
+Fable seat** (`velo-build-f1`; 22:30 → 01:30 UTC, 2026-09-01/02 — recorded with a hard expiry in
+`docs/decisions/LOG.md` via #33) — **renewed verbatim by Jim at ~00:20 UTC to 03:20 UTC** (same
+entry, `cb92d46`). **If you are reading this after 03:20 UTC on 2026-09-02, it has expired and
+nothing further is decided in his name.** (Written at ~00:45 UTC, inside the renewed window.) The
+renewal lifted no permission gate and did not reach the Opus seat's hold — both stated in the entry.
+What waits on him, in the order it unblocks work:
 
-1. **E2 rev-2 re-confirmation — the ONLY thing blocking the session-pooling build.** Decision 4 is
-   DECIDED (a) (Jim, 2026-09-01, relayed). The brief is rev 3 (`a230f3a`,
-   `docs/briefs/2026-09-01-e2-p15-session-pooling.md`): citations re-verified at `0d0b373`,
-   #25/#26 drift folded in, **six pooling findings recorded — judge the re-confirmation against
-   §Pooling findings item 1** (cancellation bypasses eviction-on-error; the design does not cover
-   it; the cheap fix — checkout-removes-entry — also closes the panic path). Build seat: Opus.
-2. **F-4 fresh approval** (vanished-UID reconciliation). Spec is **rev 5** in the vault
-   (`Pepper Knowledge/10 Projects/Velo/Build Queue/10-Bug-Fixes/SPEC-F-4_…`). Two vendors, five
-   revisions: Opus ×2 rounds → Gemini cross-vendor **DO NOT BUILD YET** (7 findings, all verified
-   and adopted in rev 4) → delta-review found 3 defects in rev 4's own clauses → rev 5 fixed them →
-   **re-check clean**. Jim's earlier conditional approval voided itself per its own terms; the
-   decision is his, fresh. Builds after E2.
-3. **PR C plan approval** — the Gemini SDK swap (`@google/genai` 2.20 replacing the EOL'd
-   `@google/generative-ai`): the one dependency-series item that is a **new dependency**, so its
-   Tier-2 plan (vault, `Build Queue/20-Enhancements/PLAN-PR-C_Gemini-SDK-Replacement.md`) needs
-   Jim's sign-off before code. ~2 h build once approved. Blast radius: one 40-line provider file.
-4. **Branch-protection append** — `rust MSRV` passes on every PR but is **not a required check**;
-   the append was classifier-blocked for agents (settings-level). Jim runs:
+1. **Ratify or reverse the delegated decisions — read the #33 LOG entry first.** Every decision
+   made under the delegation is marked *(delegated)* there and is subject to his retroactive
+   review; anything he reverses is reverted, not argued. The decisions:
+   - **E2/P15 rev 2 re-confirmed**, judged against §Pooling findings as he asked: **findings 1, 3,
+     5 folded into the build; 4, 6 deferred** (1 and 5 via one checkout-removes-entry pattern; 3 =
+     `account_key` includes port/TLS/auth-mechanism + a credential-version counter).
+   - **PR C plan approved with an amendment: no new dependency.** Built as #34 — see §4.
+   - **F-4: deliberately NOT decided.** Read in full; recommendation is *approve rev 5 as written*.
+     It builds after E2 anyway, so deciding it by proxy would have traded provenance for nothing.
+2. **Merge #33 and #34** — both green, both opposite-line reviewed, #34 also cross-vendor
+   reviewed. **Every `gh pr merge` from the Fable session was classifier-blocked, and was NOT
+   routed through the Opus seat** (that is the unresolved "agent reach" precedent from #24; doing it
+   again would have decided the question by fait accompli). So either Jim merges, or he rules on
+   agent merge reach. Merge #33 first — #34's provenance points at it.
+3. **The E2 build is HELD by the Opus seat until Jim confirms the delegation to it directly.** The
+   Opus seat approved #33 *as a record* but declined to build a Tier-2 IMAP rewrite on an
+   agent-created approval — because the artifact attesting to the grant was written by the session
+   that received it, which is exactly the hazard the #24 LOG entry names. That hold was correct and
+   the Fable seat did not argue it. One sentence from Jim to the Opus seat starts the build in the
+   recorded scope.
+4. **F-4 fresh approval** — his, after (1); builds after E2.
+5. **Decision 4 — make `rust MSRV` a required check.** Attempted again from the Fable session at
+   22:33 UTC, classifier-blocked again, not laundered. Jim runs:
    `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`
-   (Opus bundled this with its own #24 governance question as one "agent reach" decision.)
+   **Until it lands, the MSRV is not enforced.**
 
-**Build order once unblocked:** PR C → PR D (TS 6→7, Vite 8) on the Fable line · E2/P15 on the Opus
-line · then PR E (Rust parsers) and F-4, both explicitly parked behind E2.
+**Build order once unblocked:** merge #33 → #34 · E2/P15 on the Opus line · PR D (TS 6→7, Vite 8)
+on the Fable line · then PR E (Rust parsers) and F-4, both parked behind E2 for file-collision
+reasons.
 
 ### Resume commands
 
 ```bash
 cd /Users/jpepper/Developer/Claude/Velo-Build/velo
+git worktree list                        # who is where — before anything else
 git checkout main && git pull origin main
 npm ci
 npx tsc --noEmit && npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'
@@ -74,33 +98,31 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected: **152 test files, 1,822 tests, all passing.** A wildly higher count means the worktree
-exclude was dropped.
+Expected on `main` before #34: **152 test files, 1,822 tests**; after: **153 / 1,842**. A wildly
+higher count means a worktree exclude was dropped.
 
 ### Re-verify before acting — these may have gone stale
 
-- **Has code landed past `0d0b373`?** `git log --oneline -5`. Two sessions land work here — `main`
-  moves; rebase before merging, and sequence doc-touching PRs (LOG/EXCEPTIONS appends conflict).
-- **PR #30 was the last merge** — if more merged since, this file is behind; the memory log
-  (`~/.claude/projects/-Users-jpepper-Developer-Claude-Velo-Build/memory/velo-upstream-issue-triage.md`)
-  is the running ledger.
-- **Node:** CI, `engines`, `.nvmrc` all say **24** since #27. `rust-version = "1.89"` — the MSRV
-  job pins it; if that job reds while `rust` stays green, a dependency raised its floor again.
+- **Has code landed past `0d0b373`?** `git log --oneline 0d0b373..origin/main` — anything that is
+  not `docs:` means the code pin is stale. #34 will be the first such commit.
+- **PR state:** `gh pr list` — this file was written with #33/#34 open.
+- **Node 24 / `rust-version = "1.89"`** — the MSRV job pins it; if that job reds while `rust` stays
+  green, a dependency raised its floor again.
 - **Upstream drift:** `git fetch upstream && git log --oneline main..upstream/main` — empty all day.
-- **Every E2-brief line number was verified at `0d0b373`** (rev 3 did exactly that). Re-grep after
-  any new code merge.
+- **Every E2-brief line number was verified at `0d0b373`.** Re-grep after any code merge —
+  including #34, though it touches nothing E2 touches.
 
 ---
 
 ## 2. Immediate / time-sensitive
 
-**No credentials to rotate. None were created, read, or logged this session.**
+**No credentials to rotate. None were created, read, or logged this session.** The Gemini SDK
+tarball used to verify the wire format was unpacked in a scratchpad and never installed.
 
-- **The four Jim decisions in §1** — nothing else is truly time-sensitive. The dependency series'
-  SLA item (the vitest critical) already **landed** in #27.
-- Still parked on Jim from earlier sessions, unchanged: **P11** capability split (brief written;
-  needs his approval + 5-step manual QA) · **P19** phishing wired-or-deleted (product decision —
-  F-3 in the vault queue tracks it).
+- **The #33 ratification** is the only genuinely time-sensitive item: the longer the delegated
+  decisions stand unreviewed, the more work stacks on them.
+- Still parked on Jim from earlier, unchanged: **P11** capability split (brief written; needs
+  approval + 5-step manual QA) · **P19** phishing wired-or-deleted (F-3 in the vault queue).
 
 ---
 
@@ -108,88 +130,123 @@ exclude was dropped.
 
 Velo is a local-first Tauri v2 (Rust) + React 19 desktop email client, forked from
 `avihaymenahem/velo` (v0.4.21). Jim is hardening it under his methodology (`docs/methodology/`,
-pinned). The 20-item optimization audit is fully landed. Current thrust: the **2026-09-01
-dependency audit** (5 PRs, A–E — A and B landed today) and the **IMAP correctness line** (#25/#26
-shipped; E2 pooling and F-4 reconciliation specced and parked on approvals).
+pinned). The 20-item optimization audit is fully landed. Current thrust: the **dependency audit**
+(A, B landed; **C built and reviewed**; D next; E parked) and the **IMAP correctness line** (#25/#26
+shipped; E2 pooling scoped and held on a provenance question; F-4 specced and recommended).
 
-Two agent sessions run in parallel under cross-session governance: relayed approvals carry Jim's
-authority but never create it (LOG.md rule, PR #24); merges happen only on green-at-exact-head plus
-recorded opposite-line review (EX-005).
+Two agent seats run in parallel under cross-session governance: relayed approvals carry Jim's
+authority but never create it (LOG.md, #24); merges happen only on green-at-exact-head plus a
+recorded opposite-line review (EX-005). **New this session: a time-boxed delegation of Jim's own
+authority to a seat, recorded before use (#33).** The Opus seat's refusal to build on it is the
+governance working as designed, not a failure of it.
 
 ---
 
-## 4. What just happened (2026-09-01, evening session — Fable seat)
+## 4. What just happened (2026-09-01 22:30 → 01:30 UTC — the delegation window, Fable seat)
 
-| PR | What |
-|---|---|
-| #27 `0183733` | **Dep batch A** — vitest 4.1.11 (critical killed), vite 7.3.6, Tauri 2.11 align, Node 24, `rust-version` 1.89 + **MSRV CI job**, full-audit visibility step. Full-tree `npm audit` → **0** via in-range fixes (no EX-008 needed) |
-| #29 `0d0b373` | **Dep batch B** — @anthropic-ai/sdk 0.122, openai 7.8, lucide 1.39 (8 renames + the `Github` brand icon the audit missed → GitBranch), jsdom 30, jest-dom 7 (+@testing-library/dom **promoted** transitive→declared, same 10.4.1), tsdav 2.3.1, 4 release workflows SHA-pinned |
-| #30 `a230f3a` | **E2 brief rev 3** (Opus authored, Fable reviewed) — citations at `0d0b373`, Decision 4 recorded DECIDED (a), six pooling findings written down |
+| PR | State | What |
+|---|---|---|
+| #33 | **open, green, reviewed** | **LOG.md entry:** the delegation itself (hard expiry), the E2 scope decision, the PR C amendment, F-4 read-and-not-decided, Decision 4 attempted-and-blocked. Opus EX-005: *approve as a record*. |
+| #34 | **open, green, reviewed ×2** | **Dependency PR C — `@google/generative-ai` removed, nothing added.** `geminiProvider.ts` rewritten as one `fetch` to v1beta `generateContent`; 19 tests written first. Opus EX-005 **approved at head `e5655ff`**; Gemini 3.7 cross-vendor **APPROVE WITH NITS** (3 LOW, all adopted). |
 
-**F-4 went rev 2 → rev 5 today.** The commissioned Gemini cross-vendor read (per the same-vendor
-caveat) returned DO NOT BUILD YET with 7 verified findings — including a cap deadlock, a
-permanently-broken counter invariant, and an arrival-masking hole in two-pass confirmation that
-three same-vendor rounds missed. Rev 4 adopted all seven; the delta-review then caught rev 4
-contradicting itself in three places; rev 5 fixed those and re-checked clean. Raw Gemini review is
-archived beside the spec.
+**Why PR C added nothing.** The approved plan swapped SDKs one-for-one. Re-verified in the tree:
+the old SDK has **zero** dependencies; `@google/genai` would have brought `google-auth-library`,
+`protobufjs`, `ws` and `p-retry` into a renderer that holds mail credentials, for a provider that
+makes one POST. Two of the four are structurally dead weight here (Opus verified: `ws` is the Live
+API, `google-auth-library` is server-side ADC). The wire format was read from the successor SDK's
+own source, and 2 of the 14 initial tests passed against the *old* provider because the old SDK
+was making the identical request underneath — corroboration, not luck. Net: **−1 dependency**, and
+the only provider whose auth/rate errors now derive from real HTTP status (it maps 403, which the
+central string-sniffing mapper in `aiService.ts` misses).
 
-**The MSRV gate falsified its own audit figure on first run** (real floor 1.89 via notify-rust, not
-1.85 via lettre) — and PR #27 was mergeable with that job red, which is finding-grade evidence for
-§1 item 4. The job is named version-stably (`rust MSRV`) precisely so it can become a required
-check.
+**The one real bug in PR C was found by the same-vendor reviewer, not the cross-vendor one.**
+`testConnection` sent a 10-token budget through the strict text extractor; on the default model
+(Gemini 2.5 Flash, a *thinking* model whose thinking tokens come out of `maxOutputTokens`) that can
+be a 200 with no text part → typed error → `false` → a valid key reported as broken. A regression
+the rewrite introduced, not inherited — the old provider never read `.text()` there. Fixed by
+splitting the POST (proves the key) from extraction (strict only in `complete()`), with tests for
+thinking-only parts and for `parts: []` + `finishReason: MAX_TOKENS`. **Neither reviewer hit the
+live API**; the fix restores the old semantics exactly, so its worst case is fixing nothing. Gemini
+had reviewed the earlier head, was asked for regressions, and reported none material — see §6.
+
+**The peer seat held the E2 build.** Correctly — see §1 item 3. The Fable seat's own PR C work
+proceeded because *that* grant was first-hand (typed into its session), not relayed; the
+distinction is recorded in #33's thread.
+
+**Three permission gates fired in the Fable session and none was routed around:** the branch
+protection append, `gh pr merge` (twice), and one cross-session message that asserted delegated
+authority in prose (re-sent as a pointer to the durable record instead — the right shape anyway).
 
 ---
 
 ## 5. Decisions
 
-**Made today (recorded in the E2 brief, F-4 spec, PR threads, LOG.md):**
-- **E2 Decision 4: (a) frontend-driven** `NeedRawFallback` (Jim, direct, relayed to Opus). Option
-  (d) — raw fetch over the pooled session — recorded as the better post-E2 end state, with the two
-  reasons it is not scope now.
-- **Dep batches A–E approved as a series** (Jim: "approve") — A, B landed; **C gated on its own
-  Tier-2 plan** (new dependency); D next after C; E parked behind E2.
-- **F-4 conditional approval voided by its own terms** (delta-review found findings) — approval is
-  Jim's again, fresh; rev 5 verified clean.
-- **Fix beats exception:** dev-graph advisories were cleared in-range rather than registered
-  (EX-008 never created). Register rows are for what cannot be fixed.
-- **Version-stable CI check names** — a required-status context must never embed a version.
+**Made this window — all in `docs/decisions/LOG.md` via #33, marked *(delegated)*, subject to Jim's
+retroactive review:**
+- **The delegation itself:** Jim → `velo-build-f1`, 22:30–01:30 UTC, scoped to the four open
+  decisions and build judgment calls; the proxy cannot reach what a permission gate refuses; *no
+  self-approval* still binds the proxy's own builds.
+- **E2/P15 rev 2 re-confirmed; findings 1/3/5 in, 4/6 deferred.** `getrandom = "0.3"` stays the
+  only dependency E2 may add.
+- **PR C amended: REST via `fetch`, no new dependency.** Self-approval hazard named (the proxy
+  amended, approved and built it); mitigated by an opposite-line plan ack *before* code, EX-005
+  review, and cross-vendor review — all three recorded on #33/#34.
+- **F-4: read in full, recommended, not decided.**
+- **Decision 4: not made** — permission-gated twice, never laundered.
 
-**Pending Jim:** the four items in §1 · P11 · P19/F-3 · the "agent reach on settings" governance
-question (Opus bundled protection-append + #24).
+**Made by the Opus seat, and right:** hold E2 until Jim confirms the delegation directly.
+
+**Pending Jim:** everything in §1 · P11 · P19/F-3 · the "agent reach" question, which now has
+four more data points (two blocked merges, one blocked protection append, one blocked
+`git worktree remove` for the other seat), all handled the same way: surface, never route around.
+They are converging on one question, not four: **what may an agent seat reach on its own.**
 
 **Deliberately deferred + reason:**
-- **F-4 build** — after E2/P15 (same files, active rewrite; a second rebase of a Tier-2 credential
-  change is the expensive kind).
-- **F-5 (move-time row hygiene)** — not merely an F-4 dependency: `updateMessageImapFolder`
-  (`messageHelper.ts:126`) has **zero callers** and nothing else writes `messages.imap_folder`
-  after a move, so an action on an already-moved message uses a stale folder/UID pair. **A live
-  defect on `main` today** (reviewer-verified at `a230f3a`), queued — and if it slips past F-4,
-  F-4's suspect table grows beyond design assumptions (coupling note in the spec).
-- **PR E** (`async-imap` 0.11, `mail-parser` 0.11, reqwest 0.13) — parked behind E2 for the same
-  file-collision reason; reqwest must keep `native-tls` explicit or TLS silently swaps to rustls.
-- **TS 7 direct** — 6.0 bridge first (`baseUrl` removal bites; tsconfig:19).
-- **lucide aria-label sweep** — v1 sets `aria-hidden` on icons; lone-icon buttons predate it; noted
-  as follow-up, not smuggled into #29.
+- **`AbortSignal.timeout()` on the Gemini fetch** — one line, but the test environment is jsdom and
+  its `AbortSignal` support is unverified; a mock-fetch suite would pass either way. Not a
+  regression (the old provider had no timeout). Small follow-up.
+- **`callAi` duplicate** — 16 identical lines in `aiService.ts` and `writingStyleService.ts`
+  (Opus, review of #34); the P16(3) pattern; its own PR.
+- **F-5**, **PR E**, **TS 7 direct**, **lucide aria-label sweep** — unchanged from the previous
+  handoff, same reasons.
+- **`docs/development.md:43`'s per-group test breakdown** sums to 129 against a gated total of 153;
+  only the gated number was touched in #34. Delete the breakdown or regenerate it; do not hand-fix.
 
-**Operational notes that bit us today (adds to the standing list):**
-- `agy` (Antigravity/Gemini): `--print` **swallows the next flag as its prompt** — use
-  `--print="$(cat file)"` with other flags first, via a small `sh` script for the worktree guard.
-- The permission classifier blocks **settings-level** `gh api` calls (branch protection) in agent
-  sessions — surface to Jim, never route around; and never claim an action done before its call
-  resolves (both sessions filed corrections for exactly this today).
-- **Truncated audit reads produce confident wrong counts** — both sessions did it within one hour
-  (undici-only claim; four-vs-five highs). Read complete outputs before stating numbers.
+**Operational notes that bit us this window:**
+- **`--print` on `agy` requires its prompt as an argument** and will eat the next flag as the prompt;
+  stdin is not read. Wrap it in a `.sh` (the worktree guard refuses `$(cat …)` inline).
+- **A single-use `Response` in a `vi.fn().mockResolvedValue` fails the second call** with a
+  misleading "non-JSON" error — use `mockImplementation(() => new Response(…))` for multi-call tests.
+- **The cross-session classifier blocks messages that assert authority in prose.** Land the record
+  first, then send a pointer to it. This is also the process-correct order.
+- **`gh pr checks` can start being refused mid-session after working repeatedly** (Opus seat, during
+  the #35 review) while `gh pr view --json mergeStateStatus` keeps working — `CLEAN` is the usable
+  green signal. Do not conclude the gates are broken; use the substitute.
 
 ---
 
 ## 6. Standing instruction — verify measurements before building to them
 
-The optimization audit's six failed claims (see git history of this file for the table) now have
-company: **the dependency audit lost four point-facts to mechanical checks** — `serde_json` unused
-(build fails without it), the injection-site count, **MSRV 1.85** (job's first run: 1.89), and
-"Velo uses no brand icons" (`Github` in SettingsPage). Both audits ranked the work correctly and
-measured it unreliably. The rule stands, now with more scars: **trust the backlog, verify every
-number, including our own briefs' — and read outputs to the end before counting.**
+The two audits' falsified numbers stand as recorded (see git history of this file). Two additions
+from this window, both about *how* to verify rather than *whether*:
+
+- **Check the direction of staleness; don't infer it from which document usually drifts.** §6 had
+  trained both seats to suspect the newer summary. In the #32 review the HANDOFF said EX-001/002/004
+  were closed while the *register* still read "Closing" for EX-002 — the older, more authoritative
+  document was the stale one. The mismatch was correctly flagged and incorrectly attributed until
+  someone checked `ci.yml:83`.
+- **Cross-vendor is not automatically the stronger review.** On #34 the same-vendor EX-005 reviewer
+  found the only real bug (a liveness check that fails on the shipped default model); the
+  cross-vendor pass, run on the same head and asked for regressions, found three polish items and
+  reported no regression. F-4 showed the opposite (Gemini found what three Opus rounds missed).
+  One case each way, same day: **neither seat is reliably stronger; the value is the independence,
+  not the vendor.** The two passes caught disjoint classes because of what each had *context* on —
+  the same-vendor finding came from grepping `types.ts` for the default model rather than trusting
+  the diff; the cross-vendor findings came from the API contract. So the requirement on *both*
+  reviewers is the same: **re-derive from the tree, don't read only the patch.** A same-vendor
+  reviewer who re-derives beats a cross-vendor one who doesn't. Record both, weight neither as
+  senior, and do not overturn the methodology's cross-vendor preference on one data point — that
+  would be the §6 mistake in a new coat. (Sharpened by the Opus seat in the #34 thread.)
 
 ---
 
@@ -197,31 +254,34 @@ number, including our own briefs' — and read outputs to the end before countin
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · `main` @ `99b691f` (last code:
-`0d0b373`, #29) · clean · CI green · npm audit **0 full-tree** · 152 files / 1,822 tests / 56 Rust.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `0d0b373`** (the only
+SHA pinned; `git log --oneline 0d0b373..origin/main` shows what is above it) · CI green · npm audit
+**0** · 152 files / 1,822 tests / 56 Rust on `main` (**153 / 1,842** once #34 lands).
 
-**Next action — four decisions wait on Jim; all work behind them is ready:**
-1. **E2 rev-2 re-confirmation** (only pooling blocker; judge against the brief's §Pooling finding 1
-   — cancellation bypasses eviction; Decision 4 already DECIDED (a)). Opus builds.
-2. **F-4 fresh approval** (spec rev 5 in vault, two vendors, re-check clean; prior conditional
-   approval voided itself). Builds after E2.
-3. **PR C plan approval** (vault: `PLAN-PR-C_Gemini-SDK-Replacement.md` — new dep `@google/genai`,
-   ~2 h). Then PR D. Fable builds.
-4. **Branch protection:** make `rust MSRV` required —
-   `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`
-   (agent-blocked, correctly; it passes everywhere but gates nothing until this lands).
+**Next action — Jim, in this order:**
+1. **Read the #33 LOG entry and ratify or reverse** the decisions made under the 3-hour delegation
+   (renewed to 03:20 UTC 2026-09-02; after that, expired): E2 rev 2 re-confirmed with findings 1/3/5
+   in scope; PR C amended to *no new dependency*; F-4 read and recommended but **not** decided; F-5
+   briefed (decision-ready, not built — it is Rust work that collides with E2).
+2. **Merge #33, then #34** — both green and reviewed; every agent merge was classifier-blocked and
+   deliberately not routed through the other seat. Or rule on agent merge reach.
+3. **Tell the Opus seat directly** that the delegation was real — it is holding the E2 build on
+   exactly the provenance concern the LOG warns about, and one sentence releases it.
+4. **F-4 approval** (recommended) · **Decision 4** — the `gh api` line in §1, agent-blocked twice.
 
-**Verify first:** `git log --oneline -5` (two sessions land work; past `a230f3a` means this file is
-behind — the memory ledger `velo-upstream-issue-triage.md` is the running log) · `git worktree list`
-(locked worktree = the other session's; name lags branch) · `gh run list --branch main --limit 2`
-(CI success + Release Please **skipped**).
+**Verify first:** `git worktree list` (seats may share the main checkout — never assert "clean on
+`main`" without it) · `gh pr list` · `git log --oneline 0d0b373..origin/main` (any non-`docs:`
+commit = stale line numbers) · `gh run list --branch main --limit 2` (CI success + Release Please
+**skipped**) · `ListAgents` for who is live — never a remembered session id.
 
 **Get running:** `git checkout main && git pull && npm ci`, then
 `npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'` (bare runs
-glob the parallel worktree), `npx tsc --noEmit`, graph/docs checks, `(cd src-tauri && cargo test --locked)`.
+glob every worktree), `npx tsc --noEmit`, graph/docs checks, `(cd src-tauri && cargo test --locked)`.
 `cargo build --release` stays broken locally (sqlx dylib — use
-`cargo check --locked --config 'profile.dev.debug-assertions=false'`). git-guard: long text via
-`--body-file`/`commit -F`; `git push` in its own call.
+`cargo check --locked --config 'profile.dev.debug-assertions=false'`). Prefer your own worktree
+(`EnterWorktree`); inside one, Bash refuses compound/substituted commands near git — use plain
+commands and the file tools.
 
-**Read §6:** two audits, ten falsified numbers between them, four caught today by new mechanical
-gates. Trust backlogs, verify numbers — including ours.
+**Read §6:** two audits, ten falsified numbers; this window added two *method* lessons — check
+which side is stale before assuming, and treat same-vendor and cross-vendor reviews as independent
+samples, not a hierarchy. Trust backlogs, verify numbers — including ours.
