@@ -66,7 +66,14 @@ fn is_loopback_host(host: &str) -> bool {
 /// user-info, a host present. Everything else is refused with a reason that
 /// carries none of the URL's query.
 pub fn validate_ai_url(raw: &str) -> Result<Url, String> {
-    let url = Url::parse(raw.trim()).map_err(|e| format!("not a valid URL: {e}"))?;
+    let raw = raw.trim();
+    // An `@` anywhere in the authority is user-info, including the empty
+    // `https://:@host/` form the parser normalises away (#65 review, Grok 8).
+    // Checked on the text, before parsing, so nothing can be normalised past it.
+    if authority_of(raw).contains('@') {
+        return Err("credentials inside the URL are not allowed".to_string());
+    }
+    let url = Url::parse(raw).map_err(|e| format!("not a valid URL: {e}"))?;
     if !url.username().is_empty() || url.password().is_some() {
         return Err("credentials inside the URL are not allowed".to_string());
     }
@@ -78,6 +85,20 @@ pub fn validate_ai_url(raw: &str) -> Result<Url, String> {
         other => Err(format!("the {other}: scheme is not allowed")),
     }
 }
+
+/// The text between `://` and the first `/`, `?` or `#` — the authority as
+/// written, before any normalisation.
+fn authority_of(raw: &str) -> &str {
+    let rest = match raw.find("://") {
+        Some(i) => &raw[i + 3..],
+        None => return "",
+    };
+    let end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    &rest[..end]
+}
+
+/// Longest single header value accepted (#65 review, Grok 5).
+const MAX_HEADER_VALUE_BYTES: usize = 8 * 1024;
 
 fn parse_method(raw: &str) -> Result<Method, String> {
     match raw.to_ascii_uppercase().as_str() {
@@ -118,10 +139,22 @@ pub async fn fetch_with_limits(
     let method = parse_method(&request.method)?;
     let host = url.host_str().unwrap_or("?").to_string();
 
+    // The caps apply to what goes out too (#65 review, Grok 5): this is a
+    // POST primitive reachable from the webview, so it must not become a way
+    // to push tens of megabytes at an allowed host.
+    if let Some(body) = &request.body {
+        if body.len() > max_body {
+            return Err(format!("the request body is larger than {max_body} bytes"));
+        }
+    }
+
     let client = shared_client()?;
     let mut builder = client.request(method.clone(), url).timeout(timeout);
     for (name, value) in &request.headers {
         if REQUEST_HEADERS.contains(&name.to_ascii_lowercase().as_str()) {
+            if value.len() > MAX_HEADER_VALUE_BYTES {
+                return Err(format!("a request header is longer than {MAX_HEADER_VALUE_BYTES} bytes"));
+            }
             builder = builder.header(name.as_str(), value.as_str());
         }
     }
@@ -131,10 +164,11 @@ pub async fn fetch_with_limits(
 
     let mut response = builder.send().await.map_err(describe)?;
     let status = response.status();
-    if status.is_redirection() {
-        // Never followed, and the target is not disclosed: a friendly host
-        // must not be able to point the app at a loopback or link-local
-        // address by answering 3xx.
+    // Never followed, and the target is not disclosed: a friendly host must
+    // not be able to point the app at a loopback or link-local address by
+    // answering 3xx. A 304 is not a redirect (#65 review, Grok 3) and passes
+    // with its empty body.
+    if status.is_redirection() && status.as_u16() != 304 {
         return Err(format!(
             "the endpoint answered {} — redirects are not followed",
             status.as_u16()
@@ -216,13 +250,31 @@ mod tests {
             "http://localhost.example.com/v1",
             "http://127.0.0.1.example.com/v1",
             "http://0.0.0.0/v1",
+            "http://[::]/v1",
             "http://localhost./v1",
             "http://[::ffff:127.0.0.1]/v1",
             "http://[::ffff:10.0.0.1]/v1",
+            "http://[::ffff:169.254.169.254]/v1",
+            "http://[fe80::1]/v1",
+            "http://[fd00::1]/v1",
+            "http://127/v1",       // = 0.0.0.127, not loopback
+            "http://0127.0.0.1/v1", // octal 0127 = 87
+            "http://localhost%2eexample.com/v1",
         ] {
             let err = validate_ai_url(raw).unwrap_err();
             assert!(err.contains("localhost only"), "{raw}: {err}");
         }
+        // Not even a URL: refused on parse, whichever branch.
+        assert!(validate_ai_url("http://127.0.0.1%0d%0a/v1").is_err());
+    }
+
+    #[test]
+    fn any_user_info_is_refused_even_when_empty_and_an_at_sign_elsewhere_is_fine() {
+        for raw in ["https://:@host.example/v1", "https://@host.example/v1", "https://a:b@127.0.0.1/v1"] {
+            assert!(validate_ai_url(raw).unwrap_err().contains("credentials"), "{raw}");
+        }
+        assert!(validate_ai_url("https://host.example/v1/a@b").is_ok());
+        assert!(validate_ai_url("https://host.example/v1?next=a@b").is_ok());
     }
 
     #[test]
@@ -400,6 +452,35 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.contains("larger than 1024 bytes"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn a_304_is_not_a_redirect_and_passes_with_an_empty_body() {
+        let (base, _rx) = serve_once(framed("HTTP/1.1 304 Not Modified", &[], ""));
+        let req = AiFetchRequest {
+            url: format!("{base}/v1/models"),
+            method: "GET".to_string(),
+            headers: vec![],
+            body: None,
+        };
+        let out = fetch_with_limits(req, 1024, TIMEOUT).await.unwrap();
+        assert_eq!(out.status, 304);
+        assert_eq!(out.body, "");
+    }
+
+    #[tokio::test]
+    async fn a_request_body_or_header_over_the_cap_is_refused_before_any_connection() {
+        let big = post("https://example.invalid/v1".to_string(), vec![], &"z".repeat(2048));
+        let err = fetch_with_limits(big, 1024, TIMEOUT).await.unwrap_err();
+        assert!(err.contains("request body is larger than 1024"), "{err}");
+
+        let long_header = post(
+            "https://example.invalid/v1".to_string(),
+            vec![("Authorization".to_string(), "Bearer ".to_string() + &"k".repeat(9 * 1024))],
+            "{}",
+        );
+        let err = fetch_with_limits(long_header, 1024, TIMEOUT).await.unwrap_err();
+        assert!(err.contains("header is longer"), "{err}");
     }
 
     #[tokio::test]

@@ -6,6 +6,7 @@ import { useAccountStore } from "@/stores/accountStore";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
 import { PROVIDER_MODELS, type AiProvider } from "@/services/ai/types";
 import { isAllowedAiUrl } from "@/services/ai/rustFetch";
+import { describeError } from "@/services/ai/errors";
 import { deleteAccount } from "@/services/db/accounts";
 import { closeAccountSessions } from "@/services/imap/sessionManager";
 import { removeClient, reauthorizeAccount } from "@/services/gmail/tokenManager";
@@ -1102,7 +1103,7 @@ export function SettingsPage() {
                       {aiProvider === "ollama" && "Connect to a local Ollama or LMStudio server. No API key required."}
                       {aiProvider === "copilot" && `Uses ${PROVIDER_MODELS.copilot.find((m) => m.id === copilotModel)?.label ?? copilotModel}. Requires a GitHub PAT with models:read permission.`}
                       {aiProvider === "xai" && `Uses ${PROVIDER_MODELS.xai.find((m) => m.id === xaiModel)?.label ?? xaiModel}. Get a key at console.x.ai.`}
-                      {aiProvider === "custom" && "Any OpenAI-compatible endpoint — OpenRouter (https://openrouter.ai/api/v1), DeepSeek (https://api.deepseek.com/v1), or a gateway on your network. Requests go through Velo's own fetch: https, or http to this machine only; redirects are never followed."}
+                      {aiProvider === "custom" && "Any OpenAI-compatible endpoint that takes a Bearer key — OpenRouter (https://openrouter.ai/api/v1), DeepSeek (https://api.deepseek.com/v1), or a gateway on your network (Azure OpenAI's api-key header is not supported). Requests go through Velo's own fetch: https, or http to this machine only; redirects are never followed."}
                     </p>
                   </Section>
 
@@ -1153,7 +1154,7 @@ export function SettingsPage() {
                                 setAiTestError(result.ok ? null : result.error);
                               } catch (err) {
                                 setAiTestResult("fail");
-                                setAiTestError(err instanceof Error ? err.message : String(err));
+                                setAiTestError(describeError(err));
                               } finally {
                                 setAiTesting(false);
                               }
@@ -1238,7 +1239,7 @@ export function SettingsPage() {
                                 setAiTestError(result.ok ? null : result.error);
                               } catch (err) {
                                 setAiTestResult("fail");
-                                setAiTestError(err instanceof Error ? err.message : String(err));
+                                setAiTestError(describeError(err));
                               } finally {
                                 setAiTesting(false);
                               }
@@ -1384,7 +1385,7 @@ export function SettingsPage() {
                                 setAiTestError(result.ok ? null : result.error);
                               } catch (err) {
                                 setAiTestResult("fail");
-                                setAiTestError(err instanceof Error ? err.message : String(err));
+                                setAiTestError(describeError(err));
                               } finally {
                                 setAiTesting(false);
                               }

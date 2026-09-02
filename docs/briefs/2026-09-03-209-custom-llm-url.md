@@ -119,7 +119,10 @@ ever reaches Rust, refused there too.
   follow-up if asked.
 - Allowing `http:` to private LAN addresses — decision 2 says https or loopback.
 - Custom request headers (e.g. OpenRouter's optional `HTTP-Referer`/`X-Title`) — not needed
-  for the API to work.
+  for the API to work. Azure OpenAI's `api-key` header is likewise not forwarded (the card
+  says so; review, Grok 10).
+- Cancelling an in-flight Rust request when the SDK aborts — the wrapper rejects at once,
+  the request runs to its own timeout (review, Gemini N4 / Gemini 3.1 Pro N2).
 - Widening `connect-src` or the http scope for any host.
 
 ## Design
@@ -222,8 +225,13 @@ existing fallback), so nothing breaks — the custom card just disappears until 
   typed host name.
 
 ## Review
-Both cross-vendor legs on the PR (Gemini 3.7 via `agy`, Grok 4.6 via the `grok` CLI), diffs
-from committed SHAs; every finding verified before adoption; dispositions in LOG.md.
+Three legs on the PR, diffs from committed SHAs: Gemini 3.7 Flash (APPROVE WITH NITS), Grok
+4.6 (CHANGES REQUESTED — twelve minutes; on Jim's rule of 2026-09-02 a second Gemini model
+replaced it as the standing second leg) and Gemini 3.1 Pro (APPROVE WITH NITS). Every finding
+verified before adoption; dispositions on the PR and in LOG.md. Added by review: the
+parser-differential URL tables on both sides, 304 passed through, request body and header
+caps, redaction in the cards' `catch`, the empty-user-info form, `Request`-input bodies, a
+shared client, the abort race.
 
 ## Approval
 Jim, 2026-09-02 (decision 2: *"validated Rust fetch command, https/loopback only, no

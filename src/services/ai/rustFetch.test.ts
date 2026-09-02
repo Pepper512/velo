@@ -27,6 +27,9 @@ describe("isAllowedAiUrl", () => {
     "http://127.1/v1",
     "http://0177.0.0.1/v1",
     "http://2130706433/v1",
+    // An `@` outside the authority is not user-info.
+    "https://host.example/v1/a@b",
+    "https://host.example/v1?next=a@b",
   ])("accepts %s", (raw) => {
     expect(isAllowedAiUrl(raw)).toBe(true);
   });
@@ -44,6 +47,16 @@ describe("isAllowedAiUrl", () => {
     "http://[::ffff:10.0.0.1]/v1",
     "http://10.1/v1",
     "http://167772161/v1",
+    "http://[::]/v1",
+    "http://[::ffff:169.254.169.254]/v1",
+    "http://[fe80::1]/v1",
+    "http://[fd00::1]/v1",
+    "http://127/v1", // = 0.0.0.127, not loopback
+    "http://0127.0.0.1/v1", // octal 0127 = 87
+    "http://localhost%2eexample.com/v1",
+    "http://127.0.0.1%0d%0a/v1",
+    "https://:@host.example/v1",
+    "https://@host.example/v1",
     "ftp://files.example.com/",
     "javascript:alert(1)",
     "file:///etc/passwd",
@@ -98,6 +111,16 @@ describe("rustFetch", () => {
     expect(call.request.url).toBe("http://localhost:1234/v1/models");
     expect(call.request.method).toBe("GET");
     expect(call.request.headers).toEqual([["accept", "application/json"]]);
+  });
+
+  it("reads the body of a Request input when init carries none (#65 Grok 9)", async () => {
+    mockInvoke.mockResolvedValue({ status: 200, headers: [], body: "{}" });
+
+    await rustFetch(new Request("https://api.deepseek.com/v1/chat/completions", { method: "POST", body: '{"model":"m"}' }));
+
+    const call = mockInvoke.mock.calls[0]![1] as { request: { method: string; body: string | null } };
+    expect(call.request.method).toBe("POST");
+    expect(call.request.body).toBe('{"model":"m"}');
   });
 
   it("relays a non-2xx status so the SDK can classify it", async () => {

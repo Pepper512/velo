@@ -42,9 +42,13 @@ function isLoopbackHost(hostname: string): boolean {
  * Rust's check is the one that counts; this one is for the inline message.
  */
 export function isAllowedAiUrl(raw: string): boolean {
+  const text = raw.trim();
+  // Any `@` in the authority is user-info, including the empty `https://:@host/`
+  // form the parser normalises away — same pre-parse check as Rust.
+  if (authorityOf(text).includes("@")) return false;
   let url: URL;
   try {
-    url = new URL(raw.trim());
+    url = new URL(text);
   } catch {
     return false;
   }
@@ -53,6 +57,15 @@ export function isAllowedAiUrl(raw: string): boolean {
   if (url.protocol === "https:") return true;
   if (url.protocol === "http:") return isLoopbackHost(url.hostname);
   return false;
+}
+
+/** The text between `://` and the first `/`, `?` or `#`, as written. */
+function authorityOf(raw: string): string {
+  const start = raw.indexOf("://");
+  if (start === -1) return "";
+  const rest = raw.slice(start + 3);
+  const end = rest.search(/[/?#]/);
+  return end === -1 ? rest : rest.slice(0, end);
 }
 
 function headerPairs(headers: HeadersInit | undefined): [string, string][] {
@@ -85,6 +98,9 @@ export const rustFetch: typeof fetch = async (input, init) => {
       throw new Error("ai_fetch: only string bodies are supported");
     }
     body = rawBody;
+  } else if (fromRequest?.body) {
+    // A `Request` carries its own body (#65 review, Grok 9).
+    body = await fromRequest.text();
   }
 
   const signal = init?.signal ?? null;

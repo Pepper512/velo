@@ -1014,3 +1014,41 @@
   cache, the manager's six `custom` cases. Threat pass and rollback in the brief. Gates:
   cargo test 143 (+10), clippy `-D warnings`, 168 files / 2,165 tests, tsc, graph, docs.
   Both review legs to follow.
+- **2026-09-03 — PR #65 (#209/#265) review, three legs.** Gemini 3.7 Flash: APPROVE WITH
+  NITS (2L 3N). Grok 4.6: CHANGES REQUESTED (2M 5L 3N) — twelve minutes on a 1,400-line
+  prompt; **Jim (2026-09-02): "replace Grok with Gemini-2.7 from now on if Grok is slow"** —
+  no such model in `agy` (3.6/3.7/3.8 Flash, 3.1 Pro), so the second leg ran on
+  **Gemini 3.1 Pro (high)**, a different family from the first leg: APPROVE WITH NITS (2N).
+  A same-vendor second leg is weaker evidence than a cross-vendor one; Grok's late verdict
+  is taken as the third. **Adopted:** Gemini L1 — a socket test with no `content-length`
+  proves the cap holds in the chunk loop; L2 — one process-wide `reqwest::Client` in a
+  `OnceLock` carrying the redirect policy, timeout per request; N3 — `||` for a saved empty
+  model name; N4 — `rustFetch` races `invoke` against the `AbortSignal` (the Rust request
+  runs to its own timeout — IPC cannot be cancelled; Gemini 3.1 Pro N2 says the same and
+  accepts it); Grok 1/2 + Gemini N5 + Gemini 3.1 Pro N1 — the URL tables on both sides now
+  pin the parser-differential forms: `127.1`, `0177.0.0.1`, `2130706433`, `0x7f.1` accepted
+  as 127.0.0.1; `10.1`, `167772161`, `0x0a000001`, `0.0.0.0`, `[::]`, `[::ffff:127.0.0.1]`,
+  `[::ffff:10.0.0.1]`, `[::ffff:169.254.169.254]`, `[fe80::1]`, `[fd00::1]`, `127` (= 0.0.0.127),
+  `0127.0.0.1` (octal, = 87.0.0.1), `localhost.`, `localhost%2eexample.com`, `%0d%0a`
+  refused, whitespace cannot smuggle a host; Grok 3 — a **304 is not a redirect** and passes
+  with its empty body (socket test); Grok 5 — the **request** body and each header value are
+  capped too (8 MiB / 8 KiB, refused before any connection); Grok 6 — the three AI cards'
+  `catch` now goes through `describeError` (redaction) like the success path; Grok 8 — any
+  `@` in the authority as written is refused on both sides, so the empty `https://:@host/`
+  form cannot be normalised past the check, while `@` in a path or query is fine; Grok 9 —
+  a `Request` input's body is read when `init.body` is absent; Grok 10 — the card says Azure's
+  `api-key` header is not supported. **Declined with reasons:** Grok 4 (clamp `retry-after`,
+  `maxRetries` 0/1, reject non-UTF-8) — the OpenAI SDK ignores a `retry-after` above 60 s and
+  uses its own backoff, retries are the same two every provider makes, and a lossy body only
+  fails JSON parsing the same way a rejection would; Grok 7 (bind the command to the saved
+  base URL's origin, or an explicit capability) — Rust has no access to the settings table,
+  app commands cannot be permission-gated without generating permissions, and the reach is
+  strictly narrower than the http plugin's scope already granted to the same JavaScript —
+  recorded as the threat pass's residual; Grok Q3 (system proxy on loopback) — `reqwest`
+  honours `NO_PROXY`; a user's own proxy configuration intercepting their own loopback is
+  their configuration, not a boundary the app owns. **Questions answered:** plugin scope is
+  `http://*` + `https://*` at this pin (Grok Q1); https to a private address stays allowed and
+  a self-signed certificate must be in the OS trust store (`native-tls`) or the gateway used
+  over `http://127.0.0.1` (Gemini Q2, Grok Q2); 8 MiB of response text is far beyond any
+  chat completion (Gemini 3.1 Pro Q1). Raw outputs in `docs/reviews/2026-09-03-pr65-{gemini,
+  grok,gemini31pro}-raw.md`.
