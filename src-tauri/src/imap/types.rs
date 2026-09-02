@@ -1,22 +1,43 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ImapConfig {
     pub host: String,
     pub port: u16,
     pub security: String, // "tls", "starttls", "none"
     pub username: String,
-    pub password: String, // plaintext password or OAuth2 access token
+    pub password: String,    // plaintext password or OAuth2 access token
     pub auth_method: String, // "password" or "oauth2"
     #[serde(default)]
     pub accept_invalid_certs: bool,
 }
 
+/// Manual, so `{:?}` can never print the password.
+///
+/// Nothing `{:?}`-logs an `ImapConfig` today — that was checked — but session
+/// pooling (brief E2/P15) adds credential-handling code paths, and a derived
+/// `Debug` on a struct holding a plaintext password or an OAuth access token is
+/// one stray `tracing::debug!` away from putting it in a log file. Cheaper to
+/// remove the possibility than to keep re-checking that nobody used it.
+impl std::fmt::Debug for ImapConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImapConfig")
+            .field("host", &self.host)
+            .field("port", &self.port)
+            .field("security", &self.security)
+            .field("username", &self.username)
+            .field("password", &"[redacted]")
+            .field("auth_method", &self.auth_method)
+            .field("accept_invalid_certs", &self.accept_invalid_certs)
+            .finish()
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ImapFolder {
-    pub path: String,      // decoded UTF-8 display name
-    pub raw_path: String,  // original modified UTF-7 path for IMAP commands
-    pub name: String,      // decoded display name (last segment)
+    pub path: String,     // decoded UTF-8 display name
+    pub raw_path: String, // original modified UTF-7 path for IMAP commands
+    pub name: String,     // decoded display name (last segment)
     pub delimiter: String,
     pub special_use: Option<String>, // "\Sent", "\Trash", "\Drafts", "\Junk", "\Archive", "\All"
     pub exists: u32,
@@ -114,4 +135,54 @@ pub struct DeltaCheckResult {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub struct RemovalResult {
     pub expunged: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config() -> ImapConfig {
+        ImapConfig {
+            host: "imap.example.com".to_string(),
+            port: 993,
+            security: "ssl".to_string(),
+            username: "user@example.com".to_string(),
+            password: "hunter2-not-in-any-log".to_string(),
+            auth_method: "password".to_string(),
+            accept_invalid_certs: false,
+        }
+    }
+
+    #[test]
+    fn debug_never_renders_the_password() {
+        let rendered = format!("{:?}", config());
+
+        assert!(
+            !rendered.contains("hunter2-not-in-any-log"),
+            "ImapConfig's Debug leaked the credential: {rendered}"
+        );
+        assert!(rendered.contains("[redacted]"));
+    }
+
+    #[test]
+    fn debug_still_renders_the_fields_worth_debugging() {
+        // Redaction is only worth having if the type stays useful in a log.
+        let rendered = format!("{:?}", config());
+
+        assert!(rendered.contains("imap.example.com"));
+        assert!(rendered.contains("993"));
+        assert!(rendered.contains("user@example.com"));
+        assert!(rendered.contains("password"), "the field name survives");
+    }
+
+    #[test]
+    fn serialization_is_unaffected_by_the_manual_debug() {
+        // The redaction must not reach the wire format: the config still has to
+        // round-trip to Rust from the frontend with a usable credential.
+        let json = serde_json::to_string(&config()).expect("serialize");
+        let back: ImapConfig = serde_json::from_str(&json).expect("deserialize");
+
+        assert_eq!(back.password, "hunter2-not-in-any-log");
+        assert_eq!(back.host, "imap.example.com");
+    }
 }

@@ -72,10 +72,12 @@ describe('IMAP Tauri commands', () => {
     ];
     mockInvoke.mockResolvedValue(folders);
 
-    const result = await imapListFolders(testImapConfig);
+    const result = await imapListFolders('session-abc');
 
+    // E2/P15: no password crosses this boundary any more — the session id
+    // stands in for the credential, which is the point of the pool.
     expect(mockInvoke).toHaveBeenCalledWith('imap_list_folders', {
-      config: testImapConfig,
+      sessionId: 'session-abc',
     });
     expect(result).toEqual(folders);
   });

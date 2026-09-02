@@ -7,6 +7,7 @@ import {
   imapSearchFolder,
   imapDeltaCheck,
 } from "./tauriCommands";
+import { withSession } from "./sessionManager";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
 import {
   mapFolderToLabel,
@@ -412,7 +413,8 @@ export async function imapInitialSync(
 
   // Phase 1: List and sync folders
   onProgress?.({ phase: "folders", current: 0, total: 1 });
-  const allFolders = await imapListFolders(config);
+  // One command per `withSession`, so a pool error is always safe to retry.
+  const allFolders = await withSession(accountId, "sync", {}, (id) => imapListFolders(id));
   const syncableFolders = getSyncableFolders(allFolders);
   await syncFoldersToLabels(accountId, syncableFolders);
   console.log(`[imapSync] Initial sync for account ${accountId}: ${syncableFolders.length} syncable folders`);
@@ -857,7 +859,8 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
   const syncStates = await getAllFolderSyncStates(accountId);
 
   // Also check for any new folders
-  const allFolders = await imapListFolders(config);
+  // One command per `withSession`, so a pool error is always safe to retry.
+  const allFolders = await withSession(accountId, "sync", {}, (id) => imapListFolders(id));
   const syncableFolders = getSyncableFolders(allFolders);
   await syncFoldersToLabels(accountId, syncableFolders);
 

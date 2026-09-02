@@ -167,11 +167,44 @@ export async function imapTestConnection(config: ImapConfig): Promise<string> {
   return invoke<string>('imap_test_connection', { config });
 }
 
+// ---------- Pooled session lifecycle (brief E2/P15) ----------
+
+/**
+ * Open an authenticated IMAP session and keep it in the Rust pool.
+ *
+ * The only command that carries a password, together with Decision 4(a)'s raw
+ * fetch. Everything else takes the returned opaque session id.
+ */
+export async function imapSessionOpen(config: ImapConfig): Promise<string> {
+  return invoke<string>('imap_session_open', { config });
+}
+
+/** Close a pooled session. Idempotent: an unknown id is not an error. */
+export async function imapSessionClose(sessionId: string): Promise<void> {
+  return invoke<void>('imap_session_close', { sessionId });
+}
+
+/**
+ * Drop every pooled session for an account after its credential changed.
+ *
+ * Takes the account's identity rather than a session id because the point is to
+ * catch sessions this window does not know about — other windows' `interactive`
+ * sessions included.
+ */
+export async function imapSessionsInvalidate(
+  username: string,
+  host: string,
+): Promise<void> {
+  return invoke<void>('imap_sessions_invalidate', { username, host });
+}
+
 /**
  * List all IMAP folders/mailboxes on the server.
+ *
+ * Takes a pooled session id (E2/P15): no password crosses the boundary here.
  */
-export async function imapListFolders(config: ImapConfig): Promise<ImapFolder[]> {
-  return invoke<ImapFolder[]>('imap_list_folders', { config });
+export async function imapListFolders(sessionId: string): Promise<ImapFolder[]> {
+  return invoke<ImapFolder[]>('imap_list_folders', { sessionId });
 }
 
 /**

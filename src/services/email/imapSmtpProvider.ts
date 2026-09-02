@@ -19,6 +19,7 @@ import {
   type ImapConfig,
   type SmtpConfig,
 } from "../imap/tauriCommands";
+import { withSession, invalidateAccountCredentials } from "../imap/sessionManager";
 import { getAccount, type DbAccount } from "../db/accounts";
 import { findSpecialFolder } from "../imap/messageHelper";
 import { ensureFreshToken } from "../oauth/oauthTokenManager";
@@ -175,13 +176,29 @@ export class ImapSmtpProvider implements EmailProvider {
   clearConfigCache(): void {
     this._imapConfig = null;
     this._smtpConfig = null;
+
+    // The credential changed, so pooled sessions authenticated with the old one
+    // must go too (E2/P15). Without this the pool keeps serving the superseded
+    // credential — fine until the server stops tolerating it, and in the
+    // revocation case the connection keeps working after the user revoked it.
+    // Fire-and-forget: clearing a cache must not become an async call for every
+    // existing caller, and a failure here only costs a stale session that the
+    // reaper will take.
+    void invalidateAccountCredentials(this.accountId).catch((err: unknown) => {
+      console.warn(
+        `[imapSmtpProvider] Failed to invalidate pooled sessions for ${this.accountId}:`,
+        err,
+      );
+    });
   }
 
   // ---- Folder/Label operations ----
 
   async listFolders(): Promise<EmailFolder[]> {
-    const config = await this.getImapConfig();
-    const imapFolders = await imapListFolders(config);
+    // One command per `withSession`, so a pool error is always safe to retry.
+    const imapFolders = await withSession(this.accountId, "interactive", {}, (id) =>
+      imapListFolders(id),
+    );
     const syncable = getSyncableFolders(imapFolders);
 
     return syncable.map((f) => {
