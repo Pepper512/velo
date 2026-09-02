@@ -1,6 +1,6 @@
 # Velo fork — roadmap
 
-> Pinned 2026-09-02 at `b95468e` (#54). Sources: the vault build queues
+> Pinned 2026-09-02 at `848ccaa` (#56). Sources: the vault build queues
 > (`~/Vaults/Pepper Knowledge/10 Projects/Velo/Build Queue/`), the 2026-09-01 issue ledger, parity
 > report and effort model, `docs/decisions/LOG.md` and `EXCEPTIONS.md`, and `HANDOFF.md`. Days are
 > the effort model's build-days for one credentialed seat, tests and Tier-2 overhead included.
@@ -20,7 +20,7 @@ Superhuman-parity enhancements have not started.
 | Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA) and **P19/F-3** (orphaned phishing dialog — Jim's product decision: wire or delete) |
 | Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
 | IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
-| Bug-fix queue (upstream triage) | **#297 (#52) and #240 (#54, `b95468e`) landed** — both P0s done. 11 items left, ~13 days; next #280 + #241 |
+| Bug-fix queue (upstream triage) | **#297, #240, #280 (#56, `848ccaa`), #241 (#57) landed** — both P0s and two P1s done. 9 items left, ~12 days; next #252/#253 then #197 |
 | Enhancement queue (Superhuman parity) | **Nothing started.** 10 items in 3 waves, 33.5 days |
 
 ## Next up, in order
@@ -41,8 +41,8 @@ Superhuman-parity enhancements have not started.
 |---|---|---|---|
 | 1 | **#297** | **Landed #52 (`64de404`, 2026-09-02).** Rust strips `Bcc`/`Resent-Bcc` after the envelope, fail-closed guard, Sent/Drafts keep it | 1.0 ✓ |
 | 2 | **#240** | **Landed #54 (`b95468e`, 2026-09-02).** One Rust-held connection per transaction, `BEGIN IMMEDIATE`, idle watchdog; `sqlx =0.8.6` direct (approved). Closes #264; #204 unrelated (ledger corrected); #205 re-test. **Also Opus 5's HIGH 2 on #43 — closed.** Task 6 (manual sync check) open | 7.0 ✓ |
-| 3 | #280 | `http://127.0.0.1:*` / `localhost` in the http scope; un-swallow `testConnection` | 0.5 |
-| 4 | #241 | Parenthesise multi-item `uid_fetch` (Stalwart "no body") | 0.5 |
+| 3 | #280 | **Landed #56 (`848ccaa`).** Four loopback scope entries (no `*:*`), URLPattern test with an exact allow-list snapshot, connection-test reason shown with credentials redacted, Ollama fetch refuses redirects. Open for Jim: `urlpattern` dev-dep for a plugin-matcher test | 0.5 ✓ |
+| 4 | #241 | **Landed #57 (`51689ef`).** `FETCH_*` constants, three sites parenthesised, source-scanning guard (`imap/fetch_guard.rs`). Reporter's Stalwart re-test open | 0.5 ✓ |
 | 5 | #252/#253 | Separate encrypted SMTP credentials | 2.0 |
 | 6 | #197 | Remote-image CSP — **Jim decides** widen `img-src` vs Rust proxy | 0.25 / 3.0 |
 | 7–13 | #276, #243, #209/#265, #278, #233, #204, #281 | P2/P3: all-time sync, unread counts, custom LLM URL (CSP decision), macOS signing ($99/yr, Jim), Flatpak bump, cancel test, paste images | 8.5 |
@@ -101,6 +101,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-Then take bug-fix queue items 3 and 4 as one PR each: #280 — the Tauri http scope is a URLPattern that does not match non-default ports, so local AI on http://127.0.0.1:11434 is blocked; add http://127.0.0.1:* and http://localhost:* (not *:*) and stop swallowing the testConnection error. #241 — multi-item uid_fetch is unparenthesised at three sites in src-tauri/src/imap/client.rs, so Stalwart returns "no body". For each: spec from the vault template into docs/briefs/, verify the bug in the tree first (the triage's line numbers are stale), Tier 2 (tauri.conf.json and Rust IMAP): plan in the PR before code, TDD, Gemini 3.7 via agy AND Grok 4.6 via the grok CLI (diffs only — generate the diff from committed SHAs, never from the working tree), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges.
-Do not run the manual checks (F-4 live Done-when, #240 Task 6) unless the app can be driven; they are recorded as open.
+Then take bug-fix queue item 5, #252/#253 — separate encrypted SMTP credentials. The triage's evidence: AddImapAccount.tsx has a ternary identical in both branches so the SMTP password is discarded, and accounts need an smtp_password column (encrypted like imap_password) plus the config builder reading it. Verify in the tree first (line numbers are stale). Tier 2 (services/db/accounts.ts, a migration with rollback, crypto): spec from the vault template into docs/briefs/, plan in the PR before code (threat pass, rollback), TDD on the SQLite harness, Gemini 3.7 via agy AND Grok 4.6 via the grok CLI (diffs from committed SHAs only; keep any fake credentials in test fixtures out of literal form — the secret scan reads commit history), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges. Then #197: widen img-src on opt-in (decided).
+Do not run the manual checks (F-4 live Done-when, #240 Task 6) unless the app can be driven; they are recorded as open. The urlpattern dev-dependency for SPEC-280's test oracle is my decision — ask me before adding it.
 ```

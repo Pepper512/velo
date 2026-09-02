@@ -4,12 +4,12 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `b95468e`** (#54, #240 pinned transactions — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline b95468e..origin/main` —
+- **Code pin: `848ccaa`** (#56, #280 local-AI http scope — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 848ccaa..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
-  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#54 all landed 2026-09-02.
+  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#57 all landed 2026-09-02.
 - **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
   were deleted at merge; their local copies linger only inside this session's worktree.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
@@ -29,14 +29,18 @@
     tools. Grok gotcha: with a long prompt it "offloads" the text and reads it back with its own
     tools — takes 5–10 minutes, the output file stays near-empty until it finishes.
   - **Worktrees:** the session's own worktree `.claude/worktrees/f5-move-hygiene` (branch
-    `docs-post-54` checked out at the end) plus the **two dead ones from before**
+    `docs-post-56` checked out at the end) plus the **two dead ones from before** (their
+    `src-tauri/target` build caches were deleted on 2026-09-02 when the disk hit 100 %; the
+    worktrees and branches themselves are untouched)
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `b95468e`:** frontend **160** files / **2,045** tests · Rust **123** + 1 ignored
+- **State on `main` @ `848ccaa`:** frontend **162** files / **2,060** tests · Rust **132** + 1 ignored
   (the live Dovecot test) · 27 migrations / 32 tables · npm audit 0 · 0 service import cycles.
   **One dependency added, approved by Jim:** `sqlx = "=0.8.6"` direct (already in the graph via
-  `tauri-plugin-sql`; CI asserts one copy) — #54, LOG.md.
+  `tauri-plugin-sql`; CI asserts one copy) — #54, LOG.md. **One dependency question open for
+  Jim:** `urlpattern` as a dev-dependency so the http-scope test can use the plugin's own matcher
+  (brief SPEC-280 §Open for Jim).
 
 ---
 
@@ -71,15 +75,23 @@ diff sent to reviewers omitted the new Rust files. Closes upstream #264; #204 is
 (ledger corrected); #205 is "re-test", a half-applied migration can no longer be produced but an
 already-broken database is not repaired.
 
-**Next: bug-fix queue items 3 and 4 together — #280 (Tauri http scope must list
-`http://127.0.0.1:*` and `http://localhost:*`; un-swallow the `testConnection` error) and #241
-(parenthesise multi-item `uid_fetch`, three sites in `imap/client.rs`; Stalwart "no body").**
-Both half a day, both Tier 2 (`tauri.conf.json` and Rust IMAP). Spec each from the vault
-template into `docs/briefs/`, verify the bug in the tree first (the triage's line numbers are
-stale), plan → TDD → both legs → merge. Then #252/#253 (separate SMTP credentials) and #197
-(widen `img-src`, decided). **Manual, still open:** #240's Task 6 (initial IMAP sync against
-Dovecot with the UI browsing — no `database is locked`) and F-4's live Done-when; both need the
-running app.
+**#280 landed as #56 (`848ccaa`) and #241 as #57 (`51689ef`).** #280: four loopback http-scope
+entries (no `*:*`), a URLPattern test that pins the allow list exactly, the connection test's
+reason shown on both AI cards with credentials redacted, and the Ollama client refusing
+redirects. #241: `FETCH_*` constants, three sites parenthesised, and a source-scanning guard in
+`imap/fetch_guard.rs`. Both had two review legs, every finding dispositioned (LOG.md). Two
+process notes from this stretch, recorded in LOG.md: the disk filled to 100 % (dead worktrees'
+build caches removed), and the secret scan reads a PR's commit *history*, so a flagged test
+fixture has to be kept out of every commit — #56 was rebuilt as two clean commits for that.
+
+**Next: #252/#253 — separate encrypted SMTP credentials** (queue item 5, 2 days, Tier 2: touches
+`services/db/accounts.ts` and a migration). The triage's evidence: `AddImapAccount.tsx:387` has a
+ternary identical in both branches, so the SMTP password is discarded; needs an `smtp_password`
+column. Spec from the vault template, verify in the tree first (the line number is stale), plan →
+TDD on the harness → both legs → merge. Then #197 (widen `img-src` on opt-in — decided). **Open
+for Jim:** the `urlpattern` dev-dependency (above); the reporter re-tests for #280 (real Ollama)
+and #241 (Stalwart). **Manual, still open:** #240's Task 6 and F-4's live Done-when; both need
+the running app.
 
 **Still open on F-4:** the live Dovecot Done-when (scenarios 1–5 in
 `docs/testing/dovecot/README.md`; manual, needs the running app — never run) and, Jim's call, a
@@ -118,11 +130,11 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected on `main`: **160 test files, 2,045 tests; Rust 123 passed, 1 ignored.**
+Expected on `main`: **162 test files, 2,060 tests; Rust 132 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline b95468e..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline 848ccaa..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
@@ -222,17 +234,19 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `b95468e`** (#54,
-#240 pinned transactions; the only SHA pinned — `git log --oneline b95468e..origin/main` shows
-what is above it) · **no open PRs** · CI green · 160 files / 2,045 tests / Rust 123 + 1 ignored ·
-27 migrations · npm audit 0 · `sqlx =0.8.6` is a direct dependency now (approved).
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `848ccaa`** (#56,
+#280 local-AI http scope; the only SHA pinned — `git log --oneline 848ccaa..origin/main` shows
+what is above it) · **no open PRs** · CI green · 162 files / 2,060 tests / Rust 132 + 1 ignored ·
+27 migrations · npm audit 0 · `sqlx =0.8.6` is a direct dependency (approved).
 
-**Next action: #280 (http scope for local AI: `http://127.0.0.1:*` + `http://localhost:*`,
-un-swallow `testConnection`) and #241 (parenthesise multi-item `uid_fetch`), both Tier 2, half
-a day each.** Spec from the vault template into `docs/briefs/`, verify in the tree first, plan →
-TDD → Gemini + Grok → merge. Then #252/#253, then #197. Manual and open: #240 Task 6 (IMAP
-initial sync with the UI browsing, Dovecot) and F-4's live Done-when; the "Keep them" hold is
-Jim's call. The build seat merges its own green PRs.
+**Next action: #252/#253 — separate encrypted SMTP credentials (queue item 5, Tier 2:
+`db/accounts.ts` + a migration).** Verify `AddImapAccount.tsx`'s identical-ternary bug in the
+tree first, spec from the vault template, plan → TDD on the harness → Gemini + Grok → merge.
+Then #197 (widen `img-src` on opt-in). Open for Jim: `urlpattern` dev-dependency for the
+http-scope test's oracle (SPEC-280). Manual and open: #240 Task 6, F-4's live Done-when, the
+"Keep them" hold; reporter re-tests for #280 (Ollama) and #241 (Stalwart). Generate reviewer
+diffs from committed SHAs; keep fake credentials out of literal form (the secret scan reads
+commit history). The build seat merges its own green PRs.
 
 **Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
 (a standing second Tier-2 leg since ADR-004). Both found real defects on every PR this day —
