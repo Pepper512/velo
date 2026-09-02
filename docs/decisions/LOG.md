@@ -338,3 +338,104 @@
   compromised or mistaken peer, because the corroborating PR comment is posted through the
   same account the relaying session controls. The mitigation is that relays must be durably
   recorded, so a wrong one is visible after the fact rather than only in a transcript.
+- **2026-09-01 22:30 UTC → 2026-09-02 01:30 UTC (hard expiry)** — **Jim delegated his decision
+  authority for this repo to session `velo-build-f1` for a three-hour window** (Jim, in-session,
+  22:30 UTC: *"you are in charge, you are me"*; he is away for the window and asked that work
+  continue). **Scope:** the four open decisions in `HANDOFF.md` §1 and any judgment call the E2/P15
+  and dependency-PR-C builds raise. **After expiry nothing further is decided in his name.** Every
+  decision made under it is listed here marked *(delegated)* and is **subject to Jim's retroactive
+  review on return — anything he reverses is reverted, not argued.**
+  **What this does not change:** *no self-approval* (the proxy's own build still needs an
+  opposite-line EX-005 review and a cross-vendor review); every required check green on the exact
+  commit merged; and **the proxy cannot reach what a permission gate refuses** — the `rust MSRV`
+  branch-protection append was attempted from this session at 22:33 UTC and classifier-blocked,
+  exactly as the earlier attempt was, and was **not** routed through the peer session. Decision 4
+  therefore remains Jim's and is **not made**.
+  - *(delegated)* **E2/P15 rev 2 re-confirmed**, judged — as Jim asked — against the brief's
+    §Pooling findings. **Findings 1, 3 and 5 are folded into the build; 4 and 6 are deferred.**
+    Reasoning: 1 (a dropped future leaves a mid-protocol session in the map with no `Err` to trigger
+    eviction) and 5 (a parser panic on hostile bytes does the same) close with one
+    *checkout-removes-entry* pattern — take the entry out of the map on checkout, reinsert only on
+    clean completion — so eviction becomes a fact about the map rather than about an error reaching
+    the caller. 3 (`account_key = "user@host"` collides across port / TLS mode / auth mechanism, so a
+    rotated credential keeps being served) is cheap and is a correctness bug. 4 (staleness `NOOP`)
+    and 6 (`last_used` stamped on acquire) are availability, not correctness, and stay in the brief
+    as follow-ups. Decision 2's `getrandom = "0.3"` remains the **only** dependency E2 may add.
+    Landing order unchanged: E2 → async-imap 0.11 bump → F-4/F-5. The rev-4 delta (Done-when
+    clauses + the pool pattern in §Proposed change) is written as the first commit of the build
+    branch; **this entry is the approval, the delta is its mechanical expression.** Builder:
+    `velo-build-43` (Opus seat). Reviewers: `velo-build-f1` (EX-005) + Gemini 3.7 via Antigravity
+    (cross-vendor; Kimi is out of weekly quota).
+  - *(delegated)* **Dependency-audit PR C — plan approved with one amendment: no new dependency.**
+    The vault plan `PLAN-PR-C_Gemini-SDK-Replacement.md` was re-verified in the tree (one importer,
+    `geminiProvider.ts`, 39 lines; `generativelanguage.googleapis.com` already in the CSP at
+    `tauri.conf.json:42`; no `geminiProvider.test.ts`) and its API claims re-verified against the
+    real `@google/genai@2.20.0` typings. `@google/generative-ai` is removed — its end of life
+    (2025-11-30) is **Google's announcement, not a registry fact**: npm carries no deprecation flag on
+    `0.24.1`, so treat the date as a citation. **Amendment:** rather than swapping SDKs,
+    `geminiProvider.ts` is rewritten against the REST API with `fetch` —
+    `POST https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`, key in
+    the `x-goog-api-key` header (never the URL), `systemInstruction` in the body,
+    `candidates[0].content.parts[].text` concatenated with `thought` parts skipped — the exact wire
+    format the SDK itself emits, read from its source. **Reasons:** (1) the hard rule *no dependency
+    where a function suffices* — the provider makes one POST; (2) the plan priced the swap as
+    one-for-one, but the old SDK has **zero** dependencies and `@google/genai` brings
+    `google-auth-library`, `p-retry`, `protobufjs` and `ws` into a renderer that holds mail
+    credentials — a transitive cost the plan did not name; (3) this makes PR C a pure removal, so
+    Jim's retroactive review lands on a strictly smaller change than the one he pre-approved, and
+    nothing is foreclosed — the SDK path can still be approved later. Error mapping: 401/403 →
+    `AiError("AUTH_ERROR")`, 429 → `RATE_LIMITED`, other non-2xx or network failure →
+    `NETWORK_ERROR`; a reply with no text part **throws** rather than returning `undefined` (P10
+    boundary), while a present-but-empty text is returned as `""` like the sibling providers.
+    **Self-approval hazard, named rather than hidden:** the proxy amended and approved this plan and
+    is also its builder (`velo-build-f1`, now the Fable seat). Mitigations: an opposite-line plan
+    acknowledgement from `velo-build-43` recorded on the PR *before* code — given for the SDK
+    version of the plan, **re-requested for this amendment**; EX-005 review by `velo-build-43`;
+    Gemini cross-vendor review; and this line, so Jim's retroactive review lands on it first.
+  - **F-4 — read in full, deliberately left to Jim.** Rev 5 of
+    `SPEC-F-4_Vanished-UID-Reconciliation.md` was read end to end within the window. **Proxy
+    recommendation: approve as written.** Five revisions, two vendors, all eleven findings adopted,
+    the three rev-5 text fixes re-checked clean, and the design fails toward "keep" on every
+    ambiguity (two-pass confirmation, positive completeness attestation, batching cap, 50% stop
+    behind `ConfirmDialog`, pending-ops guard). The one sharp edge is stated rather than emergent
+    (a 10-row folder may clear fully; an 11-row folder blocks at 6 suspects). **Why not decided in
+    his name:** it builds after E2/P15, which is itself held pending Jim's direct confirmation of
+    this delegation, so F-4 cannot start inside the window whatever is decided — an agent-created
+    approval of a 4–5-day local-deletion feature would trade provenance for nothing. Nothing is
+    lost by waiting for him.
+  - **Decision 4 (make `rust MSRV` a required check) — not made;** permission-gated, Jim only.
+    **Until it lands, the MSRV is not enforced.**
+  - **Renewed at 2026-09-02 ~00:20 UTC → 03:20 UTC.** Jim repeated the instruction to the Fable
+    session verbatim ("tell him and keep him going, I will be gone the next 3 hours; try to
+    complete the project; you are in charge, you are me"), so the window above is superseded by
+    this one; the scope, the marking of every decision as *(delegated)*, the retroactive-review
+    condition and the permission-gate rule are unchanged. Two facts stated for the record because
+    they bear on how much this renewal can carry: it was typed into the Fable session, so it is
+    first-hand there and **still a relay everywhere else** — the Opus seat's hold on the E2 build
+    (pending Jim's direct confirmation to *it*) is unaffected by it and is its own to keep or lift;
+    and it arrived after Jim's session had received a status report naming the blocked merges, but
+    it does not mention them, so **no permission gate is read as lifted** — merges, the protection
+    append, and `git worktree remove` (blocked for the Opus seat at ~00:15 UTC — the fourth gate
+    tonight) all remain Jim's alone. What the renewal is used for: the next Tier-1 engineering item
+    that lands nothing on `main` by itself — **F-5** (move-time row hygiene; a live defect on
+    `main`, the prerequisite F-4 explicitly wants), briefed before code with the self-approval
+    hazard named as for PR C.
+  - **Jim returned at ~02:36 UTC and re-authorised the Fable seat directly and in person**
+    ("go ahead review #37 and keep managing this project as me"). From that point the seat acts on
+    his live instruction, not only on the delegation above; the delegation's expiry (03:20 UTC)
+    therefore no longer governs, and any decision after it is his direct word relayed through this
+    seat. First act under it: the EX-005 opposite-line review of **#37** (E2/P15 part 1, built by
+    the Opus seat after it lifted its own hold on the reasoning that agent merges are blocked for
+    both seats) — **CHANGES REQUESTED**, five must-fix items, design sound; a Gemini 3.7
+    cross-vendor pass reached the same verdict independently. Merges remain permission-blocked
+    for both seats and remain Jim's.
+  - **Merge execution assigned to the Opus seat** (Jim, in person, 2026-09-02 ~03:30 UTC: the
+    Opus seat "has been approved to commit, push, PR, merge — have him do it when it needs done"
+    and "remind him that is in the rules"). This is the standing rule in `CLAUDE.md` Part I —
+    *Agents perform the merge* — applied to a named seat now that Jim has granted it the
+    permission his own session settings control. **Nothing else changes:** every required check
+    green on the exact commit merged, branch up to date, no unresolved review conversation,
+    Tier 2 with its plan approved before code, and merging is execution, not approval (EX-005).
+    Order: **#33 → #34 → #35 → #36**, then **#37** only after its must-fix items land and the
+    re-review at the new head is recorded. The Fable seat's merges stay blocked and are not
+    routed anywhere; this entry is the record the Opus seat can point at.
