@@ -1,4 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
 
 let db: Database | null = null;
 
@@ -8,6 +9,13 @@ export async function getDb(): Promise<Database> {
   }
   return db;
 }
+
+/**
+ * What a query helper needs from a connection. `getDb()` satisfies it, and so
+ * does the handle `withTransaction` hands its callback — a helper that accepts
+ * one of these can run inside a pinned transaction (SPEC-240 REQ-4.1).
+ */
+export type DbExecutor = Pick<Database, "execute" | "select">;
 
 /**
  * Build a dynamic SQL UPDATE statement from a set of field updates.
@@ -37,17 +45,38 @@ export function buildDynamicUpdate(
   };
 }
 
+// ---------------------------------------------------------------------------
+// Transactions (SPEC-240) — one connection, held in Rust
+// ---------------------------------------------------------------------------
+
 /**
- * Simple async mutex to prevent concurrent SQLite transactions.
- * SQLite only supports one writer at a time; overlapping BEGIN/COMMIT/ROLLBACK
- * on the same connection causes "cannot start a transaction within a transaction"
- * or "database is locked" errors.
+ * Error prefixes the Rust side returns. Must stay identical to the constants in
+ * `src-tauri/src/db/tx.rs`.
+ */
+export const TX_BUSY = "VELO_TX_BUSY";
+export const TX_EXPIRED = "VELO_TX_EXPIRED";
+export const TX_UNKNOWN = "VELO_TX_UNKNOWN";
+
+/**
+ * Simple async mutex so transactions run one at a time. The Rust side refuses
+ * a second `BEGIN` on its own (`VELO_TX_BUSY`); this queue is what keeps
+ * callers from ever hitting that refusal.
  */
 let txQueue: Promise<void> = Promise.resolve();
 
-export async function withTransaction(fn: (db: Database) => Promise<void>): Promise<void> {
+/**
+ * Run `fn` inside one SQLite transaction.
+ *
+ * Before SPEC-240 this sent `BEGIN`, the callback's statements and `COMMIT` as
+ * separate IPC calls to `tauri-plugin-sql`, which serves each call from a pool
+ * of up to ten connections — so nothing guaranteed they landed on the same one,
+ * and the moment a UI read ran concurrently they did not. Now Rust holds one
+ * connection for the whole transaction and every statement issued through the
+ * handle passed to `fn` goes to it. Statements issued through `getDb()` inside
+ * `fn` are **not** part of the transaction; pass the handle down.
+ */
+export async function withTransaction(fn: (db: DbExecutor) => Promise<void>): Promise<void> {
   // Queue this transaction behind any currently-running one.
-  // This serialises all transactions without blocking non-transactional reads.
   const prev = txQueue;
   let resolve!: () => void;
   txQueue = new Promise<void>((r) => {
@@ -60,25 +89,68 @@ export async function withTransaction(fn: (db: Database) => Promise<void>): Prom
     // previous transaction errored — that's fine, we can still proceed
   }
 
-  const database = await getDb();
   try {
-    await database.execute("BEGIN TRANSACTION", []);
+    const id = expectTxId(await invoke("db_tx_begin"));
+    const handle = transactionHandle(id);
     try {
-      await fn(database);
-      await database.execute("COMMIT", []);
+      await fn(handle);
+      await invoke("db_tx_commit", { id });
     } catch (err) {
-      // SQLite may auto-rollback on certain errors — guard against
-      // "cannot rollback - no transaction is active"
+      // Roll back on the same connection. A rollback that fails because the
+      // watchdog already reaped the transaction is not the error to report.
       try {
-        await database.execute("ROLLBACK", []);
-      } catch {
-        // ROLLBACK failed (already rolled back) — safe to ignore
+        await invoke("db_tx_rollback", { id });
+      } catch (rollbackErr) {
+        if (!String(rollbackErr).includes(TX_EXPIRED)) {
+          console.warn("[db] ROLLBACK failed after a transaction error:", rollbackErr);
+        }
       }
       throw err;
     }
   } finally {
     resolve(); // always unblock the next queued transaction
   }
+}
+
+function transactionHandle(id: string): DbExecutor {
+  return {
+    async execute(sql: string, values?: unknown[]) {
+      const result = expectExecuteResult(await invoke("db_tx_execute", { id, sql, values: values ?? [] }));
+      return { rowsAffected: result[0], lastInsertId: result[1] };
+    },
+    async select<T>(sql: string, values?: unknown[]) {
+      return expectRows(await invoke("db_tx_select", { id, sql, values: values ?? [] })) as T;
+    },
+  };
+}
+
+// Results of `invoke()` are validated at the boundary (ADR-000).
+
+function expectTxId(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new Error(`db_tx_begin returned an invalid id: ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+function expectExecuteResult(value: unknown): [number, number] {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    !Number.isInteger(value[0]) ||
+    (value[0] as number) < 0 ||
+    !Number.isInteger(value[1])
+  ) {
+    throw new Error(`db_tx_execute returned an invalid result: ${JSON.stringify(value)}`);
+  }
+  return [value[0] as number, value[1] as number];
+}
+
+function expectRows(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value) || !value.every((row) => typeof row === "object" && row !== null && !Array.isArray(row))) {
+    throw new Error("db_tx_select returned something other than an array of rows");
+  }
+  return value as Record<string, unknown>[];
 }
 
 /**

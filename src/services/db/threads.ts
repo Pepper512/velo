@@ -1,4 +1,4 @@
-import { getDb } from "./connection";
+import { getDb, type DbExecutor } from "./connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
 export interface DbThread {
@@ -102,8 +102,8 @@ export async function upsertThread(thread: {
   isStarred: boolean;
   isImportant: boolean;
   hasAttachments: boolean;
-}): Promise<void> {
-  const db = await getDb();
+}, executor?: DbExecutor): Promise<void> {
+  const db = executor ?? (await getDb());
   await db.execute(
     `INSERT INTO threads (id, account_id, subject, snippet, last_message_at, message_count, is_read, is_starred, is_important, has_attachments)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -138,8 +138,9 @@ export async function applySnoozeOverride(
   threadId: string,
   labelIds: string[],
   now: number,
+  executor?: DbExecutor,
 ): Promise<string[]> {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   const rows = await db.select<{ is_snoozed: number; snooze_until: number | null }[]>(
     "SELECT is_snoozed, snooze_until FROM threads WHERE account_id = $1 AND id = $2",
     [accountId, threadId],
@@ -158,13 +159,15 @@ export async function setThreadLabels(
   accountId: string,
   threadId: string,
   labelIds: string[],
+  executor?: DbExecutor,
 ): Promise<void> {
-  const db = await getDb();
+  const db = executor ?? (await getDb());
   const effective = await applySnoozeOverride(
     accountId,
     threadId,
     labelIds,
     getCurrentUnixTimestamp(),
+    db,
   );
   // Remove existing labels
   await db.execute(

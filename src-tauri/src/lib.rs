@@ -7,6 +7,7 @@ use tauri::{Emitter, Manager};
 use tauri_plugin_autostart::MacosLauncher;
 
 mod commands;
+mod db;
 mod imap;
 mod oauth;
 mod smtp;
@@ -122,6 +123,11 @@ pub fn run() {
         commands::imap_delta_check,
         commands::smtp_send_email,
         commands::smtp_test_connection,
+        db::tx::db_tx_begin,
+        db::tx::db_tx_execute,
+        db::tx::db_tx_select,
+        db::tx::db_tx_commit,
+        db::tx::db_tx_rollback,
     ];
 
     #[cfg(not(debug_assertions))]
@@ -155,6 +161,11 @@ pub fn run() {
         commands::imap_delta_check,
         commands::smtp_send_email,
         commands::smtp_test_connection,
+        db::tx::db_tx_begin,
+        db::tx::db_tx_execute,
+        db::tx::db_tx_select,
+        db::tx::db_tx_commit,
+        db::tx::db_tx_rollback,
     ];
 
     tauri::Builder::default()
@@ -184,8 +195,11 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_os::init())
         .manage(commands::ImapPool::new())
+        .manage(db::tx::TxManager::new())
         .invoke_handler(invoke_handler)
         .setup(|app| {
+            // SPEC-240: the pinned-transaction idle watchdog.
+            db::tx::spawn_watchdog(app.handle().clone());
             {
                 // Reaper (brief E2/P15). Snapshots expired entries under the map
                 // lock, drops the lock, then LOGOUTs — never awaits a session

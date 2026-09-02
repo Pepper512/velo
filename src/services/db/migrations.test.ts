@@ -86,6 +86,24 @@ const harnessRef: { current: ReturnType<typeof createSqliteHarness> | null } = {
 // than changing the production signature for the benefit of a test.
 vi.mock("./connection", () => ({
   getDb: () => Promise.resolve(harnessRef.current!.db),
+  // SPEC-240: production's `withTransaction` pins a connection in Rust; on
+  // the harness a real BEGIN/COMMIT on the single better-sqlite3 connection
+  // is the same guarantee.
+  withTransaction: async (fn: (db: unknown) => Promise<void>) => {
+    const db = harnessRef.current!.db;
+    await db.execute("BEGIN TRANSACTION", []);
+    try {
+      await fn(db);
+      await db.execute("COMMIT", []);
+    } catch (err) {
+      try {
+        await db.execute("ROLLBACK", []);
+      } catch {
+        // already rolled back
+      }
+      throw err;
+    }
+  },
 }));
 
 import { createSqliteHarness } from "../../test/sqliteHarness";

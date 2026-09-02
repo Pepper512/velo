@@ -744,3 +744,21 @@
   `trim_ascii` wider than WSP (over-stripping an illegal name is the safe side). Two Grok
   findings (M5 mixed blank line, L6 whitespace-led first line) were Gemini's already. Raw
   outputs in `docs/reviews/2026-09-02-pr52-{gemini,grok}-raw.md`.
+- **2026-09-02 ~19:30 UTC — #240 built (pinned SQLite transactions) on Jim's approval** of the
+  plan, the `sqlx` direct dependency (option A) and the 30 s idle watchdog. PR #54. **Dependency
+  added:** `sqlx = "0.8"` (`sqlite`, `runtime-tokio`, `json`; default features off) — already
+  compiled in through `tauri-plugin-sql` at 0.8.6, so the lockfile gained one edge and no
+  package; version must track the plugin's. **Decisions in the build:** (1) the plan's Task 2
+  capability entries were dropped — this repo lists no application command in
+  `capabilities/default.json` and Tauri 2 permits an app's own commands without them; recorded
+  on the PR. (2) Tests run on a **file-backed** pool, not `:memory:`, because an in-memory
+  SQLite is private to its connection and the property under test is cross-connection
+  visibility. (3) A connection whose COMMIT/ROLLBACK failed is **closed, not returned** to the
+  pool — sqlx does not know about a hand-issued BEGIN, so returning it would put a connection
+  still inside a transaction back into rotation. (4) The fail-fast `BEGIN IMMEDIATE` proof is a
+  second writer with a 100 ms busy timeout, not a 5 s wait. (5) `DbExecutor` =
+  `Pick<Database, "execute" | "select">` threads as a trailing optional parameter through the
+  nine helpers the audit named; existing callers unchanged. (6) The old
+  ROLLBACK-failure logging in `migrations.ts` moved into `withTransaction`, which stays silent
+  only when the failure is the watchdog having already reaped the transaction. Gates: Rust
+  119 (+7), frontend 2,034 (+5), clippy/tsc/docs/graph clean.

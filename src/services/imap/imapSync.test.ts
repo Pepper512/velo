@@ -101,7 +101,10 @@ vi.mock("../db/accounts", () => ({
   updateAccountSyncState: vi.fn(),
 }));
 vi.mock("../db/connection", () => ({
-  withTransaction: vi.fn(async (fn: () => Promise<void>) => fn()),
+  // SPEC-240: the callback receives the pinned handle and must pass it down.
+  withTransaction: vi.fn(async (fn: (tx: unknown) => Promise<void>) =>
+    fn({ execute: vi.fn(async () => ({ rowsAffected: 0 })), select: vi.fn(async () => []) }),
+  ),
 }));
 vi.mock("../db/folderSyncState", () => ({
   upsertFolderSyncState: vi.fn(),
@@ -442,12 +445,14 @@ describe("imapInitialSync", () => {
     await imapInitialSync("acc-1");
 
     expect(mockUpsertAttachment).toHaveBeenCalledTimes(1);
+    // ...and through the transaction's handle, not a fresh connection (SPEC-240 REQ-4.1).
     expect(mockUpsertAttachment).toHaveBeenCalledWith(
       expect.objectContaining({
         filename: "doc.pdf",
         mimeType: "application/pdf",
         accountId: "acc-1",
       }),
+      expect.objectContaining({ execute: expect.any(Function), select: expect.any(Function) }),
     );
   });
 

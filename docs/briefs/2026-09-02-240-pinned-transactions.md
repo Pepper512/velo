@@ -181,19 +181,23 @@ so explicitly rather than silently dropping the task.
 
 ## Tasks (risk-first)
 - [x] 0. **Audit** — above. Nine helpers, three callbacks, no capability entries.
-- [ ] 1. Rust `tx.rs` with tests on an in-memory sqlx pool: begin/execute/commit visible to a
-  second pool connection; rollback invisible; wrong id refused; second BEGIN refused; expiry
-  after idle rolls back and the id is dead; binding parity with the plugin for null/string/
-  number/object. — REQ-1.1–1.5, NFR-1
-- [ ] 2. Commands registered in both handler lists in `lib.rs`; `TxState` managed; the watchdog
+- [x] 1. Rust `db/tx.rs` with tests on a **file-backed** sqlx pool (an in-memory SQLite database
+  is private to its connection, so "visible from another connection" needs a file): commit
+  visible to a second pool connection, rollback invisible, `BEGIN IMMEDIATE` proven by a second
+  writer failing fast, wrong id / second BEGIN / dead id refused with the named errors, idle
+  reap → `VELO_TX_EXPIRED`, binding and decoding parity, a failing statement leaves the
+  transaction open for the caller's rollback. — REQ-1.1–1.5, NFR-1
+- [x] 2. Commands registered in both handler lists in `lib.rs`; `TxManager` managed; the watchdog
   spawned in `setup`. (No capability entries — see the audit's plan correction.)
-- [ ] 3. `withTransaction` on the handle; boundary validation of `invoke` results; tests with a
-  mocked `invoke` proving the sequence begin → statements-with-id → commit, and rollback on
-  throw. — REQ-1.1, 1.2
-- [ ] 4. `migrations.ts` on `withTransaction`; harness run of all 27 migrations up, idempotent
-  re-run. — REQ-3.1
-- [ ] 5. The Opus HIGH 2 proof: a harness-level test that `rekeyMovedMessages`' `PRAGMA
-  defer_foreign_keys` and `SAVEPOINT` are issued through the handle, never `getDb()`.
+- [x] 3. `withTransaction` on the handle (`DbExecutor`); `invoke` results validated at the
+  boundary; nine tests with a mocked `invoke`: sequence, id threading, rollback on throw, commit
+  failure, expired-rollback silence, serialisation, unblock after failure, refused begin,
+  validation. — REQ-1.1, 1.2
+- [x] 4. `migrations.ts` on `withTransaction`; the harness runs all 27 migrations up and the
+  idempotent re-run through the same mock. — REQ-3.1
+- [x] 5. The Opus HIGH 2 proof: `moveHygiene.test.ts` asserts `rekeyMovedMessages` issues its
+  `PRAGMA defer_foreign_keys` and `SAVEPOINT` through the handle and never calls `getDb()`;
+  `imapSync.test.ts` asserts the callbacks pass the handle down.
 - [ ] 6. Manual: initial IMAP sync against the Dovecot harness with the UI open and a folder
   being browsed — no `database is locked`; note the run in the Dovecot README.
 - [ ] 7. LOG.md, ROADMAP, vault row; close-out notes for #264/#204/#205 after re-verifying them.

@@ -1,4 +1,4 @@
-import { getDb } from "./connection";
+import { getDb, withTransaction } from "./connection";
 
 const MIGRATIONS = [
   {
@@ -965,12 +965,14 @@ export async function runMigrations(): Promise<void> {
     // Split SQL into individual statements, respecting BEGIN...END blocks
     const statements = splitStatements(migration.sql);
 
-    // Use a transaction so migrations are all-or-nothing
-    await db.execute("BEGIN");
-    try {
+    // One pinned transaction per migration (SPEC-240 REQ-3.1): every statement
+    // and the ledger insert run on the same connection, all-or-nothing. A
+    // failure rolls back on that connection and rethrows; `withTransaction`
+    // reports a rollback that itself fails.
+    await withTransaction(async (tx) => {
       for (const statement of statements) {
         try {
-          await db.execute(statement);
+          await tx.execute(statement);
         } catch (err) {
           // Tolerate "duplicate column" errors from ALTER TABLE ADD COLUMN
           // in case a migration was partially applied previously
@@ -983,26 +985,11 @@ export async function runMigrations(): Promise<void> {
         }
       }
 
-      await db.execute(
+      await tx.execute(
         "INSERT OR IGNORE INTO _migrations (version, description) VALUES ($1, $2)",
         [migration.version, migration.description],
       );
-      await db.execute("COMMIT");
-    } catch (err) {
-      // A failed ROLLBACK is a corrupt-state signal, not noise: the migration
-      // failed *and* the database is now stuck mid-transaction. Swallowing it
-      // (the previous `.catch(() => {})`) hid the more serious of the two
-      // problems. Surface it alongside the original error rather than instead of
-      // it — the original is what explains why we are here.
-      await db.execute("ROLLBACK").catch((rollbackErr: unknown) => {
-        console.error(
-          `Migration v${migration.version} failed AND its ROLLBACK failed — ` +
-            `the database may be left mid-transaction:`,
-          rollbackErr,
-        );
-      });
-      throw err;
-    }
+    });
   }
 
   console.log("All migrations applied.");
