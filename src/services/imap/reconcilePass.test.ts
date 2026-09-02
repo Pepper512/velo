@@ -37,6 +37,7 @@ import {
   beginReconcilePass,
   deleteConfirmedAfterUserApproval,
   finishReconcilePass,
+  invalidateFolderSuspects,
   markFetchCompleted,
   reconcileFolderList,
   shouldListFolder,
@@ -105,11 +106,11 @@ function threadIds(): string[] {
     .map((r) => r.id);
 }
 
-/** One attested pass in which INBOX's full list is `server`. */
+/** One attested pass in which INBOX's full list is `server` (EXISTS agrees with it). */
 async function passWith(server: number[], opts: { attested?: boolean; fetchCompleted?: boolean } = {}) {
   const pass = beginReconcilePass(ACC);
   pass.gateOpened.add(INBOX);
-  await reconcileFolderList(pass, INBOX, GEN, server);
+  await reconcileFolderList(pass, INBOX, GEN, server, server.length);
   if (opts.fetchCompleted !== false) markFetchCompleted(pass, INBOX);
   return finishReconcilePass(pass, opts.attested ?? true);
 }
@@ -330,9 +331,85 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
     expect(suspects()).toEqual([{ uid: 1, status: "suspect" }]);
 
     const pass = beginReconcilePass(ACC);
-    await reconcileFolderList(pass, INBOX, GEN + 1, [1, 2, 3]);
+    await reconcileFolderList(pass, INBOX, GEN + 1, [1, 2, 3], 3);
     await finishReconcilePass(pass, true);
     expect(suspects()).toEqual([]);
+  });
+
+  it("invalidateFolderSuspects (the UIDVALIDITY-changed path) purges the generation and drops its stop", async () => {
+    seedFolder(20);
+    const remaining = [16, 17, 18, 19, 20];
+    await passWith(remaining);
+    await passWith(remaining); // stop raised
+    expect(useUIStore.getState().reconcileStops).toHaveLength(1);
+
+    await invalidateFolderSuspects(ACC, INBOX, GEN + 1);
+
+    expect(suspects()).toEqual([]);
+    expect(useUIStore.getState().reconcileStops).toEqual([]);
+  });
+
+  it("refuses a user approval raised for a generation the folder no longer has (Grok H2)", async () => {
+    seedFolder(20);
+    const remaining = [16, 17, 18, 19, 20];
+    await passWith(remaining);
+    await passWith(remaining);
+    raw().prepare("UPDATE folder_sync_state SET uidvalidity = ? WHERE folder_path = ?").run(GEN + 1, INBOX);
+
+    await expect(deleteConfirmedAfterUserApproval(ACC, INBOX, GEN)).rejects.toThrow(/regenerated/);
+    expect(liveUids()).toHaveLength(20);
+  });
+
+  // ---------- Grok H1 / H4 on #47 ----------
+
+  it("forgets a suspect whose row F-5 tombstoned or re-keyed since it was recorded, instead of promoting it", async () => {
+    seedFolder(3);
+    await passWith([2, 3]);
+    // Between passes, F-5 tombstones UID 1 (a move without a COPYUID).
+    raw().prepare("UPDATE messages SET moved_to = 'Archive' WHERE id = ?").run(`imap-${ACC}-INBOX-1`);
+
+    const summary = await passWith([2, 3]);
+
+    expect(summary.deleted).toEqual([]);
+    expect(
+      raw().prepare<[string], { moved_to: string }>("SELECT moved_to FROM messages WHERE id = ?").get(`imap-${ACC}-INBOX-1`),
+    ).toEqual({ moved_to: "Archive" });
+    expect(suspects()).toEqual([]);
+  });
+
+  it("deletes only rows that still match their observation — a confirmed row tombstoned or re-keyed in the meantime is left alone (Grok H1)", async () => {
+    seedFolder(20);
+    const remaining = [16, 17, 18, 19, 20];
+    await passWith(remaining);
+    await passWith(remaining); // 15 confirmed, stop raised
+    // Before the user answers: UID 1 is tombstoned by a move, UID 2 was re-keyed to another UID.
+    raw().prepare("UPDATE messages SET moved_to = 'Archive' WHERE id = ?").run(`imap-${ACC}-INBOX-1`);
+    raw().prepare("UPDATE messages SET imap_uid = 999 WHERE id = ?").run(`imap-${ACC}-INBOX-2`);
+
+    const n = await deleteConfirmedAfterUserApproval(ACC, INBOX, GEN);
+
+    expect(n).toBe(13);
+    expect(
+      raw().prepare<[string], { moved_to: string }>("SELECT moved_to FROM messages WHERE id = ?").get(`imap-${ACC}-INBOX-1`),
+    ).toEqual({ moved_to: "Archive" });
+    expect(
+      raw().prepare<[string], { imap_uid: number }>("SELECT imap_uid FROM messages WHERE id = ?").get(`imap-${ACC}-INBOX-2`),
+    ).toEqual({ imap_uid: 999 });
+    expect(suspects()).toEqual([]);
+  });
+
+  it("an empty list against a positive EXISTS is a partial list: it throws and records nothing (REQ-3.3)", async () => {
+    seedFolder(3);
+    const pass = beginReconcilePass(ACC);
+    pass.gateOpened.add(INBOX);
+
+    await expect(reconcileFolderList(pass, INBOX, GEN, [], 3)).rejects.toThrow(/partial/);
+
+    expect(pass.listed.has(INBOX)).toBe(false);
+    expect(suspects()).toEqual([]);
+    // A genuinely empty folder (EXISTS 0) is a complete observation.
+    await expect(reconcileFolderList(pass, INBOX, GEN, [], 0)).resolves.toBeUndefined();
+    expect(suspects()).toHaveLength(3);
   });
 
   // ---------- Task 10 (the non-queue half): pending operations ----------
@@ -415,8 +492,8 @@ describe("F-4 part 2 — the reconciliation pass (SQLite harness)", () => {
     seedFolder(2);
     seedFolder(2, "Sent");
     const pass = beginReconcilePass(ACC);
-    await reconcileFolderList(pass, INBOX, GEN, [2]);
-    await reconcileFolderList(pass, "Sent", GEN, [2]);
+    await reconcileFolderList(pass, INBOX, GEN, [2], 1);
+    await reconcileFolderList(pass, "Sent", GEN, [2], 1);
     markFetchCompleted(pass, INBOX);
     markFetchCompleted(pass, "Sent");
     const summary = await finishReconcilePass(pass, true);

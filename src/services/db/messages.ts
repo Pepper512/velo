@@ -452,6 +452,31 @@ export async function getMessageRefsByIds(
   return out;
 }
 
+/**
+ * Delete rows only if they still are what the reconciliation observed: the
+ * same id, still in `folder` under `uid`, and live (not a tombstone). A row
+ * that was re-keyed, tombstoned, or replaced since the observation does not
+ * match and is left alone (Grok H1 on #47). Returns the ids actually deleted.
+ * Attachments cascade through the FK.
+ */
+export async function deleteObservedMessages(
+  db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,
+  accountId: string,
+  folder: string,
+  rows: { id: string; uid: number }[],
+): Promise<string[]> {
+  const deleted: string[] = [];
+  for (const row of rows) {
+    const result = await db.execute(
+      `DELETE FROM messages
+       WHERE account_id = $1 AND id = $2 AND imap_folder = $3 AND imap_uid = $4 AND moved_to IS NULL`,
+      [accountId, row.id, folder, row.uid],
+    );
+    if (result.rowsAffected > 0) deleted.push(row.id);
+  }
+  return deleted;
+}
+
 /** Delete rows by id, chunked. Attachments cascade through the FK. */
 export async function deleteMessagesByIds(
   db: Pick<Awaited<ReturnType<typeof getDb>>, "execute">,

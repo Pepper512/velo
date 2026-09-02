@@ -68,8 +68,10 @@ export async function incrementFlaggedNotExpunged(
 }
 
 /**
- * F-4 REQ-2.2: recompute, never zero — set to the ghost population a full
- * list actually observed (`|server − local|`).
+ * F-4 REQ-2.2: recompute from the observation — the server UIDs with no live
+ * local row after a full list — which may well be zero. What the spec forbids
+ * is *resetting* the counter blindly on every list; the value itself follows
+ * what was seen.
  */
 export async function setFlaggedNotExpunged(
   accountId: string,

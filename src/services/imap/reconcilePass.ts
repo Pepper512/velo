@@ -23,7 +23,7 @@
  */
 import { withTransaction } from "../db/connection";
 import {
-  deleteMessagesByIds,
+  deleteObservedMessages,
   getLiveMessagesInFolder,
   getMessageRefsByIds,
   getTombstonesInFolder,
@@ -31,7 +31,7 @@ import {
 } from "../db/messages";
 import { getThreadMessageCount } from "../db/threads";
 import { getPendingOpsForResource } from "../db/pendingOperations";
-import { setFlaggedNotExpunged } from "../db/folderSyncState";
+import { getFolderSyncState, setFlaggedNotExpunged } from "../db/folderSyncState";
 import { useUIStore } from "@/stores/uiStore";
 import {
   applySearchAll,
@@ -39,7 +39,10 @@ import {
   confirmedOnPass,
   diffVanished,
   forgetSuspects,
+  forgetSuspectsWithin,
   planDeletions,
+  purgeOtherGenerations,
+  suspectsInFolder,
   type SuspectRow,
 } from "./reconcile";
 
@@ -95,14 +98,26 @@ export function shouldListFolder(
  * Apply a folder's full server list. `serverUids` must be the validated
  * answer of `imapSearchAllUids` — a throw there is a folder error and this is
  * never reached (REQ-3.3).
+ *
+ * `exists` is the count the delta check SELECTed moments earlier. It is not
+ * used as a hard equality (mail can arrive or leave between the two
+ * commands), but an **empty** list against a positive EXISTS is never a
+ * complete folder: it is treated as partial, nothing is recorded, and the
+ * caller gets a folder error (Grok H4 on #47).
  */
 export async function reconcileFolderList(
   pass: ReconcilePass,
   folder: string,
   uidvalidity: number,
   serverUids: number[],
+  exists: number | null,
 ): Promise<void> {
   const { accountId, passId } = pass;
+  if (serverUids.length === 0 && exists !== null && exists > 0) {
+    throw new Error(
+      `UID SEARCH ALL in ${folder} returned no UIDs while EXISTS was ${exists}; treating the list as partial`,
+    );
+  }
   const server = new Set(serverUids);
 
   // Tombstones — rows F-5 already knows left this folder — are not part of
@@ -126,6 +141,17 @@ export async function reconcileFolderList(
 
   await applySearchAll({ accountId, folder, uidvalidity, passId, presentUids: server, missing });
 
+  // A suspect whose local row is no longer live in this folder — tombstoned
+  // or re-keyed by F-5 since it was recorded — has nothing left to protect
+  // and nothing left to delete. Forget it rather than let it linger, or be
+  // promoted against a row that is not there (Grok H1 on #47).
+  const stale = (await suspectsInFolder(accountId, folder, uidvalidity))
+    .filter((s) => !byUid.has(s.uid))
+    .map((s) => s.uid);
+  if (stale.length > 0) {
+    await forgetSuspects(accountId, folder, uidvalidity, stale);
+  }
+
   pass.listed.set(folder, { uidvalidity, serverUids: server, fetchCompleted: false });
 }
 
@@ -136,19 +162,38 @@ export function markFetchCompleted(pass: ReconcilePass, folder: string): void {
 }
 
 /**
- * Attestation (REQ-1.2b): every syncable folder produced an observation and
+ * A UIDVALIDITY change voids every suspect recorded for the folder and any
+ * stop raised on them (REQ-1.4, REQ-1.5): a regenerated mailbox reuses UIDs.
+ * Called by the sync as soon as the delta check reports the change, before
+ * the full resync — the gate does not run for that folder this pass.
+ */
+export async function invalidateFolderSuspects(
+  accountId: string,
+  folder: string,
+  newUidvalidity: number,
+): Promise<void> {
+  await purgeOtherGenerations(accountId, folder, newUidvalidity);
+  useUIStore.getState().clearReconcileStop(accountId, folder);
+}
+
+/**
+ * Attestation (REQ-1.2b): every folder Velo knows about — the ones this LIST
+ * returned **and** the ones it has sync state for — produced an observation;
  * every folder whose gate opened was actually listed; and no folder failed
  * anywhere in the pass. A folder missing from `checkedFolders` counts as
- * unchecked, never as "not requested".
+ * unchecked, never as "not requested"; a folder that a short or filtered LIST
+ * dropped is therefore not quietly removed from the universe (Grok H5 on
+ * #47). The price: a folder deleted on the server blocks attestation until
+ * its sync state row is removed — recorded as a follow-up.
  */
 export function attestPass(
   pass: ReconcilePass,
-  syncableFolders: string[],
+  knownFolders: Iterable<string>,
   checkedFolders: Set<string>,
   folderErrorCount: number,
 ): boolean {
   if (folderErrorCount > 0) return false;
-  for (const folder of syncableFolders) {
+  for (const folder of new Set(knownFolders)) {
     if (!checkedFolders.has(folder)) return false;
     if (pass.gateOpened.has(folder) && !pass.listed.has(folder)) return false;
   }
@@ -218,24 +263,30 @@ export async function finishReconcilePass(
 
 /**
  * The user answered REQ-3.1's stop with "delete them": remove every confirmed
- * suspect in that folder's current generation, in cap-sized chunks but all in
- * one go — the cap rate-limits *unattended* passes, and a person has just
- * confirmed a mass removal. Rows with pending operations are still skipped.
+ * suspect in that folder's current generation, in **one transaction** — all
+ * or nothing, so a failure really does mean nothing changed (Grok H6 on #47).
+ * The cap rate-limits *unattended* passes; a person has just confirmed a mass
+ * removal. Rows with pending operations are still skipped.
+ *
+ * Refuses when the folder's synced UIDVALIDITY is no longer the one the stop
+ * was raised for: the suspects the user was asked about belong to a mailbox
+ * generation that no longer exists (Grok H2 on #47).
  */
 export async function deleteConfirmedAfterUserApproval(
   accountId: string,
   folder: string,
   uidvalidity: number,
 ): Promise<number> {
+  const state = await getFolderSyncState(accountId, folder);
+  if (state !== null && state.uidvalidity !== null && state.uidvalidity !== uidvalidity) {
+    throw new Error(
+      `${folder} has been regenerated on the server since this was asked (UIDVALIDITY ${state.uidvalidity}, not ${uidvalidity}); nothing was deleted`,
+    );
+  }
   const confirmed = await confirmedInFolder(accountId, folder, uidvalidity);
   const eligible = await withoutPendingOps(accountId, confirmed);
-  let total = 0;
-  const CHUNK = 500;
-  for (let i = 0; i < eligible.length; i += CHUNK) {
-    const done = await deleteConfirmed(accountId, folder, uidvalidity, eligible.slice(i, i + CHUNK));
-    total += done.length;
-  }
-  return total;
+  const deleted = await deleteConfirmed(accountId, folder, uidvalidity, eligible);
+  return deleted.length;
 }
 
 /** REQ-3.4: a suspect whose message or thread has queued user work waits. */
@@ -270,10 +321,14 @@ async function withoutPendingOps(accountId: string, rows: SuspectRow[]): Promise
 }
 
 /**
- * Delete confirmed rows (REQ-1.3) in one transaction: the message rows, then
- * any thread left with no messages together with its labels; then forget the
- * suspect records. Each deletion is logged with folder, UID and Message-ID
- * (REQ-3.2).
+ * Delete confirmed rows (REQ-1.3) in one transaction: the message rows —
+ * each only if it still is the row that was observed: same id, still in this
+ * folder under this UID, and live — then any thread left with no messages
+ * together with its labels, then the suspect records. A row that no longer
+ * matches (re-keyed, tombstoned or replaced since the observation) is left
+ * alone; its suspect record is forgotten too, since it no longer describes a
+ * live row in this folder. Each deletion is logged with folder, UID and
+ * Message-ID (REQ-3.2).
  */
 async function deleteConfirmed(
   accountId: string,
@@ -287,16 +342,24 @@ async function deleteConfirmed(
     rows.map((r) => r.message_row_id),
   );
   const refById = new Map<string, FolderMessageRef>(refs.map((r) => [r.id, r]));
-  const present = rows.filter((r) => refById.has(r.message_row_id));
   const deleted: ReconcileSummary["deleted"] = [];
 
   await withTransaction(async (db) => {
-    await deleteMessagesByIds(
-      db,
-      accountId,
-      present.map((r) => r.message_row_id),
+    const removedIds = new Set(
+      await deleteObservedMessages(
+        db,
+        accountId,
+        folder,
+        rows.map((r) => ({ id: r.message_row_id, uid: r.uid })),
+      ),
     );
-    const threads = new Set(present.map((r) => refById.get(r.message_row_id)!.thread_id));
+    const threads = new Set<string>();
+    for (const r of rows) {
+      if (!removedIds.has(r.message_row_id)) continue;
+      const ref = refById.get(r.message_row_id);
+      if (ref) threads.add(ref.thread_id);
+      deleted.push({ folder, uid: r.uid, messageId: ref?.message_id_header ?? null });
+    }
     for (const threadId of threads) {
       if ((await getThreadMessageCount(db, accountId, threadId)) === 0) {
         await db.execute(
@@ -309,21 +372,25 @@ async function deleteConfirmed(
         ]);
       }
     }
+    await forgetSuspectsWithin(
+      db,
+      accountId,
+      folder,
+      uidvalidity,
+      rows.map((r) => r.uid),
+    );
   });
 
-  for (const r of present) {
-    const ref = refById.get(r.message_row_id)!;
+  for (const d of deleted) {
     console.info(
-      `[reconcile] deleted ${folder}/${r.uid} (${ref.message_id_header ?? "no Message-ID"}): confirmed absent on the server`,
+      `[reconcile] deleted ${d.folder}/${d.uid} (${d.messageId ?? "no Message-ID"}): confirmed absent on the server`,
     );
-    deleted.push({ folder, uid: r.uid, messageId: ref.message_id_header });
   }
-
-  await forgetSuspects(
-    accountId,
-    folder,
-    uidvalidity,
-    rows.map((r) => r.uid),
-  );
+  const skipped = rows.length - deleted.length;
+  if (skipped > 0) {
+    console.info(
+      `[reconcile] ${folder}: ${skipped} confirmed row(s) no longer matched their observation and were left alone`,
+    );
+  }
   return deleted;
 }

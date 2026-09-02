@@ -12,10 +12,12 @@ import { deleteConfirmedAfterUserApproval } from "@/services/imap/reconcilePass"
  * spec makes it a human decision: nothing in that folder is deleted until the
  * user answers here. One folder at a time; further stops queue behind.
  *
- * "Delete them" removes every confirmed message in the folder now (a person
- * has just approved a mass removal, so the per-pass cap that rate-limits
- * unattended passes does not apply). "Keep them" leaves the folder frozen;
- * the next pass asks again if the mismatch persists.
+ * "Delete them" removes every confirmed message in the folder now, in one
+ * transaction (a person has just approved a mass removal, so the per-pass cap
+ * that rate-limits unattended passes does not apply). "Keep them" changes
+ * nothing now: the next pass asks again while the folder is still more than
+ * half gone, and once it no longer is, the normal budgeted removal resumes —
+ * the stop is a threshold, not a per-folder hold (Grok M9 on #47, recorded).
  */
 export function ReconcileStopDialog() {
   const stops = useUIStore((s) => s.reconcileStops);
@@ -26,6 +28,12 @@ export function ReconcileStopDialog() {
   if (!stop) return null;
 
   const dismiss = () => clearStop(stop.accountId, stop.folder);
+  // A close while the deletion is running is ignored: the user cannot cancel a
+  // transaction that is already committing, and dismissing would hide a
+  // result they need to see.
+  const close = () => {
+    if (!busy) dismiss();
+  };
 
   const confirm = async () => {
     setBusy(true);
@@ -46,7 +54,7 @@ export function ReconcileStopDialog() {
   return (
     <ConfirmDialog
       isOpen
-      onClose={dismiss}
+      onClose={close}
       onConfirm={confirm}
       loading={busy}
       title={`${stop.folder}: ${stop.confirmed} of ${stop.localRows} messages are gone from the server`}
@@ -59,7 +67,8 @@ export function ReconcileStopDialog() {
           </p>
           <p className="mt-2">
             Remove them from Velo too? Nothing on the server changes either way. Choosing to keep
-            them leaves the folder as it is; Velo will ask again if the mismatch persists.
+            them changes nothing now; Velo will ask again while more than half the folder is
+            missing, and goes back to removing missing mail a few at a time once it is not.
           </p>
         </>
       }

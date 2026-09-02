@@ -34,8 +34,8 @@ import {
   markFetchCompleted,
   reconcileFolderList,
   shouldListFolder,
+  invalidateFolderSuspects,
 } from "./reconcilePass";
-import { purgeOtherGenerations } from "./reconcile";
 import { upsertAttachment } from "../db/attachments";
 import { getAccount, updateAccountSyncState } from "../db/accounts";
 import { withTransaction } from "../db/connection";
@@ -1112,11 +1112,10 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
               `Doing full resync of this folder.`,
           );
           // F-4 REQ-1.4/1.5: a regenerated mailbox reuses UIDs, so every
-          // suspect recorded under the old generation is void. The gate does
-          // not run for this folder this pass (the resync below is the
-          // observation); the next opened gate would purge these anyway, but
-          // there is no reason to carry a stale generation until then.
-          await purgeOtherGenerations(accountId, folder.raw_path, deltaResult.uidvalidity);
+          // suspect recorded under the old generation — and any stop raised
+          // on them — is void. The gate does not run for this folder this
+          // pass; the resync below is the observation.
+          await invalidateFolderSuspects(accountId, folder.raw_path, deltaResult.uidvalidity);
           const sinceDate = computeSinceDate(daysBack);
           const searchResult = await withSession(accountId, "sync", {}, (id) =>
         imapSearchFolder(id, folder.raw_path, sinceDate),
@@ -1168,7 +1167,13 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
           const serverUids = await withSession(accountId, "sync", {}, (id) =>
             imapSearchAllUids(id, folder.raw_path),
           );
-          await reconcileFolderList(pass, folder.raw_path, deltaResult.uidvalidity, serverUids);
+          await reconcileFolderList(
+            pass,
+            folder.raw_path,
+            deltaResult.uidvalidity,
+            serverUids,
+            deltaResult.exists,
+          );
         }
 
         // Normal delta: fetch the new UIDs returned by delta check
@@ -1211,13 +1216,17 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     }
   }
 
-  // F-4 end of pass. Attestation (REQ-1.2b): every syncable folder produced an
-  // observation, every opened gate was listed, and no folder failed anywhere
-  // in the pass. Counters are recomputed either way; deletion needs the
-  // attestation. Runs on every exit path below, and never fails the sync.
-  const attested = attestPass(
+  // F-4 end of pass. Attestation (REQ-1.2b): every folder Velo knows about —
+  // this LIST's syncable folders and every folder with sync state — produced
+  // an observation, every opened gate was listed, and no folder failed
+  // anywhere in the pass. Counters are recomputed either way; deletion needs
+  // the attestation. `settleReconcile` runs in the `finally` below, so it
+  // covers every exit — including a throw in threading or the store, where a
+  // pass that did not finish cleanly is not attested — and never fails the
+  // sync itself.
+  let attested = attestPass(
     pass,
-    syncableFolders.map((f) => f.raw_path),
+    [...syncableFolders.map((f) => f.raw_path), ...syncStateMap.keys()],
     checkedFolders,
     deltaFolderErrors.length,
   );
@@ -1234,14 +1243,30 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
     }
   };
 
+  try {
+    return await storeDeltaResults(accountId, allParsed, allThreadable, allImapMsgs, deltaFolderErrors);
+  } catch (err) {
+    attested = false;
+    throw err;
+  } finally {
+    await settleReconcile();
+  }
+}
+
+/** The tail of a delta pass: thread and store what was fetched. */
+async function storeDeltaResults(
+  accountId: string,
+  allParsed: Map<string, ParsedMessage>,
+  allThreadable: ThreadableMessage[],
+  allImapMsgs: Map<string, ImapMessage>,
+  deltaFolderErrors: string[],
+): Promise<SyncResult> {
   // If no new messages found and every folder errored, propagate the error
   if (allThreadable.length === 0 && deltaFolderErrors.length > 0) {
-    await settleReconcile();
     throw new Error(`All folders failed to sync: ${deltaFolderErrors[0]}`);
   }
 
   if (allThreadable.length === 0) {
-    await settleReconcile();
     return { messages: [] };
   }
 
@@ -1274,9 +1299,6 @@ export async function imapDeltaSync(accountId: string, daysBack = 365): Promise<
 
   // Update sync state timestamp
   await updateAccountSyncState(accountId, `imap-synced-${Date.now()}`);
-
-  // After the store, so REQ-2.2's counter sees this pass's new mail as live.
-  await settleReconcile();
 
   return { messages: storedMessages };
 }

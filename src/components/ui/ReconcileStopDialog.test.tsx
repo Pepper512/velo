@@ -52,6 +52,22 @@ describe("ReconcileStopDialog", () => {
     expect(useUIStore.getState().reconcileStops).toEqual([other]);
   });
 
+  it("ignores a close while the deletion is running (Grok H6c)", async () => {
+    let finish!: (n: number) => void;
+    vi.mocked(deleteConfirmedAfterUserApproval).mockImplementationOnce(
+      () => new Promise<number>((resolve) => { finish = resolve; }),
+    );
+    useUIStore.setState({ reconcileStops: [stop] });
+    render(<ReconcileStopDialog />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete them" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep them" }));
+    expect(useUIStore.getState().reconcileStops).toEqual([stop]);
+
+    finish(15);
+    await waitFor(() => expect(useUIStore.getState().reconcileStops).toEqual([]));
+  });
+
   it("a failed deletion leaves nothing changed, says so, and keeps the dialog open for a retry", async () => {
     vi.mocked(deleteConfirmedAfterUserApproval).mockRejectedValueOnce(new Error("DB busy"));
     vi.spyOn(console, "error").mockImplementation(() => {});

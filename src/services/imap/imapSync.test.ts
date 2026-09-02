@@ -70,10 +70,8 @@ vi.mock("../db/messages", () => ({
 // F-4: the reconciliation pass is exercised on the SQLite harness in
 // reconcilePass.test.ts. Here it is a recorder, so these tests keep asserting
 // sync behaviour; the F-4 wiring block below asserts the calls it receives.
-vi.mock("./reconcile", () => ({
-  purgeOtherGenerations: vi.fn(async () => {}),
-}));
 vi.mock("./reconcilePass", () => ({
+  invalidateFolderSuspects: vi.fn(async () => {}),
   beginReconcilePass: vi.fn((accountId: string) => ({
     accountId,
     passId: "pass-test",
@@ -900,6 +898,13 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     vi.clearAllMocks();
     mockGetAccount.mockResolvedValue(createMockImapAccount({ id: "acc-1" }));
     mockImapListFolders.mockResolvedValue([inbox()]);
+    // Implementations persist across `clearAllMocks`; pin the defaults so one
+    // test's gate/list/attestation setup cannot leak into the next.
+    const { shouldListFolder, attestPass } = await import("./reconcilePass");
+    const { imapSearchAllUids } = await import("./tauriCommands");
+    vi.mocked(shouldListFolder).mockReturnValue(false);
+    vi.mocked(attestPass).mockReturnValue(true);
+    vi.mocked(imapSearchAllUids).mockReset();
     const { getAllFolderSyncStates } = await import("../db/folderSyncState");
     vi.mocked(getAllFolderSyncStates).mockResolvedValue([
       {
@@ -933,12 +938,30 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
       "INBOX",
       7,
       [1, 2, 3, 6],
+      5,
     );
     const pass = vi.mocked(reconcileFolderList).mock.calls[0]![0];
     expect(pass.gateOpened.has("INBOX")).toBe(true);
     expect(markFetchCompleted).toHaveBeenCalledWith(pass, "INBOX");
-    expect(attestPass).toHaveBeenCalledWith(pass, ["INBOX"], new Set(["INBOX"]), 0);
+    // Known folders = this LIST's syncable folders + every folder with sync state.
+    expect(attestPass).toHaveBeenCalledWith(pass, expect.arrayContaining(["INBOX"]), new Set(["INBOX"]), 0);
     expect(finishReconcilePass).toHaveBeenCalledWith(pass, true);
+  });
+
+  it("a folder with sync state that this LIST did not return still counts toward attestation (Grok H5)", async () => {
+    const { attestPass } = await import("./reconcilePass");
+    const { getAllFolderSyncStates } = await import("../db/folderSyncState");
+    vi.mocked(getAllFolderSyncStates).mockResolvedValue([
+      { account_id: "acc-1", folder_path: "INBOX", uidvalidity: 7, last_uid: 5, modseq: null, last_sync_at: 1 },
+      { account_id: "acc-1", folder_path: "Projects", uidvalidity: 3, last_uid: 9, modseq: null, last_sync_at: 1 },
+    ]);
+    mockImapDeltaCheck.mockResolvedValue([checkedInbox()]);
+
+    await imapDeltaSync("acc-1");
+
+    const known = vi.mocked(attestPass).mock.calls[0]![1];
+    expect([...known]).toEqual(expect.arrayContaining(["INBOX", "Projects"]));
+    expect(vi.mocked(attestPass).mock.calls[0]![2]).toEqual(new Set(["INBOX"]));
   });
 
   it("finishes the pass even when nothing new was fetched (the early-return path)", async () => {
@@ -964,20 +987,33 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     await expect(imapDeltaSync("acc-1")).rejects.toThrow(/All folders failed/);
 
     expect(reconcileFolderList).not.toHaveBeenCalled();
-    expect(attestPass).toHaveBeenCalledWith(expect.anything(), ["INBOX"], new Set(["INBOX"]), 1);
+    expect(attestPass).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining(["INBOX"]), new Set(["INBOX"]), 1);
     expect(finishReconcilePass).toHaveBeenCalledWith(expect.anything(), false);
   });
 
-  it("a UIDVALIDITY change purges the old generation's suspects and skips the gate for that folder", async () => {
-    const { shouldListFolder } = await import("./reconcilePass");
-    const { purgeOtherGenerations } = await import("./reconcile");
+  it("a UIDVALIDITY change invalidates the folder's suspects and stop, and skips the gate for that folder", async () => {
+    const { shouldListFolder, invalidateFolderSuspects } = await import("./reconcilePass");
     mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), uidvalidity: 8, uidvalidity_changed: true }]);
     vi.mocked(imapSearchFolder).mockResolvedValue({ uids: [], folder_status: createMockImapFolderStatus({ exists: 0 }) });
 
     await imapDeltaSync("acc-1");
 
-    expect(purgeOtherGenerations).toHaveBeenCalledWith("acc-1", "INBOX", 8);
+    expect(invalidateFolderSuspects).toHaveBeenCalledWith("acc-1", "INBOX", 8);
     expect(shouldListFolder).not.toHaveBeenCalled();
+  });
+
+  it("finishes the pass unattested when threading or the store throws after the folders were listed (Grok L10)", async () => {
+    const { finishReconcilePass, attestPass } = await import("./reconcilePass");
+    const { upsertThread } = await import("../db/threads");
+    const msg = createMockImapMessage({ uid: 6, message_id: "<m6@test>", subject: "New", date: 1 });
+    mockImapDeltaCheck.mockResolvedValue([{ ...checkedInbox(), new_uids: [6] }]);
+    vi.mocked(imapFetchMessages).mockResolvedValue(createMockImapFetchResult([msg]));
+    vi.mocked(attestPass).mockReturnValue(true);
+    vi.mocked(upsertThread).mockRejectedValueOnce(new Error("disk full"));
+
+    await expect(imapDeltaSync("acc-1")).rejects.toThrow("disk full");
+
+    expect(finishReconcilePass).toHaveBeenCalledWith(expect.anything(), false);
   });
 
   it("an unchecked folder never opens the gate and is missing from the checked set", async () => {
@@ -987,7 +1023,7 @@ describe("imapDeltaSync reconciliation wiring (SPEC-F-4)", () => {
     await imapDeltaSync("acc-1");
 
     expect(shouldListFolder).not.toHaveBeenCalled();
-    expect(attestPass).toHaveBeenCalledWith(expect.anything(), ["INBOX"], new Set(), 0);
+    expect(attestPass).toHaveBeenCalledWith(expect.anything(), expect.arrayContaining(["INBOX"]), new Set(), 0);
   });
 });
 
