@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `5a5fe59`** (#44, F-4 part 1 — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 5a5fe59..origin/main` —
+- **Code pin: `a8b80dd`** (#45, the permanent-delete fix — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline a8b80dd..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (the wrap-up docs PR this file ships in is the exception). Never
@@ -32,7 +32,7 @@
     (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
     `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
     inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `5a5fe59`:** frontend **157** files / **1,954** tests · Rust **95** + 1 ignored
+- **State on `main` @ `a8b80dd`:** frontend **157** files / **1,954** tests · Rust **95** + 1 ignored
   (the live Dovecot test) · 26 migrations / 32 tables · npm audit 0 · 0 service import cycles. No
   dependency added or removed this session.
 
@@ -47,7 +47,7 @@ delegation window without a plan read; get one before code. Everything it depend
 
 **Before that, read the Opus 5 full review** (`docs/reviews/2026-09-02-opus5-window-review.md`;
 verdicts and dispositions in LOG.md). Its HIGH 1 — permanent delete had become a server-side
-no-op after F-5 — is **fixed in the wrap-up PR**. Its HIGH 2 — the re-key transaction depends on
+no-op after F-5 — is **fixed (#45, `a8b80dd`)**. Its HIGH 2 — the re-key transaction depends on
 per-connection SQLite state over a pooled, unpinned `tauri-plugin-sql` connection — is **open and
 Jim's to scope**: it is pre-existing for every `withTransaction` in Velo, but F-5 made it
 load-bearing for a destructive identity rewrite. Own brief; candidate fix is a Rust command owning
@@ -81,7 +81,7 @@ Expected on `main`: **157 test files, 1,954 tests; Rust 95 passed, 1 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline 5a5fe59..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline a8b80dd..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
 - `git worktree list` — three worktrees at writing (this session's plus two dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
@@ -116,7 +116,7 @@ Velo is a local-first Tauri v2 (Rust) + React 19 desktop email client, forked fr
 `avihaymenahem/velo` (v0.4.21). Jim is hardening it under his methodology (`docs/methodology/`,
 pinned). The optimization audit is landed; dependency audit A/B/C landed, D next (plan to write),
 E parked. **IMAP correctness line:** move/expunge shipped (#26); E2 pooling landed (#37/#39);
-**F-5 landed (#43)**; **F-4 part 1 in #44, part 2 planned.**
+**F-5 landed (#43)** with its permanent-delete regression fixed in #45; **F-4 part 1 landed (#44), part 2 planned.**
 
 **Governance this session, in one paragraph.** Jim put the Fable seat in charge for two hours with
 every project decision pre-approved and named the review legs; every decision made is in LOG.md
@@ -131,7 +131,7 @@ commissioned at the close as Jim asked.
 | PR | Merged | What |
 |---|---|---|
 | #43 `2792251` | build seat | **F-5, option A rev 2.** Rust drains `COPYUID` from `async-imap`'s unsolicited channel inside the pooled checkout (no parser owned; backlog discarded before `UID MOVE` — a defect the brief did not know about); TS re-keys the row + attachments + soft refs in one transaction (deferred FKs, per-pair savepoints), tombstones the rest (`messages.moved_to`, migration 25), hides tombstones from thread view/search/actions, reaps on destination sync (folder-scoped), refuses a mapping from the wrong UIDVALIDITY generation; every provider action filters to live rows first. Live Dovecot: `:11143` mapping on the same turn, `:11144` COPY path with none. Gemini CHANGES REQUESTED (1H 2M 2L 1N) + Grok CHANGES REQUESTED (15) → 9 adopted, rest answered/recorded/declined with reasons on the PR |
-| #44 `5a5fe59` | build seat | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/nullable `exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + generation-scoped suspect state machine + atomic `applySearchAll`) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N) and Grok CHANGES REQUESTED (11): everything adopted or already fixed, nothing declined. Nothing in it deletes; the part 2 plan is in `docs/briefs/` |
+| #44 `a8b80dd` | build seat | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/nullable `exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + generation-scoped suspect state machine + atomic `applySearchAll`) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N) and Grok CHANGES REQUESTED (11): everything adopted or already fixed, nothing declined. Nothing in it deletes; the part 2 plan is in `docs/briefs/` |
 
 **Findings worth remembering.** *Both cross-vendor legs found defects the author missed, and
 different ones* (#43: Gemini the reap scoping and the zombie race, Grok the whole-batch rollback
@@ -181,8 +181,8 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `5a5fe59`** (#44 F-4
-part 1; the only SHA pinned — `git log --oneline 5a5fe59..origin/main` shows what is above it) ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `a8b80dd`** (#44 F-4
+part 1; the only SHA pinned — `git log --oneline a8b80dd..origin/main` shows what is above it) ·
 **no open PRs** · CI green · 157 files / 1,954 tests / Rust 95 + 1 ignored · 26 migrations ·
 npm audit 0.
 
