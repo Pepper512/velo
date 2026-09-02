@@ -220,6 +220,27 @@ export async function getThreadCountForAccount(accountId: string): Promise<numbe
   return rows[0]?.count ?? 0;
 }
 
+/**
+ * Unread threads per label for one account, keyed by label id (SPEC-243).
+ *
+ * The same `threads ⋈ thread_labels` join `getThreadsForAccount` lists a folder
+ * with, so the sidebar's number is the number of unread rows the folder shows.
+ * One grouped query for every label; labels with no unread mail are absent.
+ */
+export async function getUnreadCountsByLabel(accountId: string): Promise<Record<string, number>> {
+  const db = await getDb();
+  const rows = await db.select<{ label_id: string; count: number }[]>(
+    `SELECT tl.label_id AS label_id, COUNT(*) AS count FROM threads t
+     INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+     WHERE t.account_id = $1 AND t.is_read = 0
+     GROUP BY tl.label_id`,
+    [accountId],
+  );
+  const counts: Record<string, number> = {};
+  for (const row of rows) counts[row.label_id] = row.count;
+  return counts;
+}
+
 export async function getUnreadInboxCount(): Promise<number> {
   const db = await getDb();
   const rows = await db.select<{ count: number }[]>(

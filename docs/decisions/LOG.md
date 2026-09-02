@@ -942,3 +942,24 @@
   test pins what `"0"` means); an interrupted all-time initial sync resumes the way any
   initial sync does today (per-folder `folder_sync_state`, `history_id` set at the end) —
   unchanged by this PR, recorded. Raw output in `docs/reviews/2026-09-03-pr62-gemini-raw.md`.
+- **2026-09-03 — #243 built (unread counts in the sidebar)** on Jim's instruction, bug-fix
+  queue item 8, **Tier 1** (no Tier-2 file; no schema). Verified first: no label had a count
+  (only smart folders and Tasks render the pill), the badge's Inbox count is cross-account,
+  and no user action fires an event — only `sendMessage` does — so a count refreshed on
+  `velo-sync-done` alone would lag the user's own reads and archives by up to 60 s.
+  **Decisions:** one grouped query (`getUnreadCountsByLabel`, the folder list's own
+  `threads ⋈ thread_labels` join, so the pill equals what the folder shows) into `labelStore`
+  rather than smart-folder-style per-label queries; a typed **`velo-threads-changed`** event
+  fired by `executeEmailAction` after its local update, whatever the server then says (online,
+  queued, or permanently failed — the local rows changed either way), with the sidebar's
+  existing 500 ms debounce listening to both events; pills on **Inbox, Spam and user labels**
+  only (Drafts would want a total; Starred/Snoozed/Sent/Trash/All Mail are not to-do folders),
+  hidden at zero and when collapsed. Not done, recorded in the brief: per-category counts,
+  refreshing the taskbar badge on the new event, replacing the inline `velo-sync-done`
+  literals. TDD: SQLite-harness test for the query (per-label, per-account, agrees with the
+  folder list), store tests (refresh, stale keys dropped, failure keeps the map, clear), the
+  three event cases in `emailActions`, and a **`Sidebar` render test** (first one for that
+  component: pills at 4/2/1, none at 0, none on uncounted folders, none collapsed, one query
+  for both events through the debounce). Spec `docs/briefs/2026-09-03-243-sidebar-unread-counts.md`,
+  committed before the code. Gates: 166 files / 2,119 tests, tsc, graph, docs. One review leg
+  (Tier 1): Gemini 3.7.
