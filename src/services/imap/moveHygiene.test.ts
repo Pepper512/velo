@@ -39,7 +39,7 @@ import {
   rekeyMovedMessages,
   reapMovedTombstones,
 } from "../db/messages";
-import { keepLiveMessageIds } from "./messageHelper";
+import { dropTombstonedMessageIds } from "./messageHelper";
 import { settleMovedRows } from "./moveHygiene";
 
 const ACC = "acc-1";
@@ -203,10 +203,13 @@ describe("F-5 move-time row hygiene (SQLite harness)", () => {
     const listed = await getMessagesForThread(ACC, THREAD);
     expect(listed.map((m) => m.id)).toEqual([`imap-${ACC}-Archive-3`]);
 
-    // Provider actions: the re-keyed id is live, the tombstone and an unknown id are not.
+    // Provider actions: the tombstone is dropped; the re-keyed id, the old id
+    // it left behind (now unknown) and a wholly unknown id all pass through —
+    // unknown ids are what permanent delete sends after its local cascade.
+    vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(
-      keepLiveMessageIds(ACC, [`imap-${ACC}-Archive-3`, B_OLD, A_OLD, "imap-acc-1-INBOX-999"]),
-    ).resolves.toEqual([`imap-${ACC}-Archive-3`]);
+      dropTombstonedMessageIds(ACC, [`imap-${ACC}-Archive-3`, B_OLD, A_OLD, "imap-acc-1-INBOX-999"]),
+    ).resolves.toEqual([`imap-${ACC}-Archive-3`, A_OLD, "imap-acc-1-INBOX-999"]);
   });
 
   it("tombstones everything when no mapping arrived at all (non-UIDPLUS server, COPY fallback, dropped response)", async () => {

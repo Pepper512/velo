@@ -57,7 +57,7 @@ vi.mock("../imap/messageHelper", () => ({
   // F-5: every action filters to live rows first. Pass-through by default so
   // the existing action tests keep asserting protocol behaviour; the F-5 block
   // below overrides it where the filter is the thing under test.
-  keepLiveMessageIds: vi.fn(async (_accountId: string, ids: string[]) => ids),
+  dropTombstonedMessageIds: vi.fn(async (_accountId: string, ids: string[]) => ids),
 }));
 
 vi.mock("../imap/moveHygiene", () => ({
@@ -88,7 +88,7 @@ import {
   smtpTestConnection,
 } from "../imap/tauriCommands";
 import { invalidateAccountCredentials } from "../imap/sessionManager";
-import { findSpecialFolder, keepLiveMessageIds } from "../imap/messageHelper";
+import { findSpecialFolder, dropTombstonedMessageIds } from "../imap/messageHelper";
 import { settleMovedRows } from "../imap/moveHygiene";
 import { upsertMessage } from "../db/messages";
 import { upsertThread, setThreadLabels, getThreadLabelIds } from "../db/threads";
@@ -242,7 +242,7 @@ describe("ImapSmtpProvider", () => {
 
   describe("move-time row hygiene (F-5)", () => {
     beforeEach(() => {
-      vi.mocked(keepLiveMessageIds).mockImplementation(async (_a, ids) => ids);
+      vi.mocked(dropTombstonedMessageIds).mockImplementation(async (_a, ids) => ids);
       vi.mocked(findSpecialFolder).mockResolvedValue("Archive");
     });
 
@@ -327,31 +327,49 @@ describe("ImapSmtpProvider", () => {
       expect(settleMovedRows).not.toHaveBeenCalled();
     });
 
-    it("drops ids that no longer name a live local row before touching the server", async () => {
-      // The stale id points at INBOX/100 — a UID the server no longer has
-      // there. Sending it is the wrong-target bug F-5 exists to remove.
-      vi.mocked(keepLiveMessageIds).mockResolvedValue(["imap-acc-1-INBOX-200"]);
+    it("drops ids whose local rows are tombstoned before touching the server", async () => {
+      // The mock drops INBOX/100 as a tombstone — a COPY-fallback row whose
+      // old folder/UID is the wrong target F-5 exists to stop acting on.
+      vi.mocked(dropTombstonedMessageIds).mockResolvedValue(["imap-acc-1-INBOX-200"]);
       vi.mocked(imapMoveMessages).mockResolvedValue({ expunged: true, mapping: [] });
 
       await provider.archive("thread-1", ["imap-acc-1-INBOX-100", "imap-acc-1-INBOX-200"]);
 
-      expect(keepLiveMessageIds).toHaveBeenCalledWith("acc-1", [
+      expect(dropTombstonedMessageIds).toHaveBeenCalledWith("acc-1", [
         "imap-acc-1-INBOX-100",
         "imap-acc-1-INBOX-200",
       ]);
       expect(imapMoveMessages).toHaveBeenCalledWith("test-session", "INBOX", [200], "Archive");
     });
 
-    it("filters every action, not only the moves", async () => {
-      vi.mocked(keepLiveMessageIds).mockResolvedValue([]);
+    it("drops tombstoned ids from every action, not only the moves", async () => {
+      // The requirement: a tombstone names a folder/UID the server no longer
+      // has for this message, so no action may be sent for it.
+      vi.mocked(dropTombstonedMessageIds).mockImplementation(async (_a, ids) =>
+        ids.filter((id) => id !== "imap-acc-1-INBOX-1"),
+      );
       vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
 
-      await provider.markRead("t", ["imap-acc-1-INBOX-1"], true);
+      await provider.markRead("t", ["imap-acc-1-INBOX-1", "imap-acc-1-INBOX-2"], true);
       await provider.star("t", ["imap-acc-1-INBOX-1"], true);
-      await provider.permanentDelete("t", ["imap-acc-1-INBOX-1"]);
+      await provider.permanentDelete("t", ["imap-acc-1-INBOX-1", "imap-acc-1-INBOX-2"]);
 
-      expect(imapSetFlags).not.toHaveBeenCalled();
-      expect(imapDeleteMessages).not.toHaveBeenCalled();
+      expect(imapSetFlags).toHaveBeenCalledTimes(1);
+      expect(imapSetFlags).toHaveBeenCalledWith("test-session", "INBOX", [2], ["Seen"], true);
+      expect(imapDeleteMessages).toHaveBeenCalledWith("test-session", "INBOX", [2]);
+    });
+
+    it("permanent delete still reaches the server when the local rows are already gone (Opus HIGH 1)", async () => {
+      // `executeEmailAction` deletes the thread locally — cascading to its
+      // messages — *before* calling the provider. The filter must therefore
+      // pass ids with no local row through, or permanent delete becomes a
+      // client-side no-op and the mail comes back on the next sync.
+      vi.mocked(dropTombstonedMessageIds).mockImplementation(async (_a, ids) => ids);
+      vi.mocked(imapDeleteMessages).mockResolvedValue({ expunged: true });
+
+      await provider.permanentDelete("t", ["imap-acc-1-INBOX-7"]);
+
+      expect(imapDeleteMessages).toHaveBeenCalledWith("test-session", "INBOX", [7]);
     });
 
     it("settles before moving on to the next folder, and still completes if settling is slow", async () => {

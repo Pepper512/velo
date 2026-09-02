@@ -579,3 +579,38 @@
     counts; `first_seen_at` NOT NULL; `CHECK` on `status`; leftover re-stamp tests and the re-stamp
     documented as required.
   - **Nothing declined this time.** Every finding on #44 was either already fixed or adopted.
+  - **Merged** as squash `5a5fe59` after CI on `b964b23` — by the build seat, under the window.
+- **2026-09-02 ~07:25 UTC — Opus 5 full review of the window (commissioned as Jim asked; full text
+  `docs/reviews/2026-09-02-opus5-window-review.md`).** Verdicts: **#43 — "would not have merged as
+  written"** (design good, one live regression); **#44 — mergeable with changes.** Thirteen findings.
+  - **HIGH 1, verified and fixed in the same window (`fix(imap)` in the wrap-up PR):**
+    `permanentDelete` had become a server-side no-op. `executeEmailAction` deletes the thread
+    locally — cascading to its messages — *before* the provider call, and F-5's new
+    `keepLiveMessageIds` then found no rows to act on. Mail stayed on the server and came back on
+    the next sync. The filter now drops only **tombstoned** ids (`dropTombstonedMessageIds`) and
+    passes unknown ids through: a re-keyed-away id names a UID the source folder no longer has and
+    UIDs are never reused within a UIDVALIDITY, so the server answers no-op/`NO`, never a wrong
+    target. The test that had ratified the regression was rewritten from the requirement. **This
+    was a design widening made mid-build** (filtering all seven actions when the brief discussed
+    four) and it was self-merged — both named by Opus as the things to do differently.
+  - **HIGH 2, recorded for Jim, not fixed:** the re-key transaction relies on `PRAGMA
+    defer_foreign_keys` and `SAVEPOINT`, both per-connection state, over a pooled `tauri-plugin-sql`
+    connection (`Pool::connect`, default `max_connections = 10`) with no pinning — and
+    `withTransaction` deliberately does not block non-transactional reads. Opus verified the sqlx
+    defaults in source. Pre-existing for every Velo transaction, but F-5 is the first destructive
+    identity rewrite on that assumption. Its own brief: a Rust command owning one connection, or
+    serialising all DB access. The window's "recorded, out of scope" answer was too quick.
+  - **MEDIUMs, recorded for follow-up:** reap fires one DELETE per upserted IMAP message (batch
+    it); the UIDVALIDITY guard is off for never-synced destination folders (write the COPYUID's
+    generation into `folder_sync_state`); `isConstraintFailure` is a message-text regex (invert
+    the rule); `recordMissingWithin` inserts one row at a time; **the >50% stop is per-pass, not
+    cumulative** (an 11-row folder can clear over two passes — part 2 must evaluate against the
+    row count at first confirmation).
+  - **Governance findings, accepted:** every review record in the repo was authored by the seat
+    under review — the raw `agy`/`grok` outputs are now preserved under `docs/reviews/`; a Tier-2
+    self-merge under a decision-authority window let a regression reach `main` with no human having
+    read the diff — Opus recommends a Tier-2 carve-out from *agents perform the merge*, which is
+    Jim's to decide; the vault approval-line edit was adequate but is the field a delegated seat
+    should default to leaving alone.
+  - **Praised:** cutting F-4 to a non-deleting substrate; the harness and live-Dovecot evidence;
+    the LOG entries; finding the timeout bug before the reviewers did.

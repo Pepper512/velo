@@ -121,47 +121,51 @@ export function securityToConfigType(
 }
 
 /**
- * Keep only the message ids that name a live local row (F-5).
+ * Drop the message ids whose local row is a tombstone (F-5).
  *
  * IMAP message ids embed `{folder}-{uid}`, and every provider action derives
- * its target from the id. An id that no longer exists locally — the row was
- * re-keyed after a move — or that is tombstoned (`moved_to` set) describes a
- * folder/UID pair the server no longer has: acting on it is a no-op at best
- * and, after expunge renumbering on a COPY-fallback server, whatever message
- * now occupies that slot at worst. Such ids are dropped with a warning rather
- * than sent.
+ * its target from the id. A tombstoned row (`moved_to` set) is a message the
+ * server moved by COPY without telling us the new UID: the old folder/UID
+ * pair is flagged `\Deleted` there, or gone, or — after expunge renumbering —
+ * whatever message now occupies that slot. Acting on it is wrong at worst and
+ * a no-op at best, so such ids are dropped with a warning rather than sent.
+ *
+ * Ids with **no** local row pass through untouched. Two callers legitimately
+ * send those: `permanentDelete`, whose local cascade delete runs *before* the
+ * provider call (Opus review of the 2026-09-02 window, HIGH 1 — filtering on
+ * existence turned it into a server-side no-op), and anything holding an id
+ * that was re-keyed away by a UIDPLUS move. The latter names a UID the source
+ * folder no longer has and UIDs are never reused within a UIDVALIDITY, so the
+ * server answers with a no-op or a `NO`, never a wrong target.
  *
  * Order is preserved. Chunked to stay within SQLite's bound-parameter limit.
  *
  * (Replaces `updateMessageImapFolder`, which had no callers and could not have
  * helped: updating a column changes nothing the id-derived paths read.)
  */
-export async function keepLiveMessageIds(
+export async function dropTombstonedMessageIds(
   accountId: string,
   messageIds: string[],
 ): Promise<string[]> {
   if (messageIds.length === 0) return [];
 
   const db = await getDb();
-  const live = new Set<string>();
+  const tombstoned = new Set<string>();
   const CHUNK = 500;
   for (let i = 0; i < messageIds.length; i += CHUNK) {
     const chunk = messageIds.slice(i, i + CHUNK);
     const placeholders = chunk.map((_, j) => `$${j + 2}`).join(", ");
     const rows = await db.select<{ id: string }[]>(
-      `SELECT id FROM messages WHERE account_id = $1 AND id IN (${placeholders}) AND moved_to IS NULL`,
+      `SELECT id FROM messages WHERE account_id = $1 AND id IN (${placeholders}) AND moved_to IS NOT NULL`,
       [accountId, ...chunk],
     );
-    for (const row of rows) live.add(row.id);
+    for (const row of rows) tombstoned.add(row.id);
   }
 
-  const kept = messageIds.filter((id) => live.has(id));
-  if (kept.length !== messageIds.length) {
-    const dropped = messageIds.filter((id) => !live.has(id));
-    console.warn(
-      `[messageHelper] Skipping ${dropped.length} message id(s) that are moved or unknown locally:`,
-      dropped,
-    );
-  }
-  return kept;
+  if (tombstoned.size === 0) return messageIds;
+  console.warn(
+    `[messageHelper] Skipping ${tombstoned.size} message id(s) whose rows were moved without a COPYUID mapping:`,
+    [...tombstoned],
+  );
+  return messageIds.filter((id) => !tombstoned.has(id));
 }

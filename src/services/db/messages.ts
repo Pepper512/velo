@@ -310,7 +310,7 @@ async function rekeyOnePair(
  *
  * The rows stay in place — still under their source folder and UID — but
  * `moved_to` hides them from `getMessagesForThread` and from provider actions
- * (`keepLiveMessageIds`), so nothing acts on a folder/UID pair the server no
+ * (`dropTombstonedMessageIds`), so nothing acts on a folder/UID pair the server no
  * longer has. They are removed by `reapMovedTombstones` when the destination
  * folder syncs the message in.
  *
