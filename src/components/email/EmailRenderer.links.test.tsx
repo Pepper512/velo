@@ -34,8 +34,12 @@ vi.mock("@/services/db/imageAllowlist", () => ({
   addToAllowlist: vi.fn(),
 }));
 
+const mockAddNotice = vi.fn();
 vi.mock("@/stores/uiStore", () => ({
-  useUIStore: (selector: (s: { theme: string }) => string) => selector({ theme: "light" }),
+  useUIStore: Object.assign(
+    (selector: (s: { theme: string }) => string) => selector({ theme: "light" }),
+    { getState: () => ({ addNotice: mockAddNotice }) },
+  ),
 }));
 
 class MockResizeObserver {
@@ -196,5 +200,50 @@ describe("EmailRenderer phishing gate (SPEC-F-3)", () => {
     expect(mockAssess).not.toHaveBeenCalled();
     // The seam is still consulted (it answers "ignored" for these) — behaviour unchanged.
     expect(mockOpenEmailLink).toHaveBeenCalledTimes(1);
+  });
+
+  it("mailto: and tel: links skip the detector and go straight to the seam (#71 M3)", async () => {
+    await renderAndClick('<a href="mailto:bob@example.com">mail</a>');
+    expect(mockAssess).not.toHaveBeenCalled();
+    expect(mockOpenEmailLink).toHaveBeenCalledWith("mailto:bob@example.com", expect.any(String));
+  });
+
+  it("a gate that throws neither opens the link nor swallows the click: a notice with the URL (#71 H1)", async () => {
+    mockAssess.mockRejectedValue(new Error("detector bug"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { queryByTestId } = await renderAndClick(`<a href="${RISKY}">x</a>`);
+
+    await waitFor(() => expect(mockAddNotice).toHaveBeenCalledTimes(1));
+    expect(mockAddNotice.mock.calls[0]![0]).toMatchObject({ text: expect.stringContaining("Couldn't check this link") });
+    expect(mockOpenEmailLink).not.toHaveBeenCalled();
+    expect(queryByTestId("link-confirm")).toBeNull();
+    error.mockRestore();
+  });
+
+  it("a middle click goes through the same gate (#71 L4)", async () => {
+    mockAssess.mockResolvedValue(analysis);
+    const utils = render(<EmailRenderer html={`<a href="${RISKY}">x</a>`} text={null} />);
+    await waitFor(() => expect(frameDoc(utils.container).querySelector("a")).not.toBeNull());
+    const doc = frameDoc(utils.container);
+    const aux = new (doc.defaultView!.MouseEvent)("auxclick", { bubbles: true, cancelable: true, button: 1 });
+    doc.querySelector("a")!.dispatchEvent(aux);
+
+    expect(aux.defaultPrevented).toBe(true);
+    await utils.findByTestId("link-confirm");
+    expect(mockOpenEmailLink).not.toHaveBeenCalled();
+  });
+
+  it("the dialog closes when the message changes underneath it (#71 M2)", async () => {
+    mockAssess.mockResolvedValue(analysis);
+    const utils = render(<EmailRenderer html={`<a href="${RISKY}">x</a>`} text={null} messageId="m1" />);
+    await waitFor(() => expect(frameDoc(utils.container).querySelector("a")).not.toBeNull());
+    const doc = frameDoc(utils.container);
+    doc.querySelector("a")!.dispatchEvent(new (doc.defaultView!.MouseEvent)("click", { bubbles: true, cancelable: true }));
+    await utils.findByTestId("link-confirm");
+
+    utils.rerender(<EmailRenderer html="<p>another message</p>" text={null} messageId="m2" />);
+
+    await waitFor(() => expect(utils.queryByTestId("link-confirm")).toBeNull());
+    expect(mockOpenEmailLink).not.toHaveBeenCalled();
   });
 });

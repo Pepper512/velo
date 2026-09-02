@@ -34,6 +34,9 @@ export const MessageItem = memo(forwardRef<HTMLDivElement, MessageItemProps>(fun
   useEffect(() => {
     let cancelled = false;
     setPhishingScan(null);
+    // Only an expanded message is scanned: a 50-message thread must not fire
+    // 50 scans on open (#71 review, Gemini L5). The result is cached in SQLite.
+    if (!expanded) return;
     scanMessageLinks(message.account_id, message.id, message.body_html, message.from_address)
       .then((result) => {
         if (!cancelled) setPhishingScan(result);
@@ -44,7 +47,7 @@ export const MessageItem = memo(forwardRef<HTMLDivElement, MessageItemProps>(fun
     return () => {
       cancelled = true;
     };
-  }, [message.account_id, message.id, message.body_html, message.from_address]);
+  }, [expanded, message.account_id, message.id, message.body_html, message.from_address]);
   const attachmentsLoadedRef = useRef(false);
 
   const loadAttachments = async () => {

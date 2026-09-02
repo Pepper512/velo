@@ -68,6 +68,13 @@ allowlist in Settings govern both. The help page and `SECURITY.md` say what is t
   detector flags (not every link); `SECURITY.md` drops the "not surfaced" caveat and names
   the two surfaces.
 
+**Threshold semantics (review, Gemini L6):** the banner is a *message*-level signal (max
+score past the line **or** the suspicious-link count past its threshold); the dialog is a
+*link*-level one (that link's score past the line). Three 30-point links therefore show a
+banner and open without a dialog at default sensitivity. Intentional: the count rule flags a
+smelly message, but a dialog on a link the detector itself rates below the line would nag.
+Raise the sensitivity to move both lines.
+
 ## Not doing
 
 - A confirmation on *every* link (the help card's old promise) — the component is a risk

@@ -1227,3 +1227,20 @@
   since the gate awaits its settings first. Help card and `SECURITY.md` rewritten to what is
   true. Spec `docs/briefs/2026-09-03-f3-link-confirm.md`, committed before the code.
   One review leg (Tier 1): Gemini 3.7.
+- **2026-09-03 — PR #71 (F-3) review, one leg (Tier 1).** Gemini 3.7 Flash: CHANGES
+  REQUESTED (1H 2M 3L 1N). **Adopted:** H1 — the gate's promise had no `.catch`, so a
+  detector exception would have left a dead click; now a visible notice with a Copy-link
+  action and **no open** (a security gate fails closed, and a dead click is also a failure);
+  M2 — a dialog left open survived a message change and "Open Anyway" would have opened the
+  previous message's URL: cleared whenever the message changes (test); M3 — `mailto:`/`tel:`
+  reached the detector: only web schemes are analysed (`isWebHref`), the rest go straight
+  to the seam (test); L4 — a middle click (`auxclick`) routes through the same gate (test);
+  L5 — a collapsed message is not scanned until expanded (a 50-message thread must not fire
+  50 scans; test); N7 — tests for the rejection path, `mailto:`, the message change, the
+  middle click. **Declined, documented:** L6 — the banner fires on a *message* (max score
+  OR suspicious-link count), the dialog on a *link* (score only), so three 30-point links
+  show a banner and no dialog. Intentional: the count rule is a message-level smell, and a
+  dialog on a link the detector rates below the line would nag; recorded in the spec. **Questions
+  recorded for follow-up:** disable "Trust this sender" when SPF/DKIM failed (a spoofed
+  `From:` could allowlist a real address); a trust from one message should dismiss sibling
+  banners in the thread. Raw output in `docs/reviews/2026-09-03-pr71-gemini-raw.md`.

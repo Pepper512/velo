@@ -191,6 +191,15 @@ describe("MessageItem phishing banner (SPEC-F-3)", () => {
     expect(screen.queryByText(/suspicious link/)).toBeNull();
   });
 
+  it("a collapsed message is not scanned until it is expanded (#71 L5)", async () => {
+    mockScan.mockResolvedValue(flagged);
+    render(<MessageItem message={makeMessage()} isLast={false} blockImages={false} />);
+    await act(async () => {});
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(screen.queryByText(/suspicious link/)).toBeNull();
+  });
+
   it("a scan that rejects leaves the message rendered without a banner", async () => {
     mockScan.mockRejectedValue(new Error("db closed"));
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

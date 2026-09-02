@@ -1,6 +1,6 @@
 import { useRef, useCallback, useLayoutEffect, useMemo, useState, useEffect } from "react";
 import { ImageOff } from "lucide-react";
-import { openEmailLink, isOpenableHref } from "@/services/links/openLink";
+import { openEmailLink, isOpenableHref, isWebHref } from "@/services/links/openLink";
 import { assessLinkForConfirmation } from "@/services/links/linkGuard";
 import { LinkConfirmDialog } from "./LinkConfirmDialog";
 import type { LinkAnalysis } from "@/utils/phishingDetector";
@@ -197,27 +197,51 @@ export function EmailRenderer({
       e.preventDefault();
       const href = anchor.getAttribute("href") ? anchor.href : null;
       const origin = window.location.origin;
-      // In-page and empty anchors keep their silent no-op (F-2 REQ-2.4) and are
-      // never analysed. Everything the seam would open first passes the
-      // phishing gate (SPEC-F-3): a flagged link waits in the dialog.
-      if (!isOpenableHref(href, origin)) {
+      // In-page and empty anchors keep their silent no-op (F-2 REQ-2.4), and
+      // only web links are analysed — mailto:/tel: go straight to the seam
+      // (#71 review, Gemini M3). Everything else passes the phishing gate
+      // (SPEC-F-3): a flagged link waits in the dialog.
+      if (!isOpenableHref(href, origin) || !isWebHref(href)) {
         void openEmailLink(href, origin);
         return;
       }
       const displayText = anchor.textContent ?? "";
-      void assessLinkForConfirmation(href!, displayText, { accountId, senderAddress }).then((analysis) => {
-        if (analysis) setPendingLink({ href: href!, analysis });
-        else void openEmailLink(href, origin);
-      });
+      void assessLinkForConfirmation(href!, displayText, { accountId, senderAddress })
+        .then((analysis) => {
+          if (analysis) setPendingLink({ href: href!, analysis });
+          else void openEmailLink(href, origin);
+        })
+        .catch((err: unknown) => {
+          // The gate itself failed (a detector bug): neither a dead click nor
+          // an unchecked open (#71 review, Gemini H1). Say so, offer the URL.
+          console.error("[EmailRenderer] link check failed:", err instanceof Error ? err.message : String(err));
+          useUIStore.getState().addNotice({
+            text: "Couldn't check this link for phishing — copy it to open it yourself",
+            action: { label: "Copy link", onClick: () => navigator.clipboard.writeText(href!) },
+          });
+        });
     };
     doc.addEventListener("click", handleClick);
+    // A middle click is `auxclick`, not `click`; the sandbox allows no popups,
+    // but it must not slip past the gate either (#71 review, Gemini L4).
+    const handleAuxClick = (e: MouseEvent) => {
+      if (e.button === 1) handleClick(e);
+    };
+    doc.addEventListener("auxclick", handleAuxClick);
 
     return () => {
       doc.removeEventListener("click", handleClick);
+      doc.removeEventListener("auxclick", handleAuxClick);
       observerRef.current?.disconnect();
       cancelAnimationFrame(rafRef.current);
     };
   }, [bodyHtml, isDark, isPlainText, accountId, senderAddress]);
+
+  // A dialog left open belongs to the message it was opened on. When the
+  // message changes, it goes (#71 review, Gemini M2).
+  useEffect(() => {
+    setPendingLink(null);
+  }, [messageId, bodyHtml]);
 
   const handleLoadImages = useCallback(() => {
     setOverrideShow(true);

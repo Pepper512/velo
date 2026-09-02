@@ -43,6 +43,17 @@ export function isOpenableHref(href: string | null | undefined, frameOrigin: str
   return url.protocol !== "about:" && url.origin !== frameOrigin;
 }
 
+/** `http:`/`https:` only — what the phishing detector's rules are about. */
+export function isWebHref(href: string | null | undefined): boolean {
+  if (!href) return false;
+  try {
+    const { protocol } = new URL(href);
+    return protocol === "http:" || protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 export async function openEmailLink(
   href: string | null | undefined,
   frameOrigin: string,
