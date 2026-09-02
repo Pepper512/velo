@@ -18,6 +18,8 @@ import {
   imapMoveMessages,
   imapDeleteMessages,
   imapSearchAllUids,
+  imapCountNotDeleted,
+  imapSearchUidsPresent,
   imapGetFolderStatus,
   imapFetchAttachment,
   smtpSendEmail,
@@ -338,6 +340,36 @@ describe("imapSearchAllUids boundary validation (F-4)", () => {
   ])("throws rather than returning an empty list for %s (an empty list would read as everything vanished)", async (_label, value) => {
     vi.mocked(invoke).mockResolvedValue(value);
     await expect(imapSearchAllUids("s", "INBOX")).rejects.toThrow(/Malformed UID list/);
+  });
+});
+
+describe("part 3 boundary validation (F-4)", () => {
+  beforeEach(() => {
+    vi.mocked(invoke).mockReset();
+  });
+
+  it("imapCountNotDeleted accepts a non-negative integer and rejects anything else", async () => {
+    vi.mocked(invoke).mockResolvedValue(42);
+    await expect(imapCountNotDeleted("s", "INBOX")).resolves.toBe(42);
+    vi.mocked(invoke).mockResolvedValue(0);
+    await expect(imapCountNotDeleted("s", "INBOX")).resolves.toBe(0);
+    for (const bad of ["42", -1, 1.5, null, undefined]) {
+      vi.mocked(invoke).mockResolvedValue(bad);
+      await expect(imapCountNotDeleted("s", "INBOX")).rejects.toThrow(/Malformed/);
+    }
+  });
+
+  it("imapSearchUidsPresent accepts only a subset of what was asked, and skips the wire for an empty set", async () => {
+    vi.mocked(invoke).mockResolvedValue([5, 7]);
+    await expect(imapSearchUidsPresent("s", "INBOX", [5, 6, 7])).resolves.toEqual([5, 7]);
+    expect(invoke).toHaveBeenCalledWith("imap_search_uids_present", { sessionId: "s", folder: "INBOX", uids: [5, 6, 7] });
+
+    vi.mocked(invoke).mockResolvedValue([5, 99]); // 99 was never asked
+    await expect(imapSearchUidsPresent("s", "INBOX", [5, 6])).rejects.toThrow(/Malformed/);
+
+    vi.mocked(invoke).mockClear();
+    await expect(imapSearchUidsPresent("s", "INBOX", [])).resolves.toEqual([]);
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 

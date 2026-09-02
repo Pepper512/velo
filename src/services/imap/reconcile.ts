@@ -135,6 +135,17 @@ async function recordMissingWithin(
     // promotion below excludes. `$n` once each, in order (the SQLite harness
     // translator depends on it), so the pass id is bound twice.
     const uidPlaceholders = chunk.map((_, j) => `$${j + 6}`).join(", ");
+    // Adopt rows a reconcile op inserted (`insertSuspects`): this list is
+    // their first *list* observation, so they take this pass id and the
+    // promotion below leaves them as suspects (Grok H1 on #50).
+    await db.execute(
+      `UPDATE reconcile_suspects
+       SET first_pass_id = $1
+       WHERE account_id = $2 AND folder = $3 AND uidvalidity = $4
+         AND first_pass_id LIKE $5
+         AND uid IN (${uidPlaceholders})`,
+      [passId, accountId, folder, uidvalidity, `${RECONCILE_OP_PASS_PREFIX}%`, ...chunk.map((m) => m.uid)],
+    );
     await db.execute(
       `UPDATE reconcile_suspects
        SET status = 'confirmed_absent', last_verified_pass_id = $1
@@ -152,6 +163,42 @@ async function recordMissingWithin(
       );
     }
   }
+}
+
+/** Prefix of the source id `insertSuspects` writes as `first_pass_id`. */
+export const RECONCILE_OP_PASS_PREFIX = "reconcile:";
+
+/**
+ * The reconcile op's write (REQ-4.5): insert as `suspect`, nothing else. It
+ * never promotes, and a row that already exists — from a list pass or an
+ * earlier op — is left exactly as it is. `sourceId` must carry
+ * `RECONCILE_OP_PASS_PREFIX`, which `recordMissing` recognises: the first
+ * full list that still reports the UID *adopts* the row as its own first
+ * sight and the list after that confirms it. A targeted `UID SEARCH` therefore
+ * never stands in for one of the two list observations, and two ops in a row
+ * confirm nothing (Grok H1 on #50).
+ */
+export async function insertSuspects(
+  accountId: string,
+  folder: string,
+  uidvalidity: number,
+  sourceId: string,
+  missing: { uid: number; messageRowId: string }[],
+): Promise<void> {
+  if (missing.length === 0) return;
+  if (!sourceId.startsWith(RECONCILE_OP_PASS_PREFIX)) {
+    throw new Error(`insertSuspects: source id must start with ${RECONCILE_OP_PASS_PREFIX}`);
+  }
+  await withTransaction(async (db) => {
+    for (const m of missing) {
+      await db.execute(
+        `INSERT OR IGNORE INTO reconcile_suspects
+           (account_id, folder, uid, uidvalidity, message_row_id, status, first_pass_id)
+         VALUES ($1, $2, $3, $4, $5, 'suspect', $6)`,
+        [accountId, folder, m.uid, uidvalidity, m.messageRowId, sourceId],
+      );
+    }
+  });
 }
 
 /**
@@ -214,6 +261,15 @@ export async function purgeOtherGenerations(
     "DELETE FROM reconcile_suspects WHERE account_id = $1 AND folder = $2 AND uidvalidity <> $3",
     [accountId, folder, current],
   );
+}
+
+/** Every suspect of a folder, whatever its generation — for a folder that is gone. */
+export async function purgeAllSuspects(accountId: string, folder: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM reconcile_suspects WHERE account_id = $1 AND folder = $2", [
+    accountId,
+    folder,
+  ]);
 }
 
 /**

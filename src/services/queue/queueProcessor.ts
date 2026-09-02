@@ -9,6 +9,7 @@ import {
   compactQueue,
 } from "../db/pendingOperations";
 import { executeQueuedAction } from "../emailActions";
+import { RECONCILE_OP, degradeReconcileOp } from "../imap/reconcileOp";
 import { classifyError } from "@/utils/networkErrors";
 
 const BATCH_SIZE = 50;
@@ -42,12 +43,26 @@ async function processQueue(): Promise<void> {
       await deleteOperation(op.id);
     } catch (err) {
       const classified = classifyError(err);
+      // Reconcile ops carry their own strike rule (three, REQ-4.3) and must
+      // degrade visibly when spent; user ops keep `incrementRetry`'s handling.
+      const exhausted = op.operation_type === RECONCILE_OP && op.retry_count + 1 >= op.max_retries;
 
-      if (classified.isRetryable) {
+      if (classified.isRetryable && !exhausted) {
         // Increment retry with exponential backoff
         await updateOperationStatus(op.id, "pending", classified.message);
         await incrementRetry(op.id);
       } else {
+        // F-4 REQ-4.3: a reconcile op that gives up must not vanish — the
+        // folder gets a forced full list on the next pass and the user hears.
+        // Degrade *before* the row is marked failed, with the folder taken
+        // from the resource id when the params do not parse (Grok M6 on #50).
+        if (op.operation_type === RECONCILE_OP) {
+          try {
+            await degradeReconcileOp(op.account_id, safeParse(op.params), op.resource_id);
+          } catch (degradeErr) {
+            console.error("[queueProcessor] Could not degrade a reconcile op; marking it failed regardless:", degradeErr);
+          }
+        }
         // Permanent failure
         await updateOperationStatus(op.id, "failed", classified.message);
       }
@@ -55,6 +70,14 @@ async function processQueue(): Promise<void> {
   }
 
   await updatePendingCount();
+}
+
+function safeParse(json: string): unknown {
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
 }
 
 async function updatePendingCount(): Promise<void> {

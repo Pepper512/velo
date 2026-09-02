@@ -191,6 +191,55 @@ describe("pendingOperations DB service", () => {
       expect(removed).toBe(0);
       expect(mockDb.execute).not.toHaveBeenCalled();
     });
+
+    it("collapses reconcile ops for one folder into the newest, merging UIDs and keeping the max attempts (F-4 REQ-4.2)", async () => {
+      mockDb.select.mockResolvedValueOnce([
+        { id: "r-1", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[5,6],"kind":"repair"}', status: "pending", retry_count: 2, created_at: 1 },
+        { id: "r-2", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[6,9],"kind":"repair"}', status: "pending", retry_count: 0, created_at: 2 },
+        { id: "r-3", account_id: "a1", resource_id: "reconcile:Sent", operation_type: "reconcile", params: '{"folder":"Sent","uids":[1],"kind":"repair"}', status: "pending", retry_count: 0, created_at: 3 },
+      ]);
+      const removed = await compactQueue();
+      expect(removed).toBe(1);
+      expect(mockDb.execute).toHaveBeenCalledWith(
+        "UPDATE pending_operations SET params = $1, retry_count = $2 WHERE id = $3",
+        [JSON.stringify({ folder: "INBOX", uids: [5, 6, 9], kind: "repair" }), 2, "r-2"],
+      );
+      expect(mockDb.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE"), ["r-1"]);
+    });
+
+    it("merges by created_at, leaves malformed and other-generation reconcile rows alone, and labels the merge a repair (Grok L9/H3 on #50)", async () => {
+      mockDb.select.mockResolvedValueOnce([
+        { id: "r-new", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[9],"uidvalidity":7}', status: "pending", retry_count: 0, created_at: 4 },
+        { id: "r-old-gen", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[1],"uidvalidity":6,"kind":"repair"}', status: "pending", retry_count: 1, created_at: 1 },
+        { id: "r-bad", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: "not json", status: "pending", retry_count: 2, created_at: 2 },
+        { id: "r-same", account_id: "a1", resource_id: "reconcile:INBOX", operation_type: "reconcile", params: '{"folder":"INBOX","uids":[5],"uidvalidity":7,"kind":"repair"}', status: "pending", retry_count: 1, created_at: 3 },
+      ]);
+      const removed = await compactQueue();
+      expect(removed).toBe(1);
+      expect(mockDb.execute).toHaveBeenCalledWith(
+        "UPDATE pending_operations SET params = $1, retry_count = $2 WHERE id = $3",
+        [JSON.stringify({ folder: "INBOX", uids: [5, 9], uidvalidity: 7, kind: "repair" }), 1, "r-new"],
+      );
+      expect(mockDb.execute).toHaveBeenCalledWith(expect.stringContaining("DELETE"), ["r-same"]);
+    });
+  });
+
+  describe("F-4 part 3 queue shape", () => {
+    it("enqueues with an explicit max_retries when asked", async () => {
+      await enqueuePendingOperation("a1", "reconcile", "reconcile:INBOX", { folder: "INBOX", uids: [5] }, 3);
+      expect(mockDb.execute).toHaveBeenCalledWith(
+        expect.stringContaining("max_retries"),
+        [expect.any(String), "a1", "reconcile", "reconcile:INBOX", JSON.stringify({ folder: "INBOX", uids: [5] }), 3],
+      );
+    });
+
+    it("orders reconcile ops after user ops within a batch (REQ-4.5)", async () => {
+      await getPendingOperations("a1", 10);
+      expect(mockDb.select).toHaveBeenCalledWith(
+        expect.stringMatching(/ORDER BY \(operation_type = 'reconcile'\) ASC, created_at ASC/),
+        expect.anything(),
+      );
+    });
   });
 
   describe("clearFailedOperations", () => {

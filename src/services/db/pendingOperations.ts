@@ -19,9 +19,18 @@ export async function enqueuePendingOperation(
   operationType: string,
   resourceId: string,
   params: Record<string, unknown>,
+  maxRetries?: number,
 ): Promise<string> {
   const db = await getDb();
   const id = crypto.randomUUID();
+  if (maxRetries !== undefined) {
+    await db.execute(
+      `INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params, max_retries)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [id, accountId, operationType, resourceId, JSON.stringify(params), maxRetries],
+    );
+    return id;
+  }
   await db.execute(
     `INSERT INTO pending_operations (id, account_id, operation_type, resource_id, params)
      VALUES ($1, $2, $3, $4, $5)`,
@@ -36,12 +45,14 @@ export async function getPendingOperations(
 ): Promise<PendingOperation[]> {
   const db = await getDb();
   const now = Math.floor(Date.now() / 1000);
+  // F-4 REQ-4.5: `reconcile` ops are read-repairs and must not head-of-line
+  // block user writes — within a batch, user ops come first.
   if (accountId) {
     return db.select<PendingOperation[]>(
       `SELECT * FROM pending_operations
        WHERE account_id = $1 AND status = 'pending'
          AND (next_retry_at IS NULL OR next_retry_at <= $2)
-       ORDER BY created_at ASC LIMIT $3`,
+       ORDER BY (operation_type = 'reconcile') ASC, created_at ASC LIMIT $3`,
       [accountId, now, limit],
     );
   }
@@ -49,7 +60,7 @@ export async function getPendingOperations(
     `SELECT * FROM pending_operations
      WHERE status = 'pending'
        AND (next_retry_at IS NULL OR next_retry_at <= $1)
-     ORDER BY created_at ASC LIMIT $2`,
+     ORDER BY (operation_type = 'reconcile') ASC, created_at ASC LIMIT $2`,
     [now, limit],
   );
 }
@@ -220,6 +231,50 @@ export async function compactQueue(accountId?: string): Promise<number> {
       // Delete all but the last
       for (let i = 0; i < moveOps.length - 1; i++) {
         toDelete.push(moveOps[i]!.id);
+      }
+    }
+
+    // F-4 REQ-4.2: reconcile ops for one folder collapse into the newest, with
+    // the UID sets merged and the attempt count carried as the max — a
+    // newest-wins-with-reset would be an infinite-retry loophole. Only pending
+    // rows are read above, so an executing op is never touched.
+    // A row whose params do not parse is left alone (the handler drops it);
+    // a row from another UIDVALIDITY generation is left alone too (the
+    // handler drops it once it sees the generation moved) — merging it would
+    // carry its UIDs into a generation they never belonged to (Grok L9/H3
+    // on #50).
+    const reconcileOps = resourceOps
+      .filter((o) => o.operation_type === "reconcile")
+      .sort((a, b) => a.created_at - b.created_at);
+    if (reconcileOps.length > 1) {
+      const parsed = reconcileOps.map((op) => {
+        try {
+          const p = JSON.parse(op.params) as unknown;
+          return typeof p === "object" && p !== null ? (p as Record<string, unknown>) : null;
+        } catch {
+          return null;
+        }
+      });
+      const newestIdx = parsed.map((p) => p !== null).lastIndexOf(true);
+      if (newestIdx >= 0) {
+        const newest = reconcileOps[newestIdx]!;
+        const newestParams = parsed[newestIdx]!;
+        const uids = new Set<number>();
+        let attempts = 0;
+        for (let i = 0; i < reconcileOps.length; i++) {
+          const op = reconcileOps[i]!;
+          const p = parsed[i];
+          if (!p) continue;
+          if (i !== newestIdx && p.uidvalidity !== newestParams.uidvalidity) continue;
+          if (Array.isArray(p.uids)) for (const u of p.uids) if (Number.isInteger(u)) uids.add(u as number);
+          attempts = Math.max(attempts, op.retry_count);
+          if (op.id !== newest.id) toDelete.push(op.id);
+        }
+        const merged = { ...newestParams, uids: [...uids].sort((a, b) => a - b), kind: "repair" };
+        await db.execute(
+          "UPDATE pending_operations SET params = $1, retry_count = $2 WHERE id = $3",
+          [JSON.stringify(merged), attempts, newest.id],
+        );
       }
     }
   }

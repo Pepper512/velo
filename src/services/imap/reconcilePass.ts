@@ -31,7 +31,12 @@ import {
 } from "../db/messages";
 import { getThreadMessageCount } from "../db/threads";
 import { getPendingOpsForResource } from "../db/pendingOperations";
-import { getFolderSyncState, setFlaggedNotExpunged } from "../db/folderSyncState";
+import {
+  bumpFolderMissing,
+  deleteFolderSyncState,
+  getFolderSyncState,
+  setFlaggedNotExpunged,
+} from "../db/folderSyncState";
 import { useUIStore } from "@/stores/uiStore";
 import {
   applySearchAll,
@@ -41,6 +46,7 @@ import {
   forgetSuspects,
   forgetSuspectsWithin,
   planDeletions,
+  purgeAllSuspects,
   purgeOtherGenerations,
   suspectsInFolder,
   type SuspectRow,
@@ -85,13 +91,24 @@ export function beginReconcilePass(accountId: string): ReconcilePass {
  * new-UID term every incoming message tripped the gate.)
  */
 export function shouldListFolder(
-  exists: number | null,
+  exists: number,
   localLiveCount: number,
   incomingNewUids: number,
   flaggedNotExpunged: number,
 ): boolean {
-  if (exists === null) return false;
   return exists !== localLiveCount + incomingNewUids + Math.max(0, flaggedNotExpunged);
+}
+
+/**
+ * Part 3, the "folder gone" sanity bound (Grok H2 on #50). A LIST that drops
+ * most of the folders Velo has sync state for — or every syncable folder —
+ * is a short LIST, not a mass deletion: nothing is counted or removed from
+ * it. Attestation already fails on such a pass because those folders are
+ * known and unchecked.
+ */
+export function folderListLooksPartial(omitted: number, known: number, listed: number): boolean {
+  if (omitted === 0) return false;
+  return listed === 0 || omitted * 2 > known;
 }
 
 /**
@@ -159,6 +176,45 @@ export async function reconcileFolderList(
 export function markFetchCompleted(pass: ReconcilePass, folder: string): void {
   const entry = pass.listed.get(folder);
   if (entry) entry.fetchCompleted = true;
+}
+
+/** REQ-2.3: the belt runs once every N passes, only where the no-UIDPLUS signature shows. */
+export const BELT_EVERY_N_PASSES = 10;
+
+export function beltDue(passNumber: number, flaggedNotExpunged: number): boolean {
+  return flaggedNotExpunged > 0 && passNumber > 0 && passNumber % BELT_EVERY_N_PASSES === 0;
+}
+
+/**
+ * The "folder gone" path (part 3, plan §C). Called for every folder that has
+ * sync state but that this pass's LIST did not return. The first miss only
+ * counts (the folder is unchecked this pass, so nothing deletes); the second
+ * consecutive miss takes the folder as gone on the server: its sync state row
+ * goes (so attestation resumes), its suspects and any stop are voided, and the
+ * user is told. **Its cached messages are kept** — deleting them on LIST
+ * evidence alone would be the mass removal REQ-1 forbids.
+ */
+export async function noteFolderMissing(
+  accountId: string,
+  folder: string,
+  stillListed = false,
+): Promise<"counted" | "removed"> {
+  const misses = await bumpFolderMissing(accountId, folder);
+  const how = stillListed ? "is listed but no longer selectable" : "was not in the server's folder list";
+  if (misses < 2) {
+    console.warn(`[reconcile] ${folder} ${how} (miss ${misses} of 2)`);
+    return "counted";
+  }
+  const kept = (await getLiveMessagesInFolder(accountId, folder)).length;
+  await deleteFolderSyncState(accountId, folder);
+  await purgeAllSuspects(accountId, folder);
+  useUIStore.getState().clearReconcileStop(accountId, folder);
+  const why = stillListed ? "can no longer be opened on the server" : "no longer exists on the server";
+  useUIStore.getState().addNotice({
+    text: `${folder} ${why}; its ${kept} cached message${kept === 1 ? "" : "s"} ${kept === 1 ? "is" : "are"} kept`,
+  });
+  console.warn(`[reconcile] ${folder} ${how} twice in a row; sync state removed, ${kept} message(s) kept`);
+  return "removed";
 }
 
 /**

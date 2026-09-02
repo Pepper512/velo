@@ -445,6 +445,55 @@ pub async fn search_all_uids(
     Ok(result)
 }
 
+/// How many messages in `folder` are **not** flagged `\Deleted` (F-4 REQ-2.3).
+///
+/// On a server without UIDPLUS, Velo leaves mail it removed flagged `\Deleted`
+/// but unexpunged; those still count toward `EXISTS`. This is the cheap
+/// question the reconciliation gate asks every N passes instead of fetching
+/// the whole UID list: "how many real messages are there?"
+pub async fn count_not_deleted(session: &mut ImapSession, folder: &str) -> Result<u32, String> {
+    net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {folder}"), session.select(folder))
+        .await?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+
+    let uids = net::with_timeout(
+        IMAP_SEARCH_TIMEOUT,
+        "UID SEARCH NOT DELETED",
+        session.uid_search("NOT DELETED"),
+    )
+    .await?
+    .map_err(|e| format!("UID SEARCH NOT DELETED failed: {e}"))?;
+
+    Ok(uids.len() as u32)
+}
+
+/// Which of `uid_set` still exist in `folder` (F-4 REQ-4.1's targeted check
+/// after an operation whose outcome was unknown). The set is validated before
+/// it reaches the wire; the answer is sorted ascending.
+pub async fn search_uids_present(
+    session: &mut ImapSession,
+    folder: &str,
+    uid_set: &str,
+) -> Result<Vec<u32>, String> {
+    wire::validate_uid_set(uid_set)?;
+
+    net::with_timeout(IMAP_CMD_TIMEOUT, &format!("SELECT {folder}"), session.select(folder))
+        .await?
+        .map_err(|e| format!("SELECT {folder} failed: {e}"))?;
+
+    let uids = net::with_timeout(
+        IMAP_SEARCH_TIMEOUT,
+        "UID SEARCH UID",
+        session.uid_search(&format!("UID {uid_set}")),
+    )
+    .await?
+    .map_err(|e| format!("UID SEARCH UID failed: {e}"))?;
+
+    let mut result: Vec<u32> = uids.into_iter().collect();
+    result.sort();
+    Ok(result)
+}
+
 /// Set or remove flags on messages.
 ///
 /// `add`: `true` sends `+FLAGS`, `false` sends `-FLAGS`.

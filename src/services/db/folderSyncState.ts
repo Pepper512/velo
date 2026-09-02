@@ -16,6 +16,66 @@ export interface FolderSyncState {
    * database always carry it.
    */
   flagged_not_expunged?: number;
+  /** F-4 part 3 (migration 27): delta passes run for this folder — REQ-2.3's belt clock. */
+  reconcile_passes?: number;
+  /** F-4 part 3: a `reconcile` op gave up (REQ-4.3); the next pass lists the folder regardless of the gate. */
+  force_list?: number;
+  /** F-4 part 3: consecutive passes on which the server's LIST omitted this folder. */
+  missing_passes?: number;
+}
+
+/**
+ * F-4 part 3: bump the folder's pass counter and return the new value, so the
+ * REQ-2.3 belt can run "once every N passes" without in-memory state.
+ */
+export async function bumpReconcilePasses(accountId: string, folderPath: string): Promise<number> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE folder_sync_state SET reconcile_passes = COALESCE(reconcile_passes, 0) + 1
+     WHERE account_id = $1 AND folder_path = $2`,
+    [accountId, folderPath],
+  );
+  const rows = await db.select<{ n: number }[]>(
+    "SELECT reconcile_passes AS n FROM folder_sync_state WHERE account_id = $1 AND folder_path = $2",
+    [accountId, folderPath],
+  );
+  return rows[0]?.n ?? 0;
+}
+
+/** F-4 REQ-4.3: a reconcile op exhausted its attempts — the next pass must list this folder. */
+export async function setForceList(accountId: string, folderPath: string, on: boolean): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "UPDATE folder_sync_state SET force_list = $1 WHERE account_id = $2 AND folder_path = $3",
+    [on ? 1 : 0, accountId, folderPath],
+  );
+}
+
+/**
+ * F-4 part 3, the "folder gone" path: count a pass on which LIST omitted the
+ * folder. Returns the new consecutive count. `clearFolderMissing` resets it
+ * when the folder is listed again.
+ */
+export async function bumpFolderMissing(accountId: string, folderPath: string): Promise<number> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE folder_sync_state SET missing_passes = COALESCE(missing_passes, 0) + 1
+     WHERE account_id = $1 AND folder_path = $2`,
+    [accountId, folderPath],
+  );
+  const rows = await db.select<{ n: number }[]>(
+    "SELECT missing_passes AS n FROM folder_sync_state WHERE account_id = $1 AND folder_path = $2",
+    [accountId, folderPath],
+  );
+  return rows[0]?.n ?? 0;
+}
+
+export async function clearFolderMissing(accountId: string, folderPath: string): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    "UPDATE folder_sync_state SET missing_passes = 0 WHERE account_id = $1 AND folder_path = $2 AND missing_passes <> 0",
+    [accountId, folderPath],
+  );
 }
 
 export async function getFolderSyncState(

@@ -512,6 +512,38 @@ export async function imapDeltaCheck(
 }
 
 /**
+ * F-4 REQ-2.3: how many messages in `folder` are not flagged `\Deleted`. The
+ * cheap belt for no-UIDPLUS accounts. Validated: a non-integer answer is an
+ * error, never a count.
+ */
+export async function imapCountNotDeleted(sessionId: string, folder: string): Promise<number> {
+  const value: unknown = await invoke('imap_count_not_deleted', { sessionId, folder });
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Malformed NOT DELETED count from Rust for ${folder}`);
+  }
+  return value;
+}
+
+/**
+ * F-4 REQ-4.1: which of `uids` still exist in `folder`. Validated like
+ * `imapSearchAllUids`: a malformed answer throws, and the answer must be a
+ * subset of what was asked.
+ */
+export async function imapSearchUidsPresent(
+  sessionId: string,
+  folder: string,
+  uids: number[],
+): Promise<number[]> {
+  if (uids.length === 0) return [];
+  const value: unknown = await invoke('imap_search_uids_present', { sessionId, folder, uids });
+  const asked = new Set(uids);
+  if (!Array.isArray(value) || !value.every((u) => isUid(u) && asked.has(u))) {
+    throw new Error(`Malformed UID presence list from Rust for ${folder}`);
+  }
+  return value;
+}
+
+/**
  * Sync a folder in a single IMAP connection: SELECT → UID SEARCH → batched UID FETCH.
  * When `sinceDate` is provided (format `DD-Mon-YYYY`), uses `UID SEARCH SINCE <date>`
  * to only fetch messages from that date onward, avoiding timeouts on large folders.
