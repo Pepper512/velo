@@ -27,12 +27,14 @@ function manifestRuntimeVersion(): string {
   return m[1]!;
 }
 
-/** `- org.freedesktop.Sdk.Extension.node24` → `node24` */
+/** The entry under `sdk-extensions:` (not a comment elsewhere): `node24` */
 function manifestNodeExtension(): string {
-  const m = /org\.freedesktop\.Sdk\.Extension\.(node\d+)/.exec(manifest);
-  if (!m) throw new Error("manifest names no Node SDK extension");
+  const m = /^sdk-extensions:\s*\n\s*-\s*org\.freedesktop\.Sdk\.Extension\.(node\d+)\s*$/m.exec(manifest);
+  if (!m) throw new Error("manifest has no Node SDK extension under sdk-extensions");
   return m[1]!;
 }
+
+const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 describe("Flatpak pins agree (SPEC-233)", () => {
   const runtime = manifestRuntimeVersion();
@@ -47,7 +49,9 @@ describe("Flatpak pins agree (SPEC-233)", () => {
   it("the workflow installs the same Platform and Sdk as the manifest", () => {
     expect(workflow).toContain(`org.gnome.Platform/x86_64/${runtime}`);
     expect(workflow).toContain(`org.gnome.Sdk/x86_64/${runtime}`);
-    expect(workflow).not.toMatch(/org\.gnome\.(Platform|Sdk)\/x86_64\/(?!50\b)\d+/);
+    // No other version anywhere in the workflow (dynamic: a future bump must not
+    // trip on the number the test was written with — #233 review, Gemini L2).
+    expect(workflow).not.toMatch(new RegExp(`org\\.gnome\\.(Platform|Sdk)/x86_64/(?!${escape(runtime)}\\b)\\d+`));
   });
 
   it("the Node extension is the Node the app requires, on the runtime's base", () => {
@@ -56,7 +60,7 @@ describe("Flatpak pins agree (SPEC-233)", () => {
     expect(node).toBe(`node${floor}`);
     // GNOME 49 and 50 are built on freedesktop-sdk 25.08; the extension branch follows the base.
     expect(workflow).toContain(`org.freedesktop.Sdk.Extension.${node}/x86_64/25.08`);
-    expect(workflow).not.toMatch(/Extension\.node(?!24\b)\d+/);
+    expect(workflow).not.toMatch(new RegExp(`Extension\\.node(?!${escape(floor!)}\\b)\\d+`));
     expect(manifest).toContain(`append-path: /usr/lib/sdk/${node}/bin`);
   });
 
@@ -68,9 +72,18 @@ describe("Flatpak pins agree (SPEC-233)", () => {
 
   it("the packaging job can be dispatched on a branch, and uploads only for a tag (REQ-2.2)", () => {
     expect(workflow).toMatch(/^\s*workflow_dispatch:/m);
-    const upload = /- name: Upload Flatpak to release\n([\s\S]*?)\n\s*- name:|- name: Upload Flatpak to release\n([\s\S]*?)$/m.exec(workflow);
-    const uploadStep = (upload?.[1] ?? upload?.[2] ?? "");
-    expect(uploadStep).toMatch(/if:\s*.*inputs\.tag_name/);
+    // The exact gate, not "mentions tag_name" (#233 review, Gemini M1): a tag
+    // must be given, AND the run must be the release workflow or a dispatch from
+    // that tag's own ref — a branch dispatch naming a shipped tag may not upload.
+    const GATE = /if:\s*\$\{\{\s*inputs\.tag_name\s*!=\s*''\s*&&\s*\(github\.event_name\s*==\s*'workflow_call'\s*\|\|\s*github\.ref\s*==\s*format\('refs\/tags\/\{0\}',\s*inputs\.tag_name\)\)\s*\}\}/;
+    // Every step that uploads to a release carries the gate. No `m` flag on the
+    // capture: `$` must mean end of file, or the lazy capture stops at a line break.
+    const uploadSteps = [...workflow.matchAll(/- name: (Upload [^\n]+ to release)\n([\s\S]*?)(?:\n\s*- name:|\n\s*[a-z-]+:\n\s+name:|$)/g)];
+    expect(uploadSteps.map((m) => m[1])).toEqual(["Upload Flatpak to release", "Upload SRPM to release"]);
+    for (const step of uploadSteps) {
+      expect(step[2], step[1]).toMatch(GATE);
+      expect(step[2], step[1]).toContain("gh release upload");
+    }
   });
 
   it("the contributor and architecture docs say the same runtime and extension", () => {

@@ -1090,3 +1090,19 @@
   bundle must carry `--runtime-repo`, the job must be dispatchable with a gated upload.
   **Not doing:** Flathub publication / `.flatpakref` (distribution decision, EX-007).
   Proof of the build: one dispatched packaging run on the branch, recorded on the PR.
+- **2026-09-03 — PR #67 (#233) review, one leg (Tier 1).** Gemini 3.7 Flash: APPROVE WITH
+  NITS (1M 2L 1N); it confirmed GNOME 50 sits on freedesktop-sdk 25.08, the node24 path,
+  webkit2gtk-4.1 on 50, and that `--runtime-repo` is what makes `flatpak install` of the
+  file offer the runtime (`--repo-url` is for OSTree update remotes; `.flatpakref` needs a
+  hosted repo — correctly deferred). **Adopted all four:** M1 — the test asserted only that
+  the upload `if:` mentioned `tag_name`; it now matches the exact gate; L2 — the version
+  lookaheads were hard-coded to 50/24 and would have failed the next legitimate bump; now
+  interpolated; L3 — a branch dispatch naming a shipped tag could `--clobber` a release
+  asset: the gate is now `tag given AND (release workflow OR dispatched from that tag's own
+  ref)`, applied to **both** upload steps (the SRPM upload had no gate at all — the first
+  dispatched run showed it failing on the empty tag); N4 — the extension is read from under
+  `sdk-extensions:` only. A bug in the test itself surfaced while doing M1: the `m` flag
+  made `$` match a line end, so the step capture stopped at the first line — fixed, and
+  every `Upload … to release` step is now enumerated and checked. **Questions:** no aarch64
+  bundle is planned (runners are x86_64; recorded); release checksums are a follow-up for
+  the release ADR. Raw output in `docs/reviews/2026-09-03-pr67-gemini-raw.md`.
