@@ -39,6 +39,11 @@ vi.mock("../db/accounts", () => ({
 
 vi.mock("./imapConfigBuilder", () => ({
   buildImapConfigWithFreshToken: vi.fn(),
+  // The real derivation: username falls back to the email, host is required.
+  imapIdentityOf: (account: { imap_host: string | null; imap_username: string | null; email: string }) => {
+    if (!account.imap_host) throw new Error("no IMAP host");
+    return { username: account.imap_username || account.email, host: account.imap_host };
+  },
 }));
 
 import {
@@ -394,8 +399,27 @@ describe("credential invalidation", () => {
     expect(id).toBe("session-2");
   });
 
-  it("does nothing for an account whose identity was never learned", async () => {
+  it("reaches the pool from a window that never opened a session, using the account record", async () => {
+    // Gemini H1 on PR #73: a password change made in the Settings window
+    // before this window ever synced must still evict the sessions other
+    // windows hold. The identity is the one the config builder would use.
+    mockGetAccount.mockResolvedValue({
+      id: "acc-never-opened",
+      imap_host: "imap.example.com",
+      imap_username: null,
+      email: "user@example.com",
+    } as never);
+
     await invalidateAccountCredentials("acc-never-opened");
+
+    expect(mockInvalidate).toHaveBeenCalledWith("user@example.com", "imap.example.com");
+    expect(mockOpen).not.toHaveBeenCalled();
+    expect(mockBuildConfig).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for an account that no longer exists", async () => {
+    mockGetAccount.mockResolvedValue(null);
+    await invalidateAccountCredentials("acc-gone");
     expect(mockInvalidate).not.toHaveBeenCalled();
   });
 });
@@ -490,6 +514,29 @@ describe("another window's invalidation (SPEC-E2-3 REQ-3)", () => {
 
     const names = listeners.map((l) => l.name);
     expect(names.filter((n) => n === "velo-imap-sessions-invalidated")).toHaveLength(1);
+  });
+
+  it("tries again on the next call when registration failed", async () => {
+    // Gemini M2 on PR #73: a rejection during early window start-up must not
+    // lock the window out of cross-window invalidation for its lifetime.
+    // The listener is module state and was registered by the tests above, so
+    // this runs the registration function through a fresh module instance.
+    vi.resetModules();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    mockListen.mockRejectedValueOnce(new Error("bridge not ready"));
+    const fresh = await import("./sessionManager");
+    const before = mockListen.mock.calls.length;
+
+    await fresh.withSession("acc-1", "sync", {}, async (id) => id);
+    await Promise.resolve();
+    expect(mockListen.mock.calls.length).toBe(before + 1);
+    expect(warn).toHaveBeenCalled();
+
+    await fresh.withSession("acc-1", "interactive", {}, async (id) => id);
+    expect(mockListen.mock.calls.length).toBe(before + 2);
+
+    await fresh.closeAllSessions();
+    warn.mockRestore();
   });
 
   it("forgets both of the matching account's ids, so the next call reopens", async () => {

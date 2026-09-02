@@ -1281,3 +1281,22 @@
   rustfmt-clean — a stray `cargo fmt` reformatted twelve untouched files, which were
   restored, and `commands.rs` was rebuilt from the committed file by script so the reviewer
   diff carries only the change. No dependency, no capability, no schema.
+- **2026-09-03 — PR #73 (E2 part 3) review, first leg (Tier 2).** Gemini 3.7 Flash via
+  `agy`, diff `5ae7a7c..6d4b49a`: CHANGES REQUESTED (1H 1M 2L 1N); its own threat matrix
+  passed ownership, cancellation, the `StaleCredential` interleaving, the once-only reopen,
+  the id validator and the event payload. **Adopted, all five.** H1 —
+  `invalidateAccountCredentials` returned early when this window had never opened a session
+  for the account, so a password change made in the Settings window before its first sync
+  never reached the pool and the sessions other windows held kept the revoked credential.
+  **Pre-existing since #39** (the old test even asserted the early return) but squarely
+  inside REQ-2's guarantee: the identity now comes from the account record through a new
+  `imapIdentityOf(account)` in `imapConfigBuilder.ts`, which `buildImapConfig` uses too so
+  the two cannot drift; no token refresh, no password; an account that no longer exists is
+  the only no-op (two tests replace the old one). M2 — a rejected `listen` left the
+  once-flag set, locking the window out of cross-window invalidation for its lifetime: the
+  flag is reset in the `.catch` (test through a fresh module instance). L3 — the refused
+  session's LOGOUT in `imap_session_open` is spawned, not awaited, because the frontend is
+  waiting on that error to reopen. L4 — `imap_sessions_invalidate` LOGOUTs the evicted
+  sessions concurrently (`join_all`), as at exit, so two slow servers cost one budget before
+  the other windows hear about it. N5 — the `Drop` comment named the wrong path. Raw output
+  in `docs/reviews/2026-09-03-pr73-gemini-raw.md`.

@@ -24,6 +24,22 @@ function mapAuthMethod(method: string | null): "password" | "oauth2" {
 }
 
 /**
+ * The identity the IMAP session pool keys an account on: the username and
+ * host a session for this account is opened with.
+ *
+ * One function, shared by the config builder and the session manager's
+ * credential invalidation, so an invalidation from a window that never opened
+ * a session names exactly the identity the pool holds (SPEC-E2-3 review,
+ * Gemini H1). No token refresh, no password: identity only.
+ */
+export function imapIdentityOf(account: DbAccount): { username: string; host: string } {
+  if (!account.imap_host) {
+    throw new Error(`Account ${account.id} has no IMAP host configured`);
+  }
+  return { username: account.imap_username || account.email, host: account.imap_host };
+}
+
+/**
  * Build an ImapConfig from a DbAccount's IMAP fields.
  * Assumes the account's imap_password has already been decrypted.
  *
@@ -34,9 +50,7 @@ export function buildImapConfig(
   account: DbAccount,
   accessToken?: string,
 ): ImapConfig {
-  if (!account.imap_host) {
-    throw new Error(`Account ${account.id} has no IMAP host configured`);
-  }
+  const { username, host } = imapIdentityOf(account);
 
   const authMethod = mapAuthMethod(account.auth_method);
   const password =
@@ -45,10 +59,10 @@ export function buildImapConfig(
       : account.imap_password ?? "";
 
   return {
-    host: account.imap_host,
+    host,
     port: account.imap_port ?? 993,
     security: mapSecurity(account.imap_security),
-    username: account.imap_username || account.email,
+    username,
     password,
     auth_method: authMethod,
     accept_invalid_certs: !!account.accept_invalid_certs,

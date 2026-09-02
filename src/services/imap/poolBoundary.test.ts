@@ -18,7 +18,10 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }));
 // and must not show up among the `invoke` calls these tests count.
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("../db/accounts", () => ({ getAccount: vi.fn() }));
-vi.mock("./imapConfigBuilder", () => ({ buildImapConfigWithFreshToken: vi.fn() }));
+vi.mock("./imapConfigBuilder", () => ({
+  buildImapConfigWithFreshToken: vi.fn(),
+  imapIdentityOf: vi.fn(),
+}));
 
 import { getAccount } from "../db/accounts";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";

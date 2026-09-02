@@ -90,9 +90,10 @@ pub async fn imap_session_open(
             // credential and must not enter the map (SPEC-E2-3 REQ-2.1). The
             // frontend reopens once against the new generation.
             // `TooManySessions`: every session for the account is in flight.
-            // Either way the fresh session is ours to LOGOUT, and it is awaited
-            // here because the caller is already on the error path.
-            logout(session).await;
+            // Either way the fresh session is ours to LOGOUT — on a background
+            // task, because the frontend is waiting on this error to reopen
+            // (review, Gemini L3).
+            spawn_logout(session);
             Err(err.to_string())
         }
     }
@@ -136,9 +137,10 @@ pub async fn imap_sessions_invalidate(
     host: String,
 ) -> Result<(), String> {
     let ident = AccountIdent { username, host };
-    for session in pool.bump_credential_version(&ident) {
-        logout(session).await;
-    }
+    // Concurrently, as at exit: two slow servers must not cost two budgets
+    // before the other windows hear about it (review, Gemini L4).
+    let evicted = pool.bump_credential_version(&ident);
+    futures::future::join_all(evicted.into_iter().map(logout)).await;
     let _ = app.emit(
         SESSIONS_INVALIDATED_EVENT,
         SessionsInvalidated {

@@ -53,7 +53,7 @@
 import { listen } from "@tauri-apps/api/event";
 import type { DbAccount } from "../db/accounts";
 import { getAccount } from "../db/accounts";
-import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";
+import { buildImapConfigWithFreshToken, imapIdentityOf } from "./imapConfigBuilder";
 import {
   imapSessionOpen,
   imapSessionClose,
@@ -198,7 +198,10 @@ function ensureInvalidationListener(): void {
     onSessionsInvalidated(event.payload);
   }).catch((err: unknown) => {
     // Without the listener a pop-out still self-heals through NoSuchSession;
-    // it just pays one failed call first. Worth a line, not a failure.
+    // it just pays one failed call first. Worth a line, not a failure — and
+    // the next call tries again rather than giving up for the window's life
+    // (review, Gemini M2).
+    invalidationListenerStarted = false;
     console.warn("[sessionManager] Could not listen for session invalidations:", err);
   });
 }
@@ -306,11 +309,21 @@ export async function closeAccountSessions(accountId: string): Promise<void> {
  *
  * The call is recorded as pending until Rust answers, so an open for the same
  * account from this window waits behind it (REQ-2.4).
+ *
+ * The identity comes from this window's own opens when it has any, and from
+ * the account record otherwise: a password change made in a window that never
+ * opened a session must still reach the pool, or the sessions other windows
+ * opened keep the revoked credential (review, Gemini H1). An account that no
+ * longer exists has nothing to invalidate.
  */
 export async function invalidateAccountCredentials(accountId: string): Promise<void> {
-  const ident = accountIdents.get(accountId);
   forgetAccount(accountId);
-  if (!ident) return;
+  let ident = accountIdents.get(accountId);
+  if (!ident) {
+    const account = await getAccount(accountId);
+    if (!account) return;
+    ident = imapIdentityOf(account);
+  }
   const pending = imapSessionsInvalidate(ident.username, ident.host).finally(() => {
     if (pendingInvalidations.get(accountId) === pending) {
       pendingInvalidations.delete(accountId);

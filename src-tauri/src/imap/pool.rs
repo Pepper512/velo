@@ -500,10 +500,10 @@ impl<S> SessionGuard<'_, S> {
 
 impl<S> Drop for SessionGuard<'_, S> {
     fn drop(&mut self) {
-        // Reached by: an `Err` path, a panic unwinding, or a dropped future.
-        // `release_ok` took the session, so `Some` here means the operation did
-        // not complete cleanly and the entry must not come back. The session is
-        // dropped without LOGOUT on purpose — see the module doc.
+        // Reached by `release_err`, a panic unwinding, or a dropped future.
+        // Only `release_ok` takes the session, so `Some` here means the
+        // operation did not complete cleanly and the entry must not come back.
+        // The session is dropped without LOGOUT on purpose — see the module doc.
         if self.session.is_some() {
             let mut inner = self.pool.lock();
             inner.entries.remove(&self.id);
