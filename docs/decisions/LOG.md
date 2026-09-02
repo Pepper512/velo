@@ -714,3 +714,17 @@
   spec's letter, never delays a vanish; the counter-only trigger is the no-UIDPLUS signature the
   belt exists for), NIT 10 (`SEARCH RETURN (COUNT)` is an ESEARCH capability, later). Raw outputs
   in `docs/reviews/2026-09-02-pr50-{gemini,grok}-raw.md`.
+- **2026-09-02 ~17:45 UTC — #297 (Bcc disclosed over SMTP) built** on Jim's "start the bug-fix
+  queue at #297". Verified in the fork before a line was written: `buildRawEmail` emits `Bcc:`
+  (`emailBuilder.ts:143`), `extract_envelope` reads it into the envelope (`smtp/client.rs:127`),
+  `send_raw_email` transmits the bytes unchanged (`:159`). Plan committed first
+  (`docs/briefs/2026-09-02-297-bcc-strip.md`, Tier 2). **Decisions:** strip in Rust inside the
+  send command, not in the TypeScript builder — the builder's output is also the Sent and Drafts
+  copy, which keeps `Bcc` on purpose so the user can see whom they blind-copied; a hand-written
+  header-block scanner (parser-independent, unit-tested for folding, case, obsolete `Bcc :`
+  whitespace, bare LF, header-only input, body lines untouched) rather than `mail_parser`'s
+  byte offsets, with `mail_parser` used as the **fail-closed guard**: if the parser still sees a
+  `Bcc` after stripping, the send is refused with an error rather than transmitted. Gmail path
+  untouched (**ASSUMPTION:** the Gmail API strips `Bcc` on submission). TDD: nine Rust tests red
+  first, then green; one TypeScript seam test pins that the same bytes go to SMTP and to the
+  Sent append.
