@@ -420,3 +420,12 @@
     that lands nothing on `main` by itself — **F-5** (move-time row hygiene; a live defect on
     `main`, the prerequisite F-4 explicitly wants), briefed before code with the self-approval
     hazard named as for PR C.
+  - **Jim returned at ~02:36 UTC and re-authorised the Fable seat directly and in person**
+    ("go ahead review #37 and keep managing this project as me"). From that point the seat acts on
+    his live instruction, not only on the delegation above; the delegation's expiry (03:20 UTC)
+    therefore no longer governs, and any decision after it is his direct word relayed through this
+    seat. First act under it: the EX-005 opposite-line review of **#37** (E2/P15 part 1, built by
+    the Opus seat after it lifted its own hold on the reasoning that agent merges are blocked for
+    both seats) — **CHANGES REQUESTED**, five must-fix items, design sound; a Gemini 3.7
+    cross-vendor pass reached the same verdict independently. Merges remain permission-blocked
+    for both seats and remain Jim's.
