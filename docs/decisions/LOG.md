@@ -642,3 +642,18 @@
     pending-ops defer; tombstones untouched; one pass id across folders), 4 wiring tests in
     `imapSync.test.ts`, 5 dialog tests, 3 provider counter tests. Not yet run: the live Dovecot
     scenarios in the plan's Done-when — flagged in the PR as the remaining manual step.
+  - **Reviews of #47, both CHANGES REQUESTED, everything adopted or already fixed.** Gemini 3.7
+    (2H 1M 2N): the pending-ops guard cached the thread+message answer per thread and hid a row's
+    own queued work; the >50% stop was judged on the filtered subset so queued work could shield a
+    mass vanish. Grok 4.6 (6H 3M 1L 2N, read against the first commit): deletion matched rows by
+    id alone (now id + folder + UID + live, and a suspect whose row F-5 moved is forgotten); a stop
+    could outlive a UIDVALIDITY change (purge + clear on the change; approval refuses a stale
+    generation); an empty list against a positive EXISTS passed as complete (now a folder error);
+    **a short LIST shrank the attestation universe** (attestation now spans every folder with sync
+    state — a server-deleted folder blocks attestation until its state row goes, recorded as the
+    "folder gone" follow-up); approval was not one transaction (now is); the pass tail is
+    `try/finally`. One semantic recorded rather than changed: **"Keep them" is a threshold, not a
+    hold** — once the folder is no longer more than half gone, budgeted removal resumes; the copy
+    says so now, and a persistent per-folder hold is an option for Jim.
+  - **Not merged by the seat.** Green CI on the final commit; the merge is Jim's (Opus 5's Tier-2
+    recommendation, pending his decision as a rule).
