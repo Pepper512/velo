@@ -450,7 +450,7 @@ export class ImapSmtpProvider implements EmailProvider {
   async sendMessage(
     rawBase64Url: string,
     _threadId?: string,
-  ): Promise<{ id: string }> {
+  ): Promise<{ id: string; threadId?: string }> {
     const smtpConfig = await this.getSmtpConfig();
     const result = await smtpSendEmail(smtpConfig, rawBase64Url);
     if (!result.success) {
@@ -459,9 +459,12 @@ export class ImapSmtpProvider implements EmailProvider {
 
     const messageId = `imap-sent-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-    // Save sent message to local DB so it appears in Sent folder immediately
+    // Save sent message to local DB so it appears in Sent folder immediately.
+    // The thread it lands in is reported back (SPEC-AR); if the save fails
+    // the reply's thread is still known, a new message's is not.
+    let sentThreadId: string | undefined = _threadId;
     try {
-      await this.saveSentMessageLocally(rawBase64Url, messageId, _threadId);
+      sentThreadId = await this.saveSentMessageLocally(rawBase64Url, messageId, _threadId);
     } catch (err) {
       console.warn("[IMAP] Failed to save sent message to local DB:", err);
     }
@@ -481,19 +484,20 @@ export class ImapSmtpProvider implements EmailProvider {
       );
     }
 
-    return { id: messageId };
+    return { id: messageId, threadId: sentThreadId };
   }
 
   /**
    * Save a sent message to the local SQLite DB with the SENT label.
    * This ensures the message appears in the Sent folder view immediately
-   * without waiting for the next IMAP delta sync.
+   * without waiting for the next IMAP delta sync. Returns the thread the
+   * message was saved under: the reply's thread, or the new message's own id.
    */
   private async saveSentMessageLocally(
     rawBase64Url: string,
     messageId: string,
     threadId?: string,
-  ): Promise<void> {
+  ): Promise<string> {
     const raw = base64UrlDecode(rawBase64Url);
     const headers = parseBasicHeaders(raw);
     const snippet = extractSnippet(raw);
@@ -566,6 +570,8 @@ export class ImapSmtpProvider implements EmailProvider {
       referencesHeader: references,
       inReplyToHeader: inReplyTo,
     });
+
+    return effectiveThreadId;
   }
 
   async createDraft(

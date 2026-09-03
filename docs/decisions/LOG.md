@@ -1562,3 +1562,64 @@
   `async-imap`'s `Name`, never pre-quoted. Raw outputs in
   `docs/reviews/2026-09-03-pr78-plan-e-{gemini38,grok}-raw.md`. **Both plans stop here: no
   code until Jim approves each.**
+- **2026-09-03 — SPEC-AR (Auto Reminders on external sends) built, PR #80, Tier 1.**
+  Enhancement wave 1 item 1 (`docs/ROADMAP.md` §4), brief at
+  `docs/briefs/2026-09-03-auto-reminders.md` committed before code. A pure module
+  `src/services/followup/autoReminders.ts` holds the rule (recipient domain differs from the
+  sender's and is not an own address or alias), the due-time math (+N days at 09:00 local,
+  Saturday → Monday, Sunday → Monday), the effective decision (override wins, else rule),
+  the day-choice normaliser (1/2/3/7, default 3) and `scheduleAutoReminder`, which never
+  overwrites an existing reminder (`existing`), warns and sets nothing without a thread id
+  (`no-thread`) and reports insert failures (`failed`) without touching the send outcome.
+  Tests first (22 cases, red then green). REQ-5: `EmailProvider.sendMessage` now returns
+  `{ id, threadId? }` — Gmail from the API response, IMAP from the thread the Sent copy was
+  saved under (the reply's thread, or the new message's own id), with provider tests
+  asserting both. Composer: "Remind me if no reply in N days" checkbox in the footer, shown
+  only when the setting is on, defaulting to the external rule; the decision is taken at
+  Send from what the user saw and the reminder is set after a successful send with a message
+  id (a queued offline send has none, so nothing is set). Settings → Sending: "Auto
+  reminders on external sends" toggle and a "Remind after" select; both persisted
+  (`auto_reminders_enabled`, `auto_reminders_days`) and restored at boot. Help entry
+  extended. Not done, per the brief: auto-drafts, scheduled-send reminders, a Reminders tab,
+  domain allow-lists, checker changes. Gates run here: `tsc` clean, vitest 174 files /
+  2321 tests green, `graph:check` and `docs:check` green (test-file counts bumped 173 → 174,
+  services 95 → 96). CI is the source of the pass bit. No dependency added.
+- **2026-09-03 — PR #80 (SPEC-AR) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (2H 3M 2L 2N); Grok 4.6: CHANGES REQUESTED (1H 2M 3L 3N). **Adopted, each verified
+  against source:** the domain rule now compares the **bare address** — reply-all prefills the
+  recipient chips straight from the raw To/Cc headers (`ThreadView.tsx` splits
+  `to_addresses` on commas), so a chip can read `"Alice" <alice@acme.com>` and the old
+  `lastIndexOf("@")` slice returned `acme.com>` (Gemini H1, Grok M1; four new cases plus the
+  empty-domain `foo@  `); the **delay is frozen at Send**, not read when the undo timer fires
+  (Gemini M1); hours are set after every date move in `autoReminderDueAt`, with a DST case
+  asserted (Gemini M2); `setAutoRemindersDays` normalises before state or disk (Gemini L2, Grok
+  L3); a **warn** when the user wanted a reminder but the send failed or was queued offline
+  with no message id (Grok M2, the REQ-1.4 half); the help tip names the setting instead of
+  "3 days" (Grok L1); an IMAP test for the local save throwing — a reply still reports the
+  input thread, a new message none (Grok's missing test). **Declined, each verified:** Gemini
+  H2 / Grok H1 "the existing-reminder guard skips on cancelled or triggered rows" —
+  `getFollowUpForThread` is `… AND status = 'pending' LIMIT 1` (`followUpReminders.ts:45`), so
+  only a pending row is ever returned; Gemini M3 plus-addressing of own aliases — outside the
+  brief's address rule, noted for a later pass; Gemini L1 boot write-back — the same pattern as
+  the `send_and_archive` restore (`App.tsx:256-259`), one write at boot; Grok L2 "dead catch" —
+  the lookup can throw, only the insert is caught inside the scheduler. **Follow-up recorded,
+  not built:** Grok M2's other half — a queued offline send goes out later from the queue
+  processor with no reminder; the brief scoped reminders to immediate sends, so this is Jim's
+  call (same hook as the scheduled-send non-goal). Raw outputs in
+  `docs/reviews/2026-09-03-pr80-auto-reminders-{gemini38,grok}-raw.md`. Fix commits `ab0ec19`
+  and the Grok fix on the same branch; suite 174 files / 2,326 tests.
+- **2026-09-03 — PR #80 fix-delta pass (Gemini 3.8 Flash High on `865d732..00759c7`).**
+  CHANGES REQUESTED (2H 2M 1L 1N). **Adopted:** a stray `<`/`>` in a typed chip is dropped
+  rather than read into the domain (H2's real part); the DST case moved onto the transition
+  Sunday so the weekend roll runs across it (N1); the alias case now uses an own address on
+  another domain, proving the exemption rather than same-domain (its "wrong thing" note).
+  **Declined, each verified:** H1 "undefined thread id reaches the query" —
+  `scheduleAutoReminder` warns and returns `no-thread` before any lookup
+  (`autoReminders.ts:113-115`); H2's multi-address chip — `AddressInput` adds one string per
+  chip and reply-all splits on commas first; M1 "`mockReset` breaks later tests" — the original
+  is a bare `vi.fn()` (`imapSmtpProvider.test.ts:72`), which `mockReset` restores exactly, and
+  the suite is green; M2 / L1 — a sender without a domain counting as external, and the warn on
+  a failed send, are deliberate and tested. Raw output in
+  `docs/reviews/2026-09-03-pr80-auto-reminders-gemini38-delta-raw.md`. Lesson, again: a
+  follow-up pass on a fix delta finds real polish (three adopted) but its Highs were both
+  wrong this time — verify before adopting.

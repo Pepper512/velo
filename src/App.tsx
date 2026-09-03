@@ -43,6 +43,7 @@ import {
   unregisterComposeShortcut,
 } from "./services/globalShortcut";
 import { initDeepLinkHandler } from "./services/deepLinkHandler";
+import { normaliseAutoReminderDays } from "./services/followup/autoReminders";
 import { updateBadgeCount } from "./services/badgeManager";
 import {
   startQueueProcessor,
@@ -255,6 +256,17 @@ export default function App() {
         const savedSendArchive = await getSetting("send_and_archive");
         if (savedSendArchive === "true") {
           ui.setSendAndArchive(true);
+        }
+
+        // Restore auto reminders (SPEC-AR): on unless explicitly turned off;
+        // the delay falls back to the default for any value not offered.
+        const savedAutoReminders = await getSetting("auto_reminders_enabled");
+        if (savedAutoReminders === "false") {
+          ui.setAutoRemindersEnabled(false);
+        }
+        const savedAutoReminderDays = await getSetting("auto_reminders_days");
+        if (savedAutoReminderDays !== null) {
+          ui.setAutoRemindersDays(normaliseAutoReminderDays(savedAutoReminderDays));
         }
 
         // Restore font scale

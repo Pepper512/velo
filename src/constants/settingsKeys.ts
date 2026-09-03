@@ -27,6 +27,8 @@ export const SETTING_KEYS = [
   "ai_writing_style_enabled",
   "attachment_cache_max_mb",
   "auto_archive_categories",
+  "auto_reminders_days",
+  "auto_reminders_enabled",
   "block_remote_images",
   "claude_model",
   "color_theme",
