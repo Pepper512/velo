@@ -52,6 +52,8 @@ export interface ComposerState {
     threadId?: string | null;
     inReplyToMessageId?: string | null;
     draftId?: string | null;
+    /** SPEC-II: a From alias the caller already resolved; the composer keeps it. */
+    fromEmail?: string | null;
   }) => void;
   closeComposer: () => void;
   setTo: (to: string[]) => void;
@@ -114,7 +116,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       showCcBcc: (opts?.cc?.length ?? 0) > 0 || (opts?.bcc?.length ?? 0) > 0,
       draftId: opts?.draftId ?? null,
       viewMode: "modal",
-      fromEmail: null,
+      fromEmail: opts?.fromEmail ?? null,
       attachments: [],
       lastSavedAt: null,
       isSaving: false,

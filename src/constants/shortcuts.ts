@@ -34,6 +34,7 @@ export const SHORTCUTS: ShortcutCategory[] = [
     { id: "action.reply", keys: "r", desc: "Reply" },
     { id: "action.replyAll", keys: "a", desc: "Reply All" },
     { id: "action.forward", keys: "f", desc: "Forward" },
+    { id: "action.instantIntro", keys: "b", desc: "Instant Intro (reply all, introducer to Bcc)" },
     { id: "action.archive", keys: "e", desc: "Archive" },
     { id: "action.delete", keys: "#", desc: "Delete" },
     { id: "action.spam", keys: "!", desc: "Report Spam / Not Spam" },

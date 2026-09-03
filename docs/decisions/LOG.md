@@ -1843,3 +1843,79 @@
   **Sibling audit (Gemini N1, Grok N2), done:** all 19 `ON CONFLICT` statements in
   `services/db` prepared against the migrated schema — this was the only invalid target. Raw
   outputs in `docs/reviews/2026-09-03-pr88-followup-upsert-{gemini38,grok}-raw.md`.
+- **2026-09-03 — SPEC-II (Instant Intro), Tier 1, PR #90.** Brief
+  `docs/briefs/2026-09-03-instant-intro.md`, committed before code. One key (`b`) or the
+  handshake on the action bar opens a reply-all on the thread's last message with the
+  introducer (`reply_to ?? from_address`, as Reply All targets it) moved to Bcc, the account's
+  own addresses removed, and the body opening "Thanks {first name}, moving you to Bcc." above
+  the usual quote. **Decisions:** (1) the rule is a pure module,
+  `services/composer/instantIntro.ts`, whose `replyAllRecipients` is the first shared copy of
+  the reply-all rule the four hand-written sites compute — replacing them is a later,
+  behaviour-preserving pass; (2) the intro opens the full composer, not the inline reply,
+  because Bcc needs a field; (3) `b` because the dispatcher looks single keys up by `e.key`, so
+  Superhuman's ⌘⇧I written as `Shift+I` could never match — **and the Settings recorder writes
+  exactly that string for any Shift-letter rebind**, a pre-existing gap recorded for Jim;
+  (4) unavailable, with the reason on the button, when there is no introducer address, the
+  last message is my own, or nobody is left once I and the introducer are set aside;
+  (5) the composer resolves the From alias from the reply's To/Cc, and the intro has removed me
+  from both, so `ThreadView` resolves it from the original headers and sets it after opening —
+  the composer's own resolution skips when `fromEmail` is already set; (6) the subject is not
+  given a second `Re:` (Reply All today always prefixes — a small, deliberate difference).
+  `bareAddress` moved from `autoReminders.ts` to `utils/emailUtils.ts` unchanged, now shared.
+  Tests: the module (17), the `b` dispatch (2), the action-bar button (3); the `ThreadView`
+  wiring has no render test, like its reply handlers — Jim's manual check covers it.
+- **2026-09-03 — PR #90 (SPEC-II) review, Gemini 3.8 Flash High leg:** CHANGES REQUESTED
+  (1H 1M 1L 1N). **Declined, verified against source — H F-01** ("the composer's own effect
+  clobbers the From alias set by `ThreadView`"): the composer's only automatic From write is
+  `if (!store.fromEmail && mapped.length > 0)` (`Composer.tsx:216`), inside the async
+  alias-loading effect; `ThreadView` sets `fromEmail` synchronously right after `openComposer`,
+  before any commit, so the guard sees it set and skips. The reviewer flagged the dependence on
+  code outside the diff; the diff's comment described exactly that guard. **Adopted — M F-02:**
+  aliases start `null` (not loaded) rather than `[]`, are reset on account change, and the intro
+  is not computed until they are known — the button reads "Instant Intro is not ready yet" for
+  the milliseconds the SQLite read takes, never a half-known own-address list. **Adopted —
+  L F-03:** `instantIntroUnavailableReason` in the module (tested) names the three cases — no
+  sender address, the last message is your own, nobody to introduce you to — instead of one
+  string for all. **Adopted — N F-04:** the first name drops surrounding quotes/punctuation
+  (`"Alice" Smith` → Alice); `Smith, Alice` still yields "Smith" — a surname-first display name
+  cannot be told from a first name, recorded. Raw output in
+  `docs/reviews/2026-09-03-pr90-instant-intro-gemini38-raw.md`.
+- **2026-09-03 — PR #90 (SPEC-II) review, Grok 4.6 leg:** CHANGES REQUESTED (2M 3L 2N).
+  **Same finding as Gemini, already fixed — M II-1** (aliases race, stale across accounts) and
+  **L II-3** (one reason string). **Adopted — M II-2 / L II-4:** the two-step open (`openComposer`
+  then `setFromEmail`) became one atomic call: `openComposer` accepts `fromEmail`, and the pure
+  `composerOptionsForIntro(message, intro, quoteHtml, aliases)` builds the whole payload —
+  recipients, subject, opener + quote, thread ids, the From alias resolved from the *original*
+  headers — so the React path Grok said was untested is now three module tests plus a store
+  test; `ThreadView` is one line. Grok's clobber theory (the same as Gemini's F-01) stays
+  declined against `Composer.tsx:216`, and Grok marked it unproven. **Adopted — L II-5:** a
+  blank `reply_to` now falls through to `from_address` (Reply All today would address nobody;
+  the intro no longer inherits that). **Notes, no change — N II-6** (the `noReply` rule lives
+  in `ThreadView`/`ActionBar`, as the brief's REQ-1.3 says) and **N II-7** (the tooltip says
+  `(b)` like Forward's `(f)`; a rebind does not update either — pre-existing pattern).
+  **Found while adopting II-2:** `resolveFromAddress` compares whole lower-cased header chips,
+  so a display-name chip (`Alias <alias@acme.com>`) never matches an alias and the
+  default/primary fallback answers instead — the same for Reply All today; recorded, not this
+  PR's. Raw output in `docs/reviews/2026-09-03-pr90-instant-intro-grok-raw.md`.
+- **2026-09-03 — PR #90 (SPEC-II) follow-up pass on the fix delta (`be1fb84..b577f9a`), two
+  legs.** Gemini 3.8 Flash High: CHANGES REQUESTED (2M 1L 1N); Grok 4.6: CHANGES REQUESTED
+  (2M 1L 2N). *Review the fix, not just the change* held again: both legs found the same two
+  holes in the first round's fixes. **Adopted, both legs — the account-switch tear** (Gemini
+  F-02, Grok F-01): resetting the alias list inside the effect left one render with the new
+  account's email beside the old account's aliases; the list is now stored *with the account
+  id it was loaded for* and read as unknown whenever that id differs from the active one — a
+  reset in render, not after paint. **Adopted, both legs — the key path's own guard** (Gemini
+  F-01/F-03, Grok F-02/F-03): the handler still used `reply_to ?? from_address` for the no-reply
+  test (blank `reply_to` slipped through) and did not gate on the reason the button shows; the
+  no-reply rule moved into `instantIntroUnavailableReason` (judged on the reply target after
+  the blank fall-through, tested), and the handler refuses whenever that reason is non-null —
+  one rule for the key and the button. Grok's remark that the delta "does not show
+  `buildInstantIntro` rejecting own-from" is answered outside the delta (it does, at
+  `own.has(introducer)`); the gate makes the agreement explicit anyway. **Declined — Gemini
+  N F-04** (the primary address may be missing from the alias table, so From could resolve to
+  a secondary alias): `composerOptionsForIntro` resolves exactly as the composer's own
+  reply-all path does (`Composer.tsx:216-223`, the mapped aliases only); parity, recorded.
+  **Notes — Grok N F-04/F-05** (the composer's effect and the button's disable are outside the
+  delta): verified earlier (`Composer.tsx:216`) and in `ActionBar.tsx` (`disabled={noReply ||
+  introUnavailableReason !== null}`). Raw outputs in
+  `docs/reviews/2026-09-03-pr90-instant-intro-delta-{gemini38,grok}-raw.md`.

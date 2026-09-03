@@ -1,4 +1,18 @@
-import { normalizeEmail } from "./emailUtils";
+import { normalizeEmail, bareAddress } from "./emailUtils";
+
+describe("bareAddress", () => {
+  it("returns the address inside angle brackets, lower-cased", () => {
+    expect(bareAddress('"Alice Smith" <Alice@Acme.com>')).toBe("alice@acme.com");
+  });
+
+  it("returns a bare address trimmed and lower-cased", () => {
+    expect(bareAddress("  Bob@Example.COM ")).toBe("bob@example.com");
+  });
+
+  it("drops stray brackets when there is no bracketed address", () => {
+    expect(bareAddress("<carol@x.org")).toBe("carol@x.org");
+  });
+});
 
 describe("normalizeEmail", () => {
   it("lowercases an email address", () => {

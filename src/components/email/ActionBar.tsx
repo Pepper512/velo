@@ -11,7 +11,7 @@ import { snoozeThread } from "@/services/snooze/snoozeManager";
 import { getGmailClient } from "@/services/gmail/tokenManager";
 import { SnoozeDialog } from "./SnoozeDialog";
 import { FollowUpDialog } from "./FollowUpDialog";
-import { Archive, Trash2, MailOpen, Mail, Star, Clock, Ban, Pin, MailMinus, BellRing, VolumeX, Reply, ReplyAll, Forward, FolderInput, Printer, Download, ExternalLink, PanelRightClose, PanelRightOpen, ListTodo } from "lucide-react";
+import { Archive, Trash2, MailOpen, Mail, Star, Clock, Ban, Pin, MailMinus, BellRing, VolumeX, Reply, ReplyAll, Forward, Handshake, FolderInput, Printer, Download, ExternalLink, PanelRightClose, PanelRightOpen, ListTodo } from "lucide-react";
 import type { DbMessage } from "@/services/db/messages";
 import { insertFollowUpReminder, getFollowUpForThread, cancelFollowUpForThread } from "@/services/db/followUpReminders";
 import { Button } from "@/components/ui/Button";
@@ -26,6 +26,10 @@ interface ActionBarProps {
   onReply?: () => void;
   onReplyAll?: () => void;
   onForward?: () => void;
+  /** SPEC-II: reply all with the introducer moved to Bcc. */
+  onInstantIntro?: () => void;
+  /** SPEC-II REQ-1.3: why the intro is unavailable on this thread; null when it is available. */
+  introUnavailableReason?: string | null;
   onPrint?: () => void;
   onExport?: () => void;
   onPopOut?: () => void;
@@ -37,7 +41,7 @@ function Separator() {
   return <div className="w-px h-5 bg-border-secondary mx-1 shrink-0" />;
 }
 
-export function ActionBar({ thread, messages, noReply, defaultReplyMode = "reply", contactSidebarVisible, taskSidebarVisible, onReply, onReplyAll, onForward, onPrint, onExport, onPopOut, onToggleContactSidebar, onToggleTaskSidebar }: ActionBarProps) {
+export function ActionBar({ thread, messages, noReply, defaultReplyMode = "reply", contactSidebarVisible, taskSidebarVisible, onReply, onReplyAll, onForward, onInstantIntro, introUnavailableReason = null, onPrint, onExport, onPopOut, onToggleContactSidebar, onToggleTaskSidebar }: ActionBarProps) {
   const updateThread = useThreadStore((s) => s.updateThread);
   const removeThread = useThreadStore((s) => s.removeThread);
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
@@ -233,6 +237,17 @@ export function ActionBar({ thread, messages, noReply, defaultReplyMode = "reply
               onClick={onForward}
               title="Forward (f)"
             />
+            {onInstantIntro && (
+              <Button
+                variant="secondary"
+                iconOnly
+                icon={<Handshake size={15} />}
+                onClick={onInstantIntro}
+                disabled={noReply || introUnavailableReason !== null}
+                title={noReply ? "This sender does not accept replies" : (introUnavailableReason ?? "Instant Intro (b)")}
+                className="disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-secondary"
+              />
+            )}
             <Separator />
           </>
         )}
