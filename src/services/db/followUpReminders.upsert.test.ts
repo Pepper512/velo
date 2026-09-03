@@ -92,6 +92,22 @@ describe("insertFollowUpReminder on real SQLite (SPEC-FUR)", () => {
     expect((await getFollowUpForThread(ACC, "t1"))?.message_id).toBe("m2");
   });
 
+  it("a triggered reminder — the checker's write — stays as history too, and a new one sits beside it (Grok L1)", async () => {
+    await insertFollowUpReminder(ACC, "t1", "m1", 1000);
+    await harness.db.execute("UPDATE follow_up_reminders SET status = 'triggered' WHERE thread_id = 't1'");
+    await insertFollowUpReminder(ACC, "t1", "m2", 2000);
+    expect(await rows()).toEqual([
+      { thread_id: "t1", message_id: "m1", remind_at: 1000, status: "triggered" },
+      { thread_id: "t1", message_id: "m2", remind_at: 2000, status: "pending" },
+    ]);
+  });
+
+  it("setting the very same reminder again changes nothing and inserts nothing — existence is decided by a SELECT, not by rows changed (Grok L2)", async () => {
+    await insertFollowUpReminder(ACC, "t1", "m1", 1000);
+    await insertFollowUpReminder(ACC, "t1", "m1", 1000);
+    expect(await rows()).toEqual([{ thread_id: "t1", message_id: "m1", remind_at: 1000, status: "pending" }]);
+  });
+
   it("threads do not share reminders", async () => {
     await insertFollowUpReminder(ACC, "t1", "m1", 1000);
     await insertFollowUpReminder(ACC, "t2", "m2", 500);

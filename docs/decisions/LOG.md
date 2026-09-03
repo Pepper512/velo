@@ -1827,3 +1827,19 @@
   `followUpReminders.upsert.test.ts` on the SQLite harness (red on the old statement, green on
   the new). **Lesson:** a mocked database cannot catch a statement SQLite rejects at prepare
   time; anything with ON CONFLICT, a trigger, or a constraint belongs on the harness.
+- **2026-09-03 — PR #88 (SPEC-FUR) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (1H 1M 1L 1N); Grok 4.6: CHANGES REQUESTED (1M 2L 2N). **Adopted, each verified:**
+  the update-then-insert runs in one pinned transaction — the brief had claimed every reader
+  tolerated a duplicate pending row, but the checker fires every due pending row, so two
+  concurrent sets of one thread would have notified twice (Gemini H1, Grok M1); existence is
+  decided by a SELECT inside the transaction and the row updated by id, so a driver reporting
+  0 changes for a no-op UPDATE cannot cause a second insert (Grok L2); the triggered-history
+  and same-values cases are pinned (Grok L1, L2); the brief now names the **partial unique
+  index** (`WHERE status = 'pending'`) as the schema-level fix and the Tier 2 follow-up,
+  correcting its earlier "a unique index would collide with history" (Gemini M1, Grok N1).
+  **Declined, verified:** Gemini L1 (the `selectFirstBy` stub) — the repository's harness
+  pattern mocks the connection module and `vi.importActual` cannot rebind the module-local
+  `getDb` the real helper closes over; Grok agreed the stub is a call-time redirect and fine.
+  **Sibling audit (Gemini N1, Grok N2), done:** all 19 `ON CONFLICT` statements in
+  `services/db` prepared against the migrated schema — this was the only invalid target. Raw
+  outputs in `docs/reviews/2026-09-03-pr88-followup-upsert-{gemini38,grok}-raw.md`.
