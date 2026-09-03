@@ -127,9 +127,14 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   // SPEC-SB REQ-3.4: which folder's freshly loaded rows may animate in.
   const [staggerSet, setStaggerSet] = useState<{ folder: string; ids: Set<string> } | null>(null);
   // Which folder the rows on screen belong to. On the frame right after a
-  // folder switch the previous folder's rows are still mounted, so neither the
-  // stagger nor the scroll-to-selection may act on them.
+  // folder switch the previous folder's rows are still mounted under the new
+  // key, so the scroll-to-selection must not act on them. (The stagger has its
+  // own folder tag on `staggerSet`.)
   const [loadedFolder, setLoadedFolder] = useState<string | null>(null);
+  // Only the most recent load may write these: two loads race whenever the
+  // user switches folders quickly, and the older one must not land last
+  // (Gemini fifth pass F-01).
+  const loadSeqRef = useRef(0);
   // One key for "which list is this": the stagger set and the scroll latch
   // both hang off it.
   const folderKey = folderKeyOf(activeAccountId, activeLabel, activeCategory);
@@ -346,7 +351,9 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     // animate in; captured here so a folder change can never stagger the
     // previous folder's rows, and `loadMore` never re-triggers it.
     const folder = folderKeyOf(activeAccountId, activeLabel, activeCategory);
+    const seq = ++loadSeqRef.current;
     const markStagger = (threadsLoaded: ReadonlyArray<{ id: string }>) => {
+      if (seq !== loadSeqRef.current) return; // a newer load has started
       setStaggerSet({ folder, ids: new Set(threadsLoaded.slice(0, 15).map((t) => t.id)) });
       setLoadedFolder(folder);
     };
@@ -390,10 +397,10 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       }
     } catch (err) {
       console.error("Failed to load threads:", err);
-      // Nothing new landed for *this* folder, so nothing of its should animate
-      // in — but a newer folder's successful load must not be cleared by an
-      // older failure (Gemini fourth pass F-03).
-      setStaggerSet((prev) => (prev === null || prev.folder === folder ? null : prev));
+      // The stagger set is left alone: it is folder-tagged, so it can only
+      // belong to rows that are still on screen from an earlier successful
+      // load of this same folder, and clearing it would strip the animation
+      // from rows mid-flight (Gemini fifth pass F-03).
     } finally {
       setLoading(false);
     }

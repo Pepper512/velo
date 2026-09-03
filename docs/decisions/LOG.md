@@ -2132,3 +2132,22 @@
   (`folderKeyOf` coalesces the account but not the category): `activeCategory` is always a
   string here (`resolveActiveTab(...)` or `"All"`), and both call sites pass the same value.
   Raw outputs in `docs/reviews/2026-09-03-pr92-sb3-delta3-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-3 fifth pass on `1efb01a..b55c0af` (Gemini 3.8 Flash High): CHANGES
+  REQUESTED (2H 2M 1N).** **Adopted — H F-01 (a real race):** two `loadThreads` calls overlap
+  whenever the user switches folders quickly, and the older one could land last, writing its
+  folder into `loadedFolder` and suppressing scroll-to-selection until the next load. A
+  sequence number now gates the writes: only the newest load may set the stagger set and
+  `loadedFolder`. (The same race can still put an older folder's *rows* in the store — a
+  pre-existing gap in `loadThreads`, recorded as a follow-up; the new state no longer
+  compounds it.) **Adopted — M F-03:** the failed-load path no longer clears the stagger set
+  at all. The set is folder-tagged, so it can only belong to rows still on screen from an
+  earlier success of the same folder; clearing it stripped a running animation for no gain.
+  **Adopted — M F-04:** the reversed-starred mock now honours `mode.paged`, so a future paging
+  test cannot silently get the whole dataset. **Adopted — N F-05:** the comment claimed
+  `loadedFolder` gates the stagger; it gates the scroll, the stagger has its own tag.
+  **Declined, verified — H F-02** ("split-mode tab changes never re-run `loadThreads`, so
+  `loadedFolder` freezes and blocks scrolling"): `activeCategory` is in the loader's dependency
+  array (`EmailList.tsx:400`), the effect re-runs on its identity change (`:433-435`), and
+  split-mode queries go through `loadTabThreads(activeAccountId, activeCategory, …)` (`:375`)
+  — category filtering has been server-side since Phase 4. Raw output in
+  `docs/reviews/2026-09-03-pr92-sb3-delta4-gemini38-raw.md`.

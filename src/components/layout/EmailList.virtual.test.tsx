@@ -40,8 +40,8 @@ const mode = vi.hoisted(() => ({ paged: false, bundled: false }));
 // folder cannot pass by accident on identical positions.
 const getThreadsForAccount = vi.hoisted(() =>
   vi.fn(async (_acc: string, label: string | undefined, limit: number, offset: number) => {
-    if (label === "STARRED") return [...rows].reverse();
-    return mode.paged ? rows.slice(offset, offset + limit) : rows;
+    const source = label === "STARRED" ? [...rows].reverse() : rows;
+    return mode.paged ? source.slice(offset, offset + limit) : source;
   }),
 );
 vi.mock("@/services/db/threads", () => ({
