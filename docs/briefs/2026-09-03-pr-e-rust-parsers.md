@@ -94,8 +94,11 @@ only, and approving this plan approves it.
    neither); `usize → u32` (the three sites); **the default feature set is now empty** —
    quoted from 0.11.8's manifest as `cargo info` prints it: `default = []`, `encoding_rs`,
    `full_encoding = [encoding_rs]`, `rkyv = [dep:rkyv]`, `serde = [dep:serde]`. 0.9's default
-   was `full_encoding`, so **`full_encoding` must be explicit or non-UTF-8 charsets
-   (ISO-8859-1, Windows-1252 bodies) silently degrade**. That is the one behaviour change a
+   was `full_encoding`, so **`full_encoding` must be explicit or the multi-byte charsets
+   (Shift_JIS, GBK, Big5, EUC-KR, … bodies) silently degrade** — *corrected in the build
+   (Grok L2 on #84): the single-byte tables (ISO-8859-1, Windows-1252) are built in and
+   decode without the feature; the feature gates `decoders/charsets/multi_byte.rs` only, so
+   the fail-closed proof is a Shift_JIS fixture.* That is the one behaviour change a
    bare bump would introduce, and there is no test today that would catch it; the plan writes
    the dependency **fail-closed** (`default-features = false` as well as the explicit feature)
    so a future default cannot re-enable `rkyv` or `serde` unnoticed, and proves the guard by
@@ -185,8 +188,10 @@ only, and approving this plan approves it.
     `multipart/mixed` with a nested `multipart/alternative` and a file attachment → sections
     `"1.1"`, `"1.2"`, `"2"` and one attachment with its `filename`, `mime_type`, `size`;
     a nested `message/rfc822`; an inline image with `Content-ID` → `content_id` and
-    `is_inline`; an ISO-8859-1 and a Windows-1252 body decoded to the right characters
-    (**the `full_encoding` guard**); addresses — plain, RFC 2047 encoded display name
+    `is_inline`; an ISO-8859-1 and a Windows-1252 body decoded to the right characters, and
+    a Shift_JIS body (**the `full_encoding` guard** — the single-byte tables are built in,
+    the multi-byte decoders are what the feature adds; corrected in the build); addresses —
+    plain, RFC 2047 encoded display name
     (`=?UTF-8?B?…?=`), a comma inside a quoted display name, a group
     (`undisclosed-recipients:;`), several recipients — into `from_address`/`from_name`/
     `to_addresses`/`cc_addresses`/`reply_to`; `Message-ID`, `In-Reply-To` and `References`
@@ -287,9 +292,9 @@ only, and approving this plan approves it.
 - **Commit 2 — `mail-parser` 0.11.** `Cargo.toml`: `mail-parser = { version = "=0.11.8",
   default-features = false, features = ["full_encoding"] }`. `client.rs`: three boundary
   conversions, signatures unchanged (REQ-1.1). The invariant suite must stay green byte for
-  byte; every hardening assertion that changes is a dispositioned line; the charset fixtures
-  are run once with `full_encoding` removed and must fail (the fail-closed proof), then it is
-  restored.
+  byte; every hardening assertion that changes is a dispositioned line; the Shift_JIS fixture
+  is run once with `full_encoding` removed and must fail (the fail-closed proof — measured:
+  it alone fails, the single-byte fixtures pass without the feature), then it is restored.
 - **Commit 3 — `async-imap` 0.11.** `Cargo.toml` (`=0.11.3`), plus the duplex-stream wire
   test (REQ-2.3, in CI) and the folder-with-a-space live test (ignored).
 - **Commit 4 — `socket2` 0.6.** `Cargo.toml` only (`=0.6.5`).
