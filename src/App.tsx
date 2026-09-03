@@ -295,9 +295,9 @@ export default function App() {
         const savedReduceMotion = await getSetting("reduce_motion");
         const reduce = resolveReduceEffects({
           stored: savedReduceMotion,
-          platform: savedReduceMotion === null ? await readPlatform() : "unknown",
+          platform: await readPlatform(),
         });
-        if (reduce.value) ui.restoreReduceMotion(true);
+        ui.restoreReduceMotion(reduce.value);
 
         // Restore task sidebar visibility
         const savedTaskSidebar = await getSetting("task_sidebar_visible");

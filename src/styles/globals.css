@@ -118,7 +118,7 @@ body {
 }
 
 /*
- * "Reduce effects" (Settings → Appearance; stored as `reduce_motion`; on by
+ * "Reduce effects" (Settings → General → Appearance; stored as `reduce_motion`; on by
  * default on Linux — SPEC-SB, upstream #232): no blobs, no backdrop blur, no
  * hover/press/stagger animation. Layout is untouched — paddings, borders and
  * shadows stay, so panels simply go flat.
@@ -137,6 +137,8 @@ body {
 
 .reduce-motion .backdrop-animate {
   animation: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   background-color: rgba(0, 0, 0, 0.2);
 }
 
@@ -148,9 +150,9 @@ body {
   transition: none;
 }
 
+/* The lift goes; a shadow is static and costs nothing, so shadows stay (REQ-1.2). */
 .reduce-motion .hover-lift:hover:not(:active) {
   transform: none;
-  box-shadow: none;
 }
 
 .reduce-motion .press-scale:active {

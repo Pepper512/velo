@@ -1926,3 +1926,39 @@
   are unknown — it is ("Instant Intro is not ready yet" whenever `ownAddresses` is null). Merged
   as `91e01f6` (squash) on green for `223102b`. Raw output in
   `docs/reviews/2026-09-03-pr90-instant-intro-delta2-gemini38-raw.md`.
+- **2026-09-03 — SPEC-SB (speed budget), Tier 1, PR #92.** Brief
+  `docs/briefs/2026-09-03-speed-budget.md`, committed before code; one PR, three rebase-merged
+  commits (SB-1 reduce effects, SB-2 open instantly, SB-3 virtualized list), each reviewed on
+  its own diff. **Correction before code:** the brief's first draft blamed the follow-up
+  checker for a needless list reload every minute; its query is due-only
+  (`followUpReminders.ts:55-62`), so every reminder it touches changes state and the reload is
+  warranted — withdrawn (`1cc8e85`). The per-minute reload that remains is sync's own; a
+  changed-flag from the sync path is a recorded follow-up. **Decisions:** the existing
+  `reduce_motion` key widens in effect rather than a second toggle; the Linux default is a
+  session value (`restoreReduceMotion`, not persisted) so the user's first touch is what sticks;
+  bodies are local, so "prefetch" is a SQLite stale-while-revalidate cache, not a network
+  warm-up; `@tanstack/react-virtual` 3.14.10 exact (approved 2026-09-02 decision 3; SLSA
+  provenance on both packages; no transitive deps).
+- **2026-09-03 — PR #92 SB-1 (`b7861ca`) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (4M 3L); Grok 4.6: CHANGES REQUESTED (1H 3M 4L 1N). **Adopted:** the hover rule no
+  longer zeroes `box-shadow` — shadows stay, only the lift transform goes (Gemini M F-03, Grok
+  L F6); the boot path always reads the platform and restores the resolved value
+  unconditionally, so a junk stored value behaves as "absent" the way the resolver's test says
+  (Gemini M F-04 + L F-06, Grok L F7); `backdrop-filter: none` added to `.backdrop-animate`
+  for clarity — the base rule carries no static filter, the blur came only from the keyframes
+  the same rule already disables (Gemini M F-02, Grok M F3: belt and braces, not a fix);
+  `readPlatform` awaits `platform()` and has an async-stub test (Grok **H F1** — **declined as
+  a bug**: `@tauri-apps/plugin-os` 2.x declares `platform(): Platform`, synchronous, verified in
+  `dist-js/index.d.ts:39`; adopted as hardening); the CSS comment names the tab (Grok L F5);
+  the brief's REQ-1.1 copy updated to the shipped description, which keeps the old toggle's
+  "fixes flickering" promise (Gemini L F-05, Grok M F2). **Declined, verified:** "help says
+  Settings > General but the toggle is in Appearance" (Gemini M F-01) — Appearance is a
+  `Section` inside the General tab (`SettingsPage.tsx:442-444`), and the help already says
+  "Settings > General" six times for that section. **Declined, accepted risk:** the boot
+  restore can land after a toggle made in the first milliseconds of a session (Grok M F4) —
+  the same shape as every other setting restored in that boot effect, and the user's toggle
+  persists regardless. **Notes:** first paint on a fresh Linux install still shows the blobs
+  until the async restore lands (Grok L F8) — spec-compliant, recorded; the override rules are
+  unlayered after `@import "tailwindcss"` and so beat layered utilities (Grok N F9); the
+  default loader of `readPlatform` is untested because it imports the Tauri plugin (Gemini L
+  F-07). Raw outputs in `docs/reviews/2026-09-03-pr92-sb1-reduce-effects-{gemini38,grok}-raw.md`.

@@ -105,8 +105,9 @@ tabs or the reading-pane layouts changes for the user.
 
 - **REQ-1 (SB-1) Reduce effects.**
   - REQ-1.1 The Appearance toggle SHALL read **"Reduce effects"** with the description
-    "Flat panels, no blur or animation — quieter on the CPU (recommended on Linux)". The stored
-    key stays `reduce_motion`; a user who turned it on keeps it on.
+    "Flat panels, no blur or animation — quieter on the CPU (on by default on Linux; also
+    fixes flickering on some GPUs)" — the second clause keeps the old toggle's promise. The
+    stored key stays `reduce_motion`; a user who turned it on keeps it on.
   - REQ-1.2 WHEN the toggle is on THE SYSTEM SHALL, in addition to hiding the blobs: remove
     every `backdrop-filter` (`.glass-panel`, `.glass-modal`, `.glass-backdrop`, the
     `backdropIn` keyframes and the Tailwind `backdrop-blur-*` utilities in use) and give the

@@ -36,6 +36,8 @@ describe("readPlatform", () => {
     expect(await readPlatform(async () => ({ platform: () => "macos" }))).toBe("macos");
     expect(await readPlatform(async () => ({ platform: () => "windows" }))).toBe("windows");
     expect(await readPlatform(async () => ({ platform: () => "ios" }))).toBe("unknown");
+    // plugin-os 2.x answers synchronously; a future async answer must work too (Grok F1).
+    expect(await readPlatform(async () => ({ platform: async () => "linux" }))).toBe("linux");
     const failing = vi.fn(async () => { throw new Error("plugin not allowed"); });
     expect(await readPlatform(failing)).toBe("unknown");
   });

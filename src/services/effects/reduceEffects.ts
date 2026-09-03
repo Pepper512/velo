@@ -26,7 +26,8 @@ export function resolveReduceEffects(input: { stored: string | null; platform: P
   return { value: input.platform === "linux", persisted: false };
 }
 
-type OsPlugin = { platform: () => string };
+/** `platform()` is synchronous in plugin-os 2.x; awaiting it costs nothing and survives a change. */
+type OsPlugin = { platform: () => string | Promise<string> };
 
 /**
  * The OS as the Tauri os plugin reports it, or "unknown" when the plugin
@@ -37,7 +38,7 @@ export async function readPlatform(
   load: () => Promise<OsPlugin> = () => import("@tauri-apps/plugin-os"),
 ): Promise<Platform> {
   try {
-    const p = (await load()).platform();
+    const p = await (await load()).platform();
     return p === "linux" || p === "macos" || p === "windows" ? p : "unknown";
   } catch {
     return "unknown";
