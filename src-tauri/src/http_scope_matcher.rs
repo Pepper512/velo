@@ -41,8 +41,10 @@ mod tests {
 
     /// The `http:default` allow URLs of one committed capability file.
     fn allow_urls(file: &str) -> Vec<String> {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/capabilities/");
-        let text = std::fs::read_to_string(format!("{path}{file}")).expect("capability file");
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("capabilities")
+            .join(file);
+        let text = std::fs::read_to_string(&path).expect("capability file");
         let json: serde_json::Value = serde_json::from_str(&text).expect("valid JSON");
         let perms = json["permissions"].as_array().expect("permissions array");
         let http = perms
@@ -64,9 +66,13 @@ mod tests {
             let (input, _) = process_match_input(StringOrInit::String(url.to_string()), None)
                 .expect("a well-formed URL")
                 .expect("a URL the matcher can process");
-            patterns
-                .iter()
-                .any(|p| p.test(input.clone()).unwrap_or(false))
+            // A matcher error fails the test — `unwrap_or(false)` is the
+            // plugin's fail-closed runtime answer, but here it would let a
+            // refusal assertion pass for the wrong reason (Gemini N1 on #85).
+            patterns.iter().any(|p| {
+                p.test(input.clone())
+                    .unwrap_or_else(|e| panic!("UrlPattern::test failed for {url}: {e}"))
+            })
         }
     }
 
