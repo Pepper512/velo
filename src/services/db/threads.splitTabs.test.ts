@@ -156,6 +156,11 @@ describe("split-inbox tab queries (SPEC-SIT)", () => {
     expect(without.has("Primary")).toBe(false);
   });
 
+  it("an account with no pending reminders counts zero, not null (Grok gap)", async () => {
+    const counts = await getSplitTabCounts(ACC, { categories: [], labelIds: [], reminders: true });
+    expect(counts.get("reminders")).toEqual({ total: 0, unread: 0 });
+  });
+
   it("asks for nothing it was not given: no categories, no labels, no reminders → an empty map", async () => {
     expect((await getSplitTabCounts(ACC, { categories: [], labelIds: [], reminders: false })).size).toBe(0);
   });

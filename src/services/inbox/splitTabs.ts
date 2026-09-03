@@ -170,11 +170,15 @@ function render(tab: SplitTab, labelsById: Map<string, LabelInfo>, counts: Map<s
 /**
  * REQ-2.5, 3.1, 3.3: the tabs to draw. A hide-when-empty tab with a known
  * total of zero is dropped; an unknown count keeps the tab (fail open on
- * display). If everything would hide, the first renderable tab stays.
+ * display). A tab the user explicitly asked for (`keep` — the router's
+ * request, a shortcut's target) is never hidden, so `g n` on an empty
+ * Newsletters shows an empty Newsletters rather than yanking to the first
+ * tab (Grok M5 on #87). If everything would hide, the first renderable tab
+ * stays.
  */
 export function visibleSplitTabs(
   tabs: SplitTab[],
-  ctx: { labelsById: Map<string, LabelInfo>; counts: Map<string, TabCount> },
+  ctx: { labelsById: Map<string, LabelInfo>; counts: Map<string, TabCount>; keep?: string },
 ): VisibleTab[] {
   const out: VisibleTab[] = [];
   let firstRenderable: VisibleTab | null = null;
@@ -182,16 +186,23 @@ export function visibleSplitTabs(
     const rendered = render(tab, ctx.labelsById, ctx.counts);
     if (!rendered) continue;
     if (!firstRenderable) firstRenderable = rendered;
-    if (tab.hideWhenEmpty && ctx.counts.get(tab.id)?.total === 0) continue;
+    const hidden = tab.hideWhenEmpty && ctx.counts.get(tab.id)?.total === 0 && tab.id !== ctx.keep;
+    if (hidden) continue;
     out.push(rendered);
   }
   if (out.length === 0 && firstRenderable) return [firstRenderable];
   return out;
 }
 
-/** REQ-3.2: the tab to show for a requested id — itself if visible, else the first, else All. */
+/**
+ * REQ-3.2: the tab to show for a requested id — itself if visible, else the
+ * first visible, else All. `"All"` passes through untouched: it is the
+ * unified list, not a tab, and the list's `"All"` path stays exactly as it
+ * was (Grok H1 on #87).
+ */
 export function resolveActiveTab(visible: VisibleTab[], requested: string): string {
-  if (requested !== "All" && visible.some((t) => t.id === requested)) return requested;
+  if (requested === "All") return "All";
+  if (visible.some((t) => t.id === requested)) return requested;
   return visible[0]?.id ?? "All";
 }
 

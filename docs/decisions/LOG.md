@@ -1788,3 +1788,28 @@
   tab-strip tests rewritten (5). Gates: `tsc` clean, 176 files / 2,361 tests, `graph:check`,
   `docs:check` (counts bumped 174 → 176, services 96 → 98). No dependency added (Zod was
   already approved and in use at the model-output boundary).
+- **2026-09-03 — PR #87 (SPEC-SIT) review, two legs.** Gemini 3.8 Flash High: CHANGES REQUESTED
+  (3H 3M 2L 1N); Grok 4.6: CHANGES REQUESTED (1H 6M 2L 3N). **Adopted, each verified against
+  source:** the add path enforces the same 32-tab cap as the boundary schema, or a 33rd tab would
+  persist and reset everything at the next boot (Gemini M1, Grok M2); the Reminders count is
+  `COUNT(DISTINCT thread)` — the table has no unique index on `(account_id, thread_id)`, so two
+  pending rows on one thread are possible (Gemini H1, Grok M1); `t.id` as the paging tie-breaker
+  in both new queries (Gemini M2); the editor clears its candidate on an account switch and names
+  a label from another account (Gemini M3, L1; Grok L1); `"All"` passes through
+  `resolveActiveTab` untouched so the unified path is exactly as it was (Grok H1); a tab the
+  router asks for is never hidden by hide-when-empty, which is what stops `g n` on an empty
+  Newsletters from yanking the user to the first tab and stops a URL-named tab from vanishing
+  after the first counts load (Grok M5, M4's jump half); counts are dropped the moment the
+  account changes (Grok M3); the hide-when-empty checkbox is announced once (Grok L2); seven
+  test cases from the two gap lists, plus an editor component test. **Declined, each
+  verified:** Gemini H2 / Grok M6 "a label from another account can render a tab" — the label
+  store holds the active account's labels only (`labelStore.loadLabels` replaces the list from
+  `getLabelsForAccount`); Gemini H3 / Grok M4's rest — counts are unknown on first paint only
+  and kept across navigation, and the URL is the user's request, not display state, so nothing
+  navigates on their behalf (fail open on display, as the brief says); Gemini L2 likewise.
+  **Finding, recorded and fixed in its own PR next:** while verifying Gemini H1 on real SQLite,
+  `insertFollowUpReminder`'s `ON CONFLICT(account_id, thread_id)` upsert failed — SQLite
+  refuses an ON CONFLICT target without a unique index, and upstream's migration v6
+  (2026-02-12) created a plain one. Follow-up reminders, manual and automatic (#80, #82), cannot
+  be inserted today; the error is swallowed by the callers' catches. Raw outputs in
+  `docs/reviews/2026-09-03-pr87-split-tabs-{gemini38,grok}-raw.md`.

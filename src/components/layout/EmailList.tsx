@@ -85,15 +85,25 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const routerCategory = useActiveCategory();
   const [tabCounts, setTabCounts] = useState<Map<string, TabCount>>(() => new Map());
 
+  // Counts belong to one account: drop them the moment the account changes,
+  // before the refresh lands, so the previous account's totals cannot hide or
+  // count a tab here (Grok M3 on #87).
+  useEffect(() => {
+    setTabCounts(new Map());
+  }, [activeAccountId]);
+
   // SPEC-SIT: the tabs to draw — configured tabs, minus label tabs this
   // account does not have and hide-when-empty tabs with nothing in them.
+  // `userLabels` is the active account's labels: the label store replaces its
+  // list from `getLabelsForAccount` on every account switch (REQ-2.5). The
+  // tab the router asks for is never hidden.
   const visibleTabs = useMemo(() => {
     if (inboxViewMode !== "split") return [];
     const labelsById = new Map<string, LabelInfo>(
       userLabels.map((l) => [l.id, { name: l.name, color: l.colorBg }]),
     );
-    return visibleSplitTabs(splitInboxTabs, { labelsById, counts: tabCounts });
-  }, [inboxViewMode, splitInboxTabs, userLabels, tabCounts]);
+    return visibleSplitTabs(splitInboxTabs, { labelsById, counts: tabCounts, keep: routerCategory });
+  }, [inboxViewMode, splitInboxTabs, userLabels, tabCounts, routerCategory]);
 
   // In split mode the router asks for a tab and the visible set decides
   // (REQ-3.2); in unified mode it is always "All".

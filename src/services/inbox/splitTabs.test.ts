@@ -137,14 +137,46 @@ describe("resolveActiveTab (REQ-3.2)", () => {
     expect(resolveActiveTab(visible, "reminders")).toBe("reminders");
   });
 
-  it("falls back to the first visible tab when the request is hidden, unknown, or All", () => {
+  it("falls back to the first visible tab when the request is hidden or unknown", () => {
     expect(resolveActiveTab(visible, "Promotions")).toBe("Primary");
     expect(resolveActiveTab(visible, "label:nope")).toBe("Primary");
-    expect(resolveActiveTab(visible, "All")).toBe("Primary");
+  });
+
+  it("passes All through untouched — the unified list is not a tab (Grok H1)", () => {
+    expect(resolveActiveTab(visible, "All")).toBe("All");
   });
 
   it("returns All when nothing is visible at all", () => {
     expect(resolveActiveTab([], "Primary")).toBe("All");
+  });
+});
+
+describe("an explicitly requested tab is never hidden (Grok M5 on #87)", () => {
+  it("keeps an empty hide-when-empty tab in the strip when the router asks for it", () => {
+    const tabs = [category("Primary"), category("Newsletters", true)];
+    const counts = new Map([
+      ["Primary", { total: 3, unread: 0 }],
+      ["Newsletters", { total: 0, unread: 0 }],
+    ]);
+    const labelsById = new Map();
+    expect(visibleSplitTabs(tabs, { labelsById, counts }).map((t) => t.id)).toEqual(["Primary"]);
+    const kept = visibleSplitTabs(tabs, { labelsById, counts, keep: "Newsletters" });
+    expect(kept.map((t) => t.id)).toEqual(["Primary", "Newsletters"]);
+    expect(resolveActiveTab(kept, "Newsletters")).toBe("Newsletters");
+  });
+});
+
+describe("parseSplitTabs bounds (Grok gaps)", () => {
+  it("rejects a label id longer than the schema allows", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const long = "x".repeat(201);
+    expect(parseSplitTabs(JSON.stringify([{ id: `label:${long}`, kind: "label", labelId: long, hideWhenEmpty: false }]))).toEqual(DEFAULT_SPLIT_TABS);
+    warn.mockRestore();
+  });
+
+  it("strips keys it does not know rather than rejecting them", () => {
+    const stored = [{ id: "Primary", kind: "category", category: "Primary", hideWhenEmpty: false, extra: 1 }];
+    expect(parseSplitTabs(JSON.stringify(stored))).toEqual([{ id: "Primary", kind: "category", category: "Primary", hideWhenEmpty: false }]);
   });
 });
 

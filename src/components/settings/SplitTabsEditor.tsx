@@ -130,7 +130,8 @@ export function SplitTabsEditor() {
                 onChange={(e) => setTabs(setHideWhenEmpty(tabs, tab.id, e.target.checked))}
                 aria-label={`Hide ${tabName(tab)} when empty`}
               />
-              Hide when empty
+              {/* Announced once, by the aria-label above, which also names the tab (Grok L2). */}
+              <span aria-hidden="true">Hide when empty</span>
             </label>
             <button
               type="button"
