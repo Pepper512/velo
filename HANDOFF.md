@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `a7058cb`** (#80, SPEC-AR — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline a7058cb..origin/main` —
+- **Code pin: `ea18efc`** (#85, SPEC-280-U — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline ea18efc..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
@@ -39,19 +39,23 @@
     is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
     `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
     reviewer diff; `pool.rs` is clean and safe to Edit.
-- **State on `main` @ `a7058cb`:** frontend **174** files / **2,326** tests · Rust **173** +
-  3 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
-  import cycles. **No dependency added this session.** Still open for Jim: `urlpattern` as a
-  dev-dependency (SPEC-280 §Open for Jim).
+- **State on `main` @ `ea18efc`:** frontend **174** files / **2,341** tests · Rust **206** +
+  4 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
+  import cycles. **Dependencies changed this session, each on Jim's explicit approval:** the
+  PR D and PR E majors (TypeScript 7.0.2, Vite 8.2.2, plugin-react 6.1.1; mail-parser 0.11.8,
+  async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4, with `hashify` 0.2.9 the one pre-1.0
+  transitive addition) and `urlpattern` 0.3.0 as a dev-dependency (#85). Nothing else.
 
 ---
 
 ## 1. Exact next step
 
 **The full ordered plan is `docs/ROADMAP.md`**: the bug-fix queue is done except #278 ("not
-yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), P11 landed (#75), the PR D / PR E plans
-are docs awaiting Jim (#77, #78), and **enhancement wave 1 has started: Auto Reminders landed
-(#80)**. Next in §4 of the roadmap: custom split-inbox tabs, Instant Intro, the speed budget.
+yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), P11 landed (#75), **the dependency audit
+is complete — PR D (#83) and PR E (#84) built from their approved plans**, the queued-send
+reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 has started
+with Auto Reminders (#80). **Next in §4 of the roadmap: custom split-inbox tabs** (brief first,
+Tier 1), then Instant Intro, then the speed budget.
 
 **SPEC-AR landed as #80 (`a7058cb`) — auto reminders on external sends.** Brief
 `docs/briefs/2026-09-03-auto-reminders.md` (Tier 1, committed before code). Sending to an
@@ -197,6 +201,10 @@ merged #73 under the standing rule.
 
 | PR | Merged | What |
 |---|---|---|
+| #85 `ea18efc` | build seat | **SPEC-280-U.** The http scope matched by tauri-plugin-http's own matcher: both capability files, the exact allow list, the accepted and refused URL tables, with `urlpattern` 0.3.0 as a dev-dependency (Jim's decision 4; normal tree unchanged) |
+| #84 `300f4e7` | build seat | **PR E.** mail-parser 0.11.8 (fixture suite first; two header lookups fixed — a named REQ-1.1 deviation; the `full_encoding` premise corrected to Shift_JIS), async-imap 0.11.3 (duplex wire test: names quoted once, LIST pattern sent bare), socket2 0.6.5, reqwest 0.13.4 with native-tls pinned on three builders and a form-body mock test; per-commit CI re-run where the concurrency group had cancelled it; Docker engine dead so the live harness stays open |
+| #83 `675cc27` | build seat | **PR D.** TypeScript 6.0.3 → 7.0.2 (native, `tsc` 3.2 s → 0.4 s), Vite 8.2.2 + plugin-react 6.1.1, browser floor pinned to Vite 7's, `check-dist` in the build; packaged debug bundle smoke done by the agent through the accessibility tree; Gemini's "Vite 7 default is modules" declined against vite@7.3.6's shipped constant |
+| #82 `4cdb231` | build seat | **SPEC-QSR.** Auto reminders on queued offline sends: the wish rides on the queued op, the reminder is set when the queue's send succeeds; reminder creation moved into the action layer |
 | #80 `a7058cb` | build seat | **SPEC-AR.** Auto reminders on external sends: rule + weekend-skipping due time in a pure module, composer checkbox, Settings → Sending toggle and delay, providers return the thread id; two review legs, findings verified against source |
 | #75 `e05f6cd` | build seat | **P11.** The capability grant split: `main.json` unchanged, `content.json` scoped by path for `thread-*`/`compose-*`, splash in no file, the three creator sites gated by one label-first rule; four review passes; Jim's five-step QA open |
 | #73 `1116348` | build seat | **E2 part 3.** Pool owns `Option<S>`; LOGOUT on every clean eviction under a 3 s budget; `StaleCredential` + `BadId`; session-id shape; the invalidation event with nonce; frontend invalidation epoch with once-only retry; pending invalidations by identity; `imapIdentityOf` shared by the config builder and the session manager (host lower-cased). Four review passes; Rust 159 → 173, frontend 2,249 → 2,273 |
@@ -253,17 +261,19 @@ merge can still be wrong — including ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `a7058cb`** (#80,
-SPEC-AR; the only SHA pinned — `git log --oneline a7058cb..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 174 files / 2,326 tests / Rust 173 + 3 ignored · 28 migrations ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `ea18efc`** (#85,
+SPEC-280-U; the only SHA pinned — `git log --oneline ea18efc..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 174 files / 2,341 tests / Rust 206 + 4 ignored · 28 migrations ·
 npm audit 0 · no dependency added.
 
-**Note, unverified here:** a separate read-only session's notes (2026-09-03 evening) report Jim approving
-the PR D and PR E plans, the `urlpattern` dev-dependency, and a reminder on queued offline sends. The
-repo has no record — both Approval lines are blank on `main` — so the next build session **asks Jim
-to confirm** before filling them in or adding any dependency.
+**Jim confirmed those approvals in-session on 2026-09-03 and the build seat ran his prompt to the
+end:** SPEC-QSR (#82), **PR D (#83, six rebase-merged commits)**, **PR E (#84, seven rebase-merged
+commits)** and **SPEC-280-U (#85, the `urlpattern` dev-dependency test)** are on `main`; both plan
+Approval lines are filled in. Toolchain now: TypeScript 7.0.2 (native), Vite 8.2.2, mail-parser
+0.11.8, async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4 with native-tls pinned.
 
-**Next action: wait for Jim's approval of the PR D and PR E plans** (landed as docs, #77
+**Next action: enhancement wave 1 item 2 — custom split-inbox tabs** (ROADMAP §4), brief first,
+Tier 1. The paragraph below is the pre-approval reading, kept for history: wait for Jim's approval of the PR D and PR E plans (landed as docs, #77
 `1ccafbf` and #78 `2e4707b`; both stop before any code). If one is approved, build it exactly
 as its spec says — rebase merge, per-commit gates, the packaged-bundle smoke (D) or the fixture
 suite first and the live-harness attempt (E). If neither is, continue **enhancement wave 1**
