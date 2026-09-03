@@ -1623,3 +1623,31 @@
   `docs/reviews/2026-09-03-pr80-auto-reminders-gemini38-delta-raw.md`. Lesson, again: a
   follow-up pass on a fix delta finds real polish (three adopted) but its Highs were both
   wrong this time — verify before adopting.
+- **2026-09-03 — SPEC-QSR (Auto Reminders on queued offline sends) built, PR #82, Tier 1.**
+  Jim's decision 5 (2026-09-03): "carry the wants-reminder flag and frozen delay on the queued
+  op, create the reminder when the queue processor's send succeeds, retire the PR 80 warn for
+  that path." Brief `docs/briefs/2026-09-03-queued-send-reminder.md` committed first. The
+  `sendMessage` action gains an optional `autoReminderDays` (presence = wanted; the delay
+  frozen at Send), which rides in the queued row's JSON `params` with no schema change.
+  Reminder creation moves to the action layer — `afterSuccessfulSend` in `emailActions.ts`,
+  called after the online provider call and after a successful queued execution — dated from
+  the actual send, on the provider's thread falling back to the reply's, through the same
+  scheduler as #80; anything the scheduler throws is logged, the send stands. The composer
+  passes `{ autoReminderDays }` when it wants a reminder and no longer schedules or warns
+  itself. Seven cases in `emailActions.test.ts`, red first. No dependency. Gates here: `tsc`
+  clean, full suite green, `graph:check`, `docs:check`.
+- **2026-09-03 — PR #82 (SPEC-QSR) review, two legs.** Gemini 3.8 Flash High: APPROVE (2L
+  2N); Grok 4.6: APPROVE (2L 3N). **Adopted:** the hook is invoked only for `sendMessage` at
+  both call sites (Gemini L1); an empty provider thread id falls back to the reply's (Gemini
+  L2, `||`); the hook runs **after** the provider try/catch so a reminder problem can never be
+  classified as a provider failure (Grok L1); nine test cases from the two gap lists —
+  retryable-failure enqueue carries the wish, provider without a message id warns, a pending
+  reminder is never doubled (a re-executed row is safe), the empty-thread fallback, the
+  queue's JSON round trip with the stored delay dating the reminder under a fake clock, the
+  provider's thread winning, no thread anywhere, a stray field on a non-send action.
+  **Declined, verified:** Grok L2 "type the result instead of asserting" —
+  `executeViaProvider` returns `unknown` by design (a union of provider results) and a runtime
+  shape check is the right thing at that boundary. Both reviewers' double-reminder analysis
+  agrees with the brief: the scheduler's pending guard covers a re-executed row; a reminder
+  failure after a successful queued send is logged, not retried (Not doing). Raw outputs in
+  `docs/reviews/2026-09-03-pr82-queued-send-reminder-{gemini38,grok}-raw.md`.

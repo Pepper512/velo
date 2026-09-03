@@ -2,6 +2,8 @@ import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import { getFollowUpForThread, insertFollowUpReminder } from "@/services/db/followUpReminders";
+import { scheduleAutoReminder } from "@/services/followup/autoReminders";
 import { RECONCILE_OP, enqueueReconcileOps, runReconcileOp } from "@/services/imap/reconcileOp";
 import { classifyError } from "@/utils/networkErrors";
 import { getDb } from "@/services/db/connection";
@@ -45,6 +47,12 @@ export type EmailAction =
       type: "sendMessage";
       rawBase64Url: string;
       threadId?: string;
+      /**
+       * SPEC-QSR: the user wanted an automatic follow-up reminder, with the
+       * delay frozen when they pressed Send. Rides on the queued row's params
+       * so a send that goes out later still gets its reminder.
+       */
+      autoReminderDays?: number;
     }
   | {
       type: "createDraft";
@@ -261,6 +269,41 @@ function actionToParams(action: EmailAction): Record<string, unknown> {
   return rest;
 }
 
+/**
+ * SPEC-QSR: after a send the user wanted a follow-up reminder for, set it —
+ * whether the send went out now or from the queue. Runs from the actual send
+ * time. Nothing here can change the send's outcome: the scheduler reports its
+ * own failures, and anything it throws (a lookup error) is logged.
+ */
+async function afterSuccessfulSend(
+  accountId: string,
+  action: EmailAction,
+  result: unknown,
+): Promise<void> {
+  if (action.type !== "sendMessage" || action.autoReminderDays === undefined) return;
+  const sent = result as { id?: string; threadId?: string } | undefined;
+  if (!sent?.id) {
+    console.warn("[emailActions] Send reported no message id; no auto reminder set");
+    return;
+  }
+  try {
+    await scheduleAutoReminder(
+      { getFollowUpForThread, insertFollowUpReminder },
+      {
+        accountId,
+        // `||`, not `??`: a provider that reports an empty thread id still
+        // falls back to the thread the message replied to.
+        threadId: sent.threadId || action.threadId,
+        messageId: sent.id,
+        sentAt: new Date(),
+        days: action.autoReminderDays,
+      },
+    );
+  } catch (err) {
+    console.warn("[emailActions] Could not set the automatic reminder:", err);
+  }
+}
+
 async function executeViaProvider(
   accountId: string,
   action: EmailAction,
@@ -353,9 +396,9 @@ export async function executeEmailAction(
   }
 
   // 4. Try online execution
+  let data: unknown;
   try {
-    const data = await executeViaProvider(accountId, action);
-    return { success: true, data, nextThreadId };
+    data = await executeViaProvider(accountId, action);
   } catch (err) {
     const classified = classifyError(err);
 
@@ -386,6 +429,11 @@ export async function executeEmailAction(
     console.error(`Email action ${action.type} failed permanently:`, err);
     return { success: false, error: classified.message };
   }
+
+  // Outside the provider try on purpose (Grok L1 on #82): a reminder problem
+  // must never read as a provider failure — no re-queue, no revert.
+  if (action.type === "sendMessage") await afterSuccessfulSend(accountId, action, data);
+  return { success: true, data, nextThreadId };
 }
 
 function isMoveOrDelete(
@@ -418,8 +466,9 @@ export async function executeQueuedAction(
     return;
   }
   const action = { type: operationType, ...params } as EmailAction;
+  let result: unknown;
   try {
-    await executeViaProvider(accountId, action);
+    result = await executeViaProvider(accountId, action);
   } catch (err) {
     // F-4 REQ-4.1 on the queued path too (Grok M5 on #50): a queued move or
     // delete whose outcome is unknown gets the same observer as an online
@@ -434,6 +483,10 @@ export async function executeQueuedAction(
     }
     throw err;
   }
+  // SPEC-QSR: a queued send that goes out now gets the reminder the user
+  // asked for when they pressed Send, dated from now. After the try on
+  // purpose (Grok L1 on #82): a reminder problem is never a queue failure.
+  if (action.type === "sendMessage") await afterSuccessfulSend(accountId, action, result);
 }
 
 // ---------------------------------------------------------------------------
@@ -560,11 +613,16 @@ export async function sendEmail(
   accountId: string,
   rawBase64Url: string,
   threadId?: string,
+  opts?: {
+    /** SPEC-AR/QSR: set a follow-up reminder this many days after the send. */
+    autoReminderDays?: number;
+  },
 ): Promise<ActionResult> {
   const result = await executeEmailAction(accountId, {
     type: "sendMessage",
     rawBase64Url,
     threadId,
+    ...(opts?.autoReminderDays !== undefined ? { autoReminderDays: opts.autoReminderDays } : {}),
   });
 
   // Notify the UI to refresh (so sent message appears in Sent folder)

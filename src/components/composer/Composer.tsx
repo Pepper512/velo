@@ -30,8 +30,7 @@ import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/d
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
 import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
 import { getTemplatesForAccount, type DbTemplate } from "@/services/db/templates";
-import { effectiveAutoReminder, isExternalSend, scheduleAutoReminder } from "@/services/followup/autoReminders";
-import { getFollowUpForThread, insertFollowUpReminder } from "@/services/db/followUpReminders";
+import { effectiveAutoReminder, isExternalSend } from "@/services/followup/autoReminders";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 import { interpolateVariables } from "@/utils/templateVariables";
 import { sanitizeHtml } from "@/utils/sanitize";
@@ -336,37 +335,15 @@ export function Composer() {
 
     const timer = setTimeout(async () => {
       try {
-        const sendResult = await sendEmail(activeAccountId, raw, state.threadId ?? undefined);
-
-        // SPEC-AR: automatic follow-up reminder on an external send. It never
-        // touches the send outcome. A failed send, or a queued (offline) one
-        // with no message id yet, has nothing to hang a reminder on: say so
-        // (REQ-1.4) and set nothing.
-        if (autoReminderWanted) {
-          const sent = sendResult.success
-            ? (sendResult.data as { id?: string; threadId?: string } | undefined)
-            : undefined;
-          if (!sent?.id) {
-            console.warn(
-              "[autoReminders] No sent message id (send failed or was queued); no reminder set",
-            );
-          } else {
-            try {
-              await scheduleAutoReminder(
-                { getFollowUpForThread, insertFollowUpReminder },
-                {
-                  accountId: activeAccountId,
-                  threadId: sent.threadId ?? state.threadId,
-                  messageId: sent.id,
-                  sentAt: new Date(),
-                  days: autoReminderDaysAtSend,
-                },
-              );
-            } catch (err) {
-              console.warn("[autoReminders] Could not set the automatic reminder:", err);
-            }
-          }
-        }
+        // SPEC-AR/QSR: the automatic follow-up reminder is the action layer's
+        // job — set after the send actually goes out, now or from the offline
+        // queue — so the composer only passes the wish and the frozen delay.
+        await sendEmail(
+          activeAccountId,
+          raw,
+          state.threadId ?? undefined,
+          autoReminderWanted ? { autoReminderDays: autoReminderDaysAtSend } : undefined,
+        );
 
         // Delete draft if it was saved
         if (currentDraftId) {
