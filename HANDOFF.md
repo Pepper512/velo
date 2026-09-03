@@ -272,18 +272,19 @@ commits)** and **SPEC-280-U (#85, the `urlpattern` dev-dependency test)** are on
 Approval lines are filled in. Toolchain now: TypeScript 7.0.2 (native), Vite 8.2.2, mail-parser
 0.11.8, async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4 with native-tls pinned.
 
-**Next action: enhancement wave 1 item 2 — custom split-inbox tabs** (ROADMAP §4), brief first,
-Tier 1. The paragraph below is the pre-approval reading, kept for history: wait for Jim's approval of the PR D and PR E plans (landed as docs, #77
-`1ccafbf` and #78 `2e4707b`; both stop before any code). If one is approved, build it exactly
-as its spec says — rebase merge, per-commit gates, the packaged-bundle smoke (D) or the fixture
-suite first and the live-harness attempt (E). If neither is, continue **enhancement wave 1**
-(ROADMAP §4): Auto Reminders landed (#80); next **custom split-inbox tabs**, then Instant Intro,
-then the speed budget — briefs first, Tier 1, one PR per item. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6
-via the `grok` CLI; diffs from committed SHAs; verify every finding against source before
-adopting — on the two plans, eleven were declined that way. Open for Jim: the two plan
-approvals with their named decisions; **P11's five-step QA** and the reply-composer pop-out
-path; `urlpattern`; the rebrand `com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests.
-Manual and open: #240 Task 6, F-4's live Done-when, E2 Done-when 2, the E2 part 3 live tests.
+**Next action: enhancement wave 1 item 2 — custom split-inbox tabs from smart labels + a
+Reminders tab + hide-empty** (ROADMAP §4), brief first, Tier 1, one PR per item; then Instant
+Intro, then the speed budget with the approved `@tanstack/react-virtual`. Jim's whole 2026-09-03
+queue is on `main`: #82 (queued-send reminders), #83 (PR D), #84 (PR E), #85 (`urlpattern` scope
+test). **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6 via the `grok` CLI;
+diffs from committed SHAs; verify every finding against source before adopting — today both
+legs' Highs on #80 were wrong, Gemini's Vite-7-default claim was wrong, and Grok's LIST-quoting
+claim was the opposite of the measured bytes. Open for Jim: **P11's five-step QA**; PR E's IMAP
+dev smoke; the rebrand `com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests; the
+findings PR E recorded (`List-Unsubscribe` never persisted on IMAP, a folded
+`Authentication-Results` shape truncated, `__dirname` in `vite.config.ts`). Manual and open:
+#240 Task 6, F-4's live Done-when, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests
+(Docker's engine on this Mac answers EOF; the app lives in a quarantine folder).
 
 **Seats:** one build seat. Don't merge Tier 2 on one pair of eyes.
 
