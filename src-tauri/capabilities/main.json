@@ -1,12 +1,9 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "enables the default permissions",
+  "identifier": "main",
+  "description": "The main window: the full grant, unchanged by the SPEC-P11 split. Windows that render untrusted email are in content.json; the splash page runs no script and is in no file.",
   "windows": [
-    "main",
-    "splashscreen",
-    "thread-*",
-    "compose-*"
+    "main"
   ],
   "permissions": [
     "core:default",

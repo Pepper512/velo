@@ -150,7 +150,7 @@ Tauri v2 desktop app: Rust backend + React 19 frontend communicating via Tauri I
 
 ### Multi-window support
 
-Thread pop-out windows via `ThreadWindow.tsx`. Entry point in `main.tsx` checks URL params (`?thread=...&account=...`) to render `<ThreadWindow />` or `<App />`. Window label format: `thread-{threadId}`. Tauri capabilities allow `thread-*` wildcard. Default size: 800x700. Splash screen window (400x300, no decorations, always on top) shown during initialization.
+Thread pop-out windows via `ThreadWindow.tsx`. Entry point in `main.tsx` checks URL params (`?thread=...&account=...`) to render `<ThreadWindow />` or `<App />`. Window label format: `thread-{threadId}`. Tauri capabilities: `thread-*` and `compose-*` get the narrowed `content.json` grant (SPEC-P11), and `main.tsx`'s routing shares one `windowKindFromSearch` rule with the components that hide "Open in new window" inside a pop-out. Default size: 800x700. Splash screen window (400x300, no decorations, always on top) shown during initialization.
 
 ### Startup sequence (App.tsx)
 
@@ -232,7 +232,7 @@ Tailwind CSS v4 — uses `@import "tailwindcss"`, `@theme {}` for custom propert
 
 Vitest + jsdom. Setup file: `src/test/setup.ts` (imports `@testing-library/jest-dom/vitest`). Config: `globals: true` (no imports needed for `describe`, `it`, `expect`). Tests are colocated with source files (e.g., `uiStore.test.ts` next to `uiStore.ts`). Zustand test pattern: `useStore.setState()` in beforeEach, assert via `.getState()`.
 
-172 test files across services (95), components (38), utils (17), stores (9), constants (4), hooks (3), config (3), router (2), test (1). Both numbers are measured by `npm run docs:check`, not maintained by hand.
+173 test files across services (95), components (38), utils (18), stores (9), constants (4), hooks (3), config (3), router (2), test (1). Both numbers are measured by `npm run docs:check`, not maintained by hand.
 
 ## Database
 
@@ -245,7 +245,7 @@ Key tables (37 total): `accounts` (with `provider` "gmail_api"|"imap", IMAP/SMTP
 - **Tauri SQL plugin config**: `preload` in tauri.conf.json must be an array `["sqlite:velo.db"]` — NOT an object/map
 - **Transactions are pinned in Rust (SPEC-240)**: the plugin serves every `execute`/`select` from a pool of up to ten connections, so a transaction issued as separate IPC calls is not on one connection. `withTransaction(fn)` in `db/connection.ts` holds one connection in Rust (`BEGIN IMMEDIATE`, 30 s idle watchdog, one open transaction at a time) and every statement must go through the `DbExecutor` handle passed to `fn` — a helper that calls `getDb()` inside the callback is **outside** the transaction. Query helpers take a trailing optional `db?: DbExecutor` for this
 - **Tauri Emitter trait**: Must `use tauri::Emitter;` to call `.emit()` on windows
-- **Tauri capabilities**: Any new plugin needs explicit permissions added to `src-tauri/capabilities/default.json`. Windows allow `"main"`, `"splashscreen"`, and `"thread-*"` wildcard
+- **Tauri capabilities (SPEC-P11)**: two files. `src-tauri/capabilities/main.json` is the main window's full grant; `content.json` is what `thread-*` and `compose-*` windows demonstrably call (no webview creation, no `fs:remove`, no notifications/badge/autostart/shortcuts/updater/process/os). The splash page runs no script and is in neither. A new plugin goes in `main.json`, and in `content.json` only if a pop-out calls it — `src/config/capabilities.test.ts` pins both files and fails on a permission that leaks into content. Any change here is Tier 2
 - **Tauri window config**: Custom titlebar — macOS uses `titleBarStyle: "Overlay"`, Windows/Linux removes decorations programmatically in Rust setup. 1200x800 default, 800x600 minimum. Splash screen: 400x300, no decorations, center, always on top
 - **Single instance**: `tauri-plugin-single-instance` must be first plugin registered. Forwards args for deep linking
 - **Minimize-to-tray**: Use `.on_window_event()` on the Builder, not `window.on_window_event()`

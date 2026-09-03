@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CSSTransition } from "react-transition-group";
+import { isPopoutWindow } from "@/utils/windowKind";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -505,13 +506,17 @@ export function Composer() {
             >
               {isFullpage ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
-            <button
-              onClick={handlePopOutComposer}
-              className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
-              title="Open in new window"
-            >
-              <ExternalLink size={14} />
-            </button>
+            {/* Not inside a pop-out: it is already a window, and the content
+                grant has no webview creation (SPEC-P11). */}
+            {!isPopoutWindow() && (
+              <button
+                onClick={handlePopOutComposer}
+                className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
+                title="Open in new window"
+              >
+                <ExternalLink size={14} />
+              </button>
+            )}
             <button
               onClick={closeComposer}
               className="text-text-tertiary hover:text-text-primary text-lg leading-none p-1"

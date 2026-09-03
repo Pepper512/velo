@@ -22,6 +22,7 @@ import { AiTaskExtractDialog } from "@/components/tasks/AiTaskExtractDialog";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
 import { RawMessageModal } from "./RawMessageModal";
+import { isPopoutWindow } from "@/utils/windowKind";
 
 interface ThreadViewProps {
   thread: Thread;
@@ -393,7 +394,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
           onForward={handleForward}
           onPrint={handlePrint}
           onExport={handleExport}
-          onPopOut={() => handlePopOut(thread)}
+          // Inside a pop-out the thread is already in its own window, and the
+          // content grant has no webview creation (SPEC-P11): no button.
+          onPopOut={isPopoutWindow() ? undefined : () => handlePopOut(thread)}
           onToggleContactSidebar={toggleContactSidebar}
           onToggleTaskSidebar={() => useUIStore.getState().toggleTaskSidebar()}
         />

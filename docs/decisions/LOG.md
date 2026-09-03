@@ -1374,3 +1374,30 @@
   spelling. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-final-raw.md`. Four passes
   on this PR; the reviewers stopped finding new interleavings at the identity edge cases,
   which is where a fifth pass would look.
+- **2026-09-03 — P11 built (SPEC-P11, PR #75), Tier 2**, on Jim's roadmap instruction. Plan
+  (`docs/briefs/2026-09-01-batch-g-p11-capabilities.md`, rewritten from the 2026-09-01 draft
+  and re-grepped at `2d764a9`, threat pass and rollback) committed and the PR opened **before
+  any code**. **What the re-grep changed:** the draft said only `App.tsx` opens pop-outs;
+  `ThreadView` and `Composer` both call `new WebviewWindow` and both render inside the pop-out
+  roots, so dropping `core:webview:allow-create-webview-window` from content windows needed
+  the two "Open in new window" buttons hidden inside a pop-out (where the thread's is a no-op
+  on itself and the composer's would spawn a copy and close itself). Everything else on the
+  draft's removal list was confirmed main-only by import (window controls in `TitleBar`,
+  badge, notifications, autostart, shortcuts, deep-link, updater, process, `os`,
+  `fs:remove`); the splash page runs no script. **Decisions:** two files — `main.json` byte for
+  byte today's grant, `content.json` for `thread-*`/`compose-*` (`core:default`, `sql` with
+  execute, `opener`, `dialog`, `fs` under `$APPDATA`, `http` with the identical scope); no
+  file for `splashscreen`; one `windowKindFromSearch` rule shared by `main.tsx` and the two
+  button gates. **Kept, with reasons:** `sql:allow-execute` (migrations, draft auto-save) and
+  `http` (unsubscribe POST, Ollama) — the next narrowing is unsubscribe → Rust and Ollama →
+  `ai_fetch`, own brief. **Not done, by design:** routing window creation through a Rust
+  command (would let `main` drop webview creation too — own brief); the iframe sandbox (P9).
+  **Trade named for Jim:** popping the reply composer out of a thread pop-out is no longer
+  offered. **Jim's five-step manual QA is open, not done** — the draft gated the merge on it;
+  the 2026-09-03 roadmap instruction says merge on green and record it as open (the fork
+  ships nothing, EX-007, so the blast radius is a dev build on this machine). TDD:
+  `capabilities.test.ts` rewritten (partition, subset, forbidden by id and plugin prefix,
+  required, identical `http` scope in both files with the SPEC-280 assertions run against
+  both, `main` equal to a literal snapshot) and `windowKind.test.ts`, both red before the
+  files existed; `cargo check --locked` regenerated `gen/schemas/capabilities.json` with the
+  two grants (tauri-build validates identifiers). No dependency, no schema, CSP untouched.

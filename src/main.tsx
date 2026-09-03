@@ -5,14 +5,15 @@ import { router } from "./router";
 import ThreadWindow from "./ThreadWindow";
 import ComposerWindow from "./ComposerWindow";
 import "./styles/globals.css";
+import { windowKindFromSearch } from "./utils/windowKind";
 
-const params = new URLSearchParams(window.location.search);
-const isThreadWindow = params.has("thread") && params.has("account");
-const isComposerWindow = params.has("compose");
+// One rule for which window this is, shared with the components that hide
+// "Open in new window" inside a pop-out (SPEC-P11).
+const windowKind = windowKindFromSearch(window.location.search);
 
 function Root() {
-  if (isThreadWindow) return <ThreadWindow />;
-  if (isComposerWindow) return <ComposerWindow />;
+  if (windowKind === "thread") return <ThreadWindow />;
+  if (windowKind === "compose") return <ComposerWindow />;
   return <RouterProvider router={router} />;
 }
 

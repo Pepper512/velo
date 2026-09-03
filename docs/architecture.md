@@ -113,7 +113,8 @@ velo/
 ├── src-tauri/
 │   ├── src/                  # Rust backend (tray, OAuth, splash, single-instance,
 │   │   │                     # IMAP client, SMTP client, Tauri commands)
-│   ├── capabilities/         # Tauri v2 permissions
+│   ├── capabilities/         # Tauri v2 permissions: main.json (main window),
+│   │   │                     # content.json (thread-*/compose-* pop-outs) — SPEC-P11
 │   └── icons/                # App icons (all platforms)
 ├── docs/                     # Documentation
 ├── package.json
