@@ -13,8 +13,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 const { mockInvoke } = vi.hoisted(() => ({ mockInvoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mockInvoke }));
 
+// The session manager registers a window-event listener on first use
+// (SPEC-E2-3 REQ-3); that goes through the event plugin, not an IMAP command,
+// and must not show up among the `invoke` calls these tests count.
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock("../db/accounts", () => ({ getAccount: vi.fn() }));
-vi.mock("./imapConfigBuilder", () => ({ buildImapConfigWithFreshToken: vi.fn() }));
+vi.mock("./imapConfigBuilder", () => ({
+  buildImapConfigWithFreshToken: vi.fn(),
+  imapIdentityOf: () => ({ username: "user@example.com", host: "imap.example.com" }),
+}));
 
 import { getAccount } from "../db/accounts";
 import { buildImapConfigWithFreshToken } from "./imapConfigBuilder";

@@ -308,8 +308,9 @@ export async function imapSessionClose(sessionId: string): Promise<void> {
 export async function imapSessionsInvalidate(
   username: string,
   host: string,
+  nonce: string,
 ): Promise<void> {
-  return invoke<void>('imap_sessions_invalidate', { username, host });
+  return invoke<void>('imap_sessions_invalidate', { username, host, nonce });
 }
 
 /**

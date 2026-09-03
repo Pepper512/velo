@@ -1244,3 +1244,133 @@
   recorded for follow-up:** disable "Trust this sender" when SPF/DKIM failed (a spoofed
   `From:` could allowlist a real address); a trust from one message should dismiss sibling
   banners in the thread. Raw output in `docs/reviews/2026-09-03-pr71-gemini-raw.md`.
+- **2026-09-03 — E2 part 3 built (SPEC-E2-3, PR #73), Tier 2**, on Jim's roadmap
+  instruction and "go". Plan (`docs/briefs/2026-09-03-e2-part3-pool-carry.md`, threat pass
+  and rollback) committed and the PR opened **before any code**. **What the re-grep found
+  beyond the carry list:** (1) the carry item said a bump could evict a session opened on
+  the new credential (one wasted login) — the other interleaving is worse: a bump landing
+  during `imap_session_open`'s one round trip inserts an entry tagged with the *retired*
+  generation, authenticated with whichever credential the frontend had, and it survives
+  until the next bump or reap; (2) `imap_session_close` and `imap_sessions_invalidate`
+  awaited an **unbounded** LOGOUT while the reaper and exit hook bounded theirs; (3) the
+  cap's victim and a clean release into a vanished entry were dropped without LOGOUT, and
+  so was a fresh session refused by `TooManySessions`. **Decisions:** the pool owns
+  `Option<S>` (no `Arc`, no async mutex) and moves the session into the guard and back;
+  every path that removes a *clean* session from the map returns it to the caller —
+  `insert` returns the cap's victim, `release_ok` returns an orphan, refusals hand the
+  session back with the error (`Result<Option<S>, (PoolError, S)>`); one `logout(session)`
+  helper, 3 s budget, replaces `logout_arc`; `with_pooled_session` hands the operation
+  `&mut ImapSession` through a `BoxFuture` (one allocation per command, nothing beside the
+  round trip), guard still held across the await; **`StaleCredential`** is a new pool error
+  and `velo:pool:StaleCredential` sentinel — `insert` refuses any generation that is not
+  current, the open LOGOUTs the refused session, the frontend rebuilds the config and opens
+  once more; `bump_credential_version` filters `< next` explicitly; the frontend waits for
+  its own pending invalidation before opening; Rust emits `velo-imap-sessions-invalidated`
+  `{username, host}` after evicting and each window's session manager forgets matching
+  ids (listener registered lazily on first `withSession`, because pop-outs mount their own
+  roots); session ids are refused before the map unless exactly 32 lowercase hex. **Kept
+  as designed:** error / panic / cancellation still drop the socket without LOGOUT (module
+  doc says why). **Live halves:** Done-when 9 and 10 are `#[ignore]` tests against the
+  Dovecot harness (`mod live_tests`, README section); **Docker is down on this machine, so
+  they compile but were not run** — recorded, not claimed. Done-when 2 stays manual. TDD:
+  pool tests 19 → 31 plus 2 in `commands.rs` (Rust 159 → 171, 3 ignored); nine
+  `sessionManager` tests, seven of which were run against the committed module first and
+  failed there. `poolBoundary.test.ts` unchanged in substance (one mock line for the event
+  plugin). Gates: 172 files / 2,258 tests, tsc, clippy, graph, docs. **Process note:** the
+  format-on-save hook runs `rustfmt` on any `.rs` file edited, and the crate is not
+  rustfmt-clean — a stray `cargo fmt` reformatted twelve untouched files, which were
+  restored, and `commands.rs` was rebuilt from the committed file by script so the reviewer
+  diff carries only the change. No dependency, no capability, no schema.
+- **2026-09-03 — PR #73 (E2 part 3) review, first leg (Tier 2).** Gemini 3.7 Flash via
+  `agy`, diff `5ae7a7c..6d4b49a`: CHANGES REQUESTED (1H 1M 2L 1N); its own threat matrix
+  passed ownership, cancellation, the `StaleCredential` interleaving, the once-only reopen,
+  the id validator and the event payload. **Adopted, all five.** H1 —
+  `invalidateAccountCredentials` returned early when this window had never opened a session
+  for the account, so a password change made in the Settings window before its first sync
+  never reached the pool and the sessions other windows held kept the revoked credential.
+  **Pre-existing since #39** (the old test even asserted the early return) but squarely
+  inside REQ-2's guarantee: the identity now comes from the account record through a new
+  `imapIdentityOf(account)` in `imapConfigBuilder.ts`, which `buildImapConfig` uses too so
+  the two cannot drift; no token refresh, no password; an account that no longer exists is
+  the only no-op (two tests replace the old one). M2 — a rejected `listen` left the
+  once-flag set, locking the window out of cross-window invalidation for its lifetime: the
+  flag is reset in the `.catch` (test through a fresh module instance). L3 — the refused
+  session's LOGOUT in `imap_session_open` is spawned, not awaited, because the frontend is
+  waiting on that error to reopen. L4 — `imap_sessions_invalidate` LOGOUTs the evicted
+  sessions concurrently (`join_all`), as at exit, so two slow servers cost one budget before
+  the other windows hear about it. N5 — the `Drop` comment named the wrong path. Raw output
+  in `docs/reviews/2026-09-03-pr73-gemini-raw.md`.
+- **2026-09-03 — PR #73 (E2 part 3) review, second leg (Tier 2).** Grok 4.6 via the `grok`
+  CLI on the same diff `5ae7a7c..6d4b49a` (~14 minutes): CHANGES REQUESTED (1H 1M 6L 2N).
+  Its ownership, cancellation, HRTB, first-open and once-only-retry checks passed. Two
+  findings duplicated Gemini's (M2 = Gemini H1, L3 = Gemini M2 plus "await the listener
+  before the first open", which was adopted on top). **Adopted:** **H1 — the dual race.**
+  A config built before another window's bump whose Rust command *starts after* it reads
+  the current generation, connects with the retired credential (an access token that still
+  logs in, in the OAuth-revocation case), and `insert` accepts it — `StaleCredential` can
+  only see a generation that moved *during* the command. Real, and the mirror of the
+  interleaving the build had closed. Closed on the frontend: a per-account invalidation
+  epoch, bumped by this window's own invalidation and by another window's event; the open
+  snapshots it before building the config, and if it moved when Rust answers, the id is
+  closed (Rust LOGOUTs it) and the open retried once with a rebuilt config; the identity
+  is recorded *before* the open so a first-ever open can be matched to the event; the
+  broadcast now carries the caller's nonce (bounded at 64 chars) so the invalidating
+  window ignores its own echo instead of reopening for nothing. L4 — the event is emitted
+  right after the bump, before the LOGOUTs, and a failed broadcast is logged. L6 — `insert`
+  shape-checks the id in every build and refuses an id already in the map (`BadId`, a new
+  pool error) rather than overwriting the sitting session inside the lock. L7 — the
+  listener drops a payload that is not `{username, host, nonce}` strings. N9 — the wait on a
+  pending invalidation is bounded at 8 s. N10 — the live folder-isolation test reads *back*
+  from A after B (own marker per folder; UID list unchanged). **Recorded as accepted
+  residuals in the spec's threat pass, not changed:** L5 — spawned LOGOUTs are best-effort
+  and outside the exit drain (a join set for three rare paths is not worth the machinery;
+  documented on `spawn_logout`); L8 — an in-flight operation completes against a socket
+  the invalidation meant to kill, then the orphan is logged out; the alternative Grok
+  offered, failing `release_ok` after a bump, would report a completed server-side side
+  effect as a failure and was **declined**; L7's second half — any renderer can emit the
+  event, which is a cache-drop DoS bounded by the cap, not an authz bypass. Raw output in
+  `docs/reviews/2026-09-03-pr73-grok-raw.md`. **Independent samples, again:** Gemini found
+  the listener lock-out and the sequential LOGOUTs; Grok found the dual race, the overwrite
+  and the test's missing half; neither found the other's.
+- **2026-09-03 — PR #73 (E2 part 3) review, third leg on the follow-up delta only
+  (Tier 2).** Gemini 3.8 Flash High via `agy` on `6d4b49a..b10d912` — the epoch and nonce
+  logic was new code no reviewer had seen: CHANGES REQUESTED (2H 2M 2L 1N). **All seven
+  adopted.** H1 — the retry reused the `DbAccount` row read before the open, and a
+  password-based account carries its credential *in that row*, so the "rebuilt" config on a
+  retry rebuilt the retired password: each attempt now re-reads the row. H2 — the identity
+  was recorded after `await buildImapConfigWithFreshToken`, which can refresh a token over
+  the network, so an event landing during the build on a window's first open was unmatched
+  and the epoch never moved: the identity is now recorded first and synchronously (from
+  `imapIdentityOf`, which does not depend on the credential), then the epoch snapshot, then
+  the row re-read — an event before the snapshot is in the snapshot and ahead of the read,
+  an event after it is caught by the compare. M3 — two local accounts on one IMAP identity:
+  Rust evicts by identity, so a local invalidation now forgets and bumps every matching
+  local account (`forgetIdentity`, shared with the event handler). M4 — after the 8 s wait
+  gave up, the stalled invalidation's late echo carried this window's own nonce and was
+  skipped, leaving a dead id cached (one `NoSuchSession`, self-healing): on timeout the
+  nonce stops counting as own. L5 — an account without an IMAP host made `imapIdentityOf`
+  throw out of `invalidateAccountCredentials`; guarded (only IMAP accounts call it today).
+  L6 — a rejected invalidate left its nonce in the own-set forever; removed on rejection.
+  N7 — the in-flight test resolved the config build synchronously and so could not have
+  seen H2; a test with the build held open now does. **Jim, mid-review: the Gemini leg is
+  3.8 Flash High from here on**, not 3.7 — recorded in memory; the final full-diff pass on
+  this PR runs on it. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-delta-raw.md`.
+- **2026-09-03 — PR #73 (E2 part 3) review, fourth pass: the whole diff at `3dda5d6`
+  on Gemini 3.8 Flash High.** CHANGES REQUESTED (1H 2M 1L 1N). **Declined, with the
+  reason verified:** H1 claimed `Instant::duration_since` in `reap` panics when a worker
+  stamps `last_used` between the `Instant::now()` and the lock — it has been saturating,
+  not panicking, since Rust 1.60 (the crate's MSRV is 1.89, CI-checked), and the line is
+  #37's, untouched by this PR. **Adopted:** M2 — the retry carried the account snapshot,
+  not the re-read row, and re-stamped the identity from the snapshot: the row is now the
+  truth for the identity and is what the retry carries. M3 — pending invalidations were
+  keyed by account id while Rust evicts by identity, so a sibling account on the same
+  username and host did not wait and could cache an id the bump had just evicted (dead,
+  not stale — one `NoSuchSession`): keyed by identity now, and the open looks up by the
+  account's identity (test). L4 — the Rust doc comment still said the event fires "once the
+  LOGOUTs are done" (stale since Grok L4); corrected, and the frontend's timeout comment now
+  says plainly that a late echo can only come from a command that has not run yet. N5 —
+  hostnames are case-insensitive (RFC 4343) and the pool keys on the string:
+  `imapIdentityOf` lower-cases the host, which flows into the config too, so Rust sees one
+  spelling. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-final-raw.md`. Four passes
+  on this PR; the reviewers stopped finding new interleavings at the identity edge cases,
+  which is where a fifth pass would look.

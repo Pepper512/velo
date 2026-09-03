@@ -124,6 +124,31 @@ hides MOVE along with UIDPLUS, so that server takes the COPY fallback, whose
 its own messages and deletes its own destination folder; the `\Deleted` copy
 it leaves in INBOX on `:11144` is harmless in a disposable server.
 
+## E2 part 3: the pool against a real server (automated against this harness)
+
+SPEC-E2-3 carries the two halves of E2's Done-when that a unit test on the pool's
+generic session type cannot settle. Both are `#[ignore]` tests in
+`src-tauri/src/commands.rs` (`mod live_tests`) and run against the UIDPLUS server:
+
+```bash
+cd docs/testing/dovecot && docker compose -f compose-arm64.yml up -d --build
+cd ../../../src-tauri && cargo test --locked -- --ignored live_dovecot --nocapture
+```
+
+- **Done-when 9, folder isolation** (`live_dovecot_one_pooled_session_isolates_folders`):
+  one pooled session lists `INBOX`, creates and appends into `E2Iso<pid>`, then lists and
+  fetches from that folder — through the real `with_pooled_session` guard. **Pass:** the
+  fetched body carries the marker appended to `E2Iso<pid>`, and the test prints both UID
+  lists. The folder is left behind; it is a disposable server.
+- **Done-when 10, live half** (`live_dovecot_reaped_session_is_logged_out_within_budget`):
+  a session the reaper hands out is logged out and the server answers inside
+  `LOGOUT_TIMEOUT` (3 s). **Pass:** `Ok(Ok(()))` from the bounded `logout()`, and the id
+  is `NoSuchSession` afterwards.
+
+Done-when 2 (a delta sync issues at most two `imap_session_open` calls) is an app-level
+count and stays manual: run the app with debug logging against the harness account and
+count the opens across one delta sync.
+
 ## F-4: vanished-UID reconciliation, end to end (manual, needs the running app)
 
 The reconciliation logic is proved on the SQLite harness (`reconcilePass.test.ts`,
