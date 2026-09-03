@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `91e01f6`** (#90, SPEC-II Instant Intro — the last commit on `main` that changed
-  `src/` or `src-tauri/`). **The only SHA this file pins.** `git log --oneline 91e01f6..origin/main` —
+- **Code pin: `ca4ba28`** (#92, SPEC-SB the speed budget — the last commit on `main` that changed
+  `src/` or `src-tauri/`). **The only SHA this file pins.** `git log --oneline ca4ba28..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
@@ -39,9 +39,11 @@
     is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
     `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
     reviewer diff; `pool.rs` is clean and safe to Edit.
-- **State on `main` @ `91e01f6`:** frontend **180** files / **2,414** tests · Rust **206** +
+- **State on `main` @ `ca4ba28`:** frontend **185** files / **2,458** tests · Rust **206** +
   4 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
-  import cycles. **Dependencies changed this session, each on Jim's explicit approval:** the
+  import cycles. **One dependency added since the last pin, pre-approved:**
+  `@tanstack/react-virtual` 3.14.10 exact (LOG.md 2026-09-02 decision 3; SLSA provenance on it
+  and `@tanstack/virtual-core`; no transitive deps). **Dependencies changed this session, each on Jim's explicit approval:** the
   PR D and PR E majors (TypeScript 7.0.2, Vite 8.2.2, plugin-react 6.1.1; mail-parser 0.11.8,
   async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4, with `hashify` 0.2.9 the one pre-1.0
   transitive addition) and `urlpattern` 0.3.0 as a dev-dependency (#85). Nothing else.
@@ -56,9 +58,38 @@ is complete — PR D (#83) and PR E (#84) built from their approved plans**, the
 reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 is three
 items in: Auto Reminders (#80), **custom split-inbox tabs (#87)** and **Instant Intro (#90)**,
 with the follow-up reminder insert repaired on the way (#88 — it had never worked since
-upstream's migration v6). **Next in §4 of the roadmap: the speed budget** (list virtualization
-with the already-approved `@tanstack/react-virtual`, body prefetch, reduce-effects; brief first,
-Tier 1), then the Tier 2 partial-unique-index migration from #88.
+upstream's migration v6). **Enhancement wave 1 is now complete: the speed budget landed as
+#92.** **Next: the Tier 2 partial-unique-index migration from #88** (plan, threat pass and
+rollback committed and approved before code), then wave 2 (Share Availability, Instant Event,
+list summaries).
+
+**SPEC-SB landed as #92 (`ca4ba28`) — the speed budget, in three commits.** Brief
+`docs/briefs/2026-09-03-speed-budget.md` (Tier 1, committed before code; one correction made
+before any code — the first draft blamed the follow-up checker for a needless reload every
+minute, but its query is due-only, so every reminder it touches changes state).
+**SB-1 Reduce effects:** the existing "Reduce motion" toggle now also removes every
+`backdrop-filter` (the glass classes, the Tailwind utilities, the composer overlay's animated
+blur) and the hover/press/stagger animations, and defaults **on** for Linux when nothing is
+stored — a session value, so the user's first touch of the toggle is what persists
+(`services/effects/reduceEffects.ts`, `uiStore.restoreReduceMotion`). **SB-2 Open instantly:**
+`services/threads/messageCache.ts` is a 30-entry stale-while-revalidate cache of
+`getMessagesForThread`, cleared on `velo-sync-done`, generation-gated so a read in flight
+across a sync cannot repopulate it; `EmailList` warms the next three and previous one threads
+150 ms after a selection settles; `ThreadView` paints the cached copy on its first render, so
+`j`/`k` shows messages with no skeleton. **SB-3 Virtualized list:** `EmailList` renders only
+the rows in view over a flat item model (`services/inbox/listItems.ts`: bundle headers,
+expanded children, threads with the pinned divider computed on the visible sequence — fixing a
+latent bug — and the two footers), with `@tanstack/react-virtual` 3.14.10. **Five review
+rounds, nine legs; every round found a real defect in the previous round's fix**, three of them
+the same shape: something acting on the frame after a folder switch, when the previous folder's
+rows are still mounted under the new key. The settled rule: the loader tags what it loaded
+(`staggerSet.folder`, `loadedFolder`, a load sequence number) and nothing acts on rows that
+belong to another folder. **Recorded, not fixed:** two `loadThreads` calls still race on a fast
+folder switch and the older can land its *rows* last (pre-existing); estimates ignore the root
+font scale until measurement corrects them; `ResizeObserver` is stubbed as a no-op in the tests,
+so re-measure on density or pane changes is untested. **Jim's glance is open:** on Linux, first
+launch should show flat panels and a quiet WebKitWebProcess; anywhere, scroll a large folder
+and `j` to the bottom, then drag a row onto a label.
 
 **SPEC-II landed as #90 (`91e01f6`) — Instant Intro.** Brief
 `docs/briefs/2026-09-03-instant-intro.md` (Tier 1, committed before code). `b` on a thread, or
@@ -225,6 +256,7 @@ merged #73 under the standing rule.
 
 | PR | Merged | What |
 |---|---|---|
+| #92 `ca4ba28` | build seat | **SPEC-SB.** The speed budget in three commits: Reduce effects (every backdrop-filter and the hover/stagger animations, on by default on Linux), a 30-entry stale-while-revalidate message cache warmed for the selected thread's neighbours, and the virtualized list over a flat item model with `@tanstack/react-virtual` 3.14.10; five review rounds, nine legs, each round finding a real defect in the previous fix |
 | #90 `91e01f6` | build seat | **SPEC-II.** Instant Intro: `b` / handshake → reply-all with the introducer in Bcc, own addresses out, "Thanks {name}, moving you to Bcc." above the quote; pure module + 28 tests, `b` dispatch (2), action-bar button (3), store `fromEmail` on open (1); three review passes, two Highs declined against source, five findings adopted |
 | #88 `3b63d73` | build seat | **SPEC-FUR.** Follow-up reminders could never be inserted (upstream's `ON CONFLICT` upsert aimed at a plain index); select-then-update-or-insert in one pinned transaction, on the SQLite harness; sibling audit of all 19 ON CONFLICT statements clean; partial unique index recorded as the Tier 2 follow-up |
 | #87 `48acaf7` | build seat | **SPEC-SIT.** Custom split-inbox tabs: a pure module with a Zod schema at the settings boundary, category/label/Reminders tabs, hide-when-empty, a requested tab never hidden, the strip by visible tab, the list by tab kind, a Settings editor; 25 pure + SQLite cases; two legs, both Highs on cross-account labels declined against the label store |
@@ -288,10 +320,10 @@ merge can still be wrong — including ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `91e01f6`** (#90,
-SPEC-II; the only SHA pinned — `git log --oneline 91e01f6..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 180 files / 2,414 tests / Rust 206 + 4 ignored · 28 migrations ·
-npm audit 0 · no dependency added.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `ca4ba28`** (#92,
+SPEC-SB; the only SHA pinned — `git log --oneline ca4ba28..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 185 files / 2,458 tests / Rust 206 + 4 ignored · 28 migrations ·
+npm audit 0 · one dependency added, pre-approved: `@tanstack/react-virtual` 3.14.10 exact.
 
 **Jim confirmed those approvals in-session on 2026-09-03 and the build seat ran his prompt to the
 end:** SPEC-QSR (#82), **PR D (#83, six rebase-merged commits)**, **PR E (#84, seven rebase-merged
@@ -299,35 +331,44 @@ commits)** and **SPEC-280-U (#85, the `urlpattern` dev-dependency test)** are on
 Approval lines are filled in. Toolchain now: TypeScript 7.0.2 (native), Vite 8.2.2, mail-parser
 0.11.8, async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4 with native-tls pinned.
 
-**Next action: enhancement wave 1 item 4 — the speed budget** (ROADMAP §4: list virtualization
-with the already-approved `@tanstack/react-virtual`, body prefetch, reduce-effects; #232), brief
-first, Tier 1, one PR; then the Tier 2 follow-up from #88 (a partial unique index on
-`follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, a migration — plan, threat
-pass and rollback before code). Landed since the last pin: **#90 Instant Intro** (`91e01f6`: `b`
-or the handshake → reply-all with the introducer in Bcc and "Thanks {name}, moving you to Bcc.";
-`openComposer` takes `fromEmail`; `services/composer/instantIntro.ts` is the pure rule). Before
-that, same day: #87 split-inbox tabs, #88 the reminder-insert repair, #82, #83 (PR D), #84
-(PR E), #85. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6 via the
-`grok` CLI; diffs from committed SHAs; verify every finding against source — on #90 both legs'
-"the composer clobbers From" findings were wrong (`Composer.tsx:216` guards on `!fromEmail`),
-their alias-race and reason-string findings were right, and **the follow-up pass on the fix
-delta found two more real holes** (an account-switch render tear; the key path's own `??`
-no-reply guard) — review the new logic every time. Open for Jim: **P11's five-step QA**; PR E's
-IMAP dev smoke; a glance at the split tabs and at `b` on an introduction thread; the rebrand
-`com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests; the findings PR E recorded
-(`List-Unsubscribe` never persisted on IMAP, a folded `Authentication-Results` shape truncated,
-`__dirname` in `vite.config.ts`); **#90's recorded gaps** (Shift-letter rebinds can never fire —
-recorder vs dispatcher; `resolveFromAddress` ignores display-name chips; four hand-written
-reply-all copies to consolidate onto `replyAllRecipients`). Manual and open: #240 Task 6, F-4's
-live Done-when, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests (Docker's engine on
-this Mac answers EOF; the app lives in a quarantine folder).
+**Next action: the Tier 2 follow-up from #88** — a partial unique index on
+`follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, a migration: plan, threat
+pass and rollback committed **and approved before any code**, full-diff review, two legs. Then
+wave 2 (ROADMAP §4): Share Availability in the composer, Instant Event, one-line list summaries.
+**Enhancement wave 1 is complete.** Landed since the last pin: **#92 the speed budget**
+(`ca4ba28`) — Reduce effects (every `backdrop-filter` and the hover/stagger animations, on by
+default on Linux), a 30-entry stale-while-revalidate message cache warmed for the selected
+thread's neighbours (no skeleton on `j`/`k`), and the virtualized list over a flat item model
+with `@tanstack/react-virtual` 3.14.10. Before it, same day: #90 Instant Intro, #87 split-inbox
+tabs, #88 the reminder-insert repair, #82, #83 (PR D), #84 (PR E), #85. **Review legs:** Gemini
+**3.8 Flash High** via `agy` **and** Grok 4.6 via the `grok` CLI; diffs from committed SHAs;
+verify every finding against source — and **review every fix you write**: #92 took five rounds
+and *each one found a real defect in the previous round's fix*, three of them the same shape
+(acting on the frame after a folder switch, when the previous folder's rows are still mounted
+under the new key). Wrong-but-confident findings were common too: "the composer clobbers From"
+(#90), "`readPlatform` never awaits" (plugin-os is synchronous), "split-mode tab changes never
+re-run the loader" (the category is in its deps). Open for Jim: **P11's five-step QA**; PR E's
+IMAP dev smoke; glances at the split tabs, at `b` on an introduction thread, and at the speed
+budget on Linux; the rebrand `com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests; the
+findings PR E recorded (`List-Unsubscribe` never persisted on IMAP, a folded
+`Authentication-Results` shape truncated, `__dirname` in `vite.config.ts`); **#90's gaps**
+(Shift-letter rebinds can never fire — recorder vs dispatcher; `resolveFromAddress` ignores
+display-name chips; four hand-written reply-all copies to consolidate onto
+`replyAllRecipients`); **#92's gaps** (two `loadThreads` calls still race on a fast folder
+switch and the older can land its rows last; row estimates ignore the root font scale until
+measurement corrects them; `ResizeObserver` is a no-op in the tests, so re-measure on density
+or pane changes is untested; `getThreadLabelIds` is an N+1 per page; "Select all" selects the
+store while the count shows the filtered list). Manual and open: #240 Task 6, F-4's live
+Done-when, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests (Docker's engine on this
+Mac answers EOF; the app lives in a quarantine folder).
 
 **Seats:** one build seat. Don't merge Tier 2 on one pair of eyes.
 
-**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **five** worktrees
+**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **six** worktrees
 (`f1-decisions` locked — unlock first; `f2-email-links-open`; `f5-move-hygiene`;
-`e2-part3-pool-carry`, locked, which also carried P11; `instant-intro`, this session's, everything
-in it landed via #90 and this docs PR) · glance at the vault edits to `SPEC-F-4`.
+`e2-part3-pool-carry`, locked, which also carried P11; `instant-intro`; `speed-budget`, this
+session's — everything in the last two landed via #90, #92 and their docs PRs) · glance at the
+vault edits to `SPEC-F-4`.
 
 **Verify first:** `git worktree list` · `gh pr list` · `ListAgents` · `gh run list --branch main --limit 2`.
 
