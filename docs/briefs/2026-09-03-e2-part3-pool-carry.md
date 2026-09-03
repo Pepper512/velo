@@ -11,8 +11,8 @@
   path (a named Tier-2 area). Plan, threat pass and rollback in the PR before code; two
   review legs. No dependency, no capability, no schema.
 - **Base:** `main` @ `5ae7a7c` (code pin `1b18160`, #71). Citations grepped at `5ae7a7c`.
-- **Status:** approved (plan) — branch `worktree-e2-part3-pool-carry`, PR opened with this
-  file before any code.
+- **Status:** landed `1116348` (#73, 2026-09-03) — four review passes, dispositions in
+  LOG.md; the two live Dovecot tests compile but were not run (Docker down).
 - **Source:** PR #39's "Scope — what this does NOT close" (quoted below), its review thread
   (finding 3), ADR-003, the E2 brief `docs/briefs/2026-09-01-e2-p15-session-pooling.md`,
   and HANDOFF's carry list. Jim's 2026-09-03 instruction: *"Then E2 part 3 … Tier 2 (Rust

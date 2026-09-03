@@ -4,178 +4,92 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `1b18160`** (#71, F-3 phishing interstitial — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 1b18160..origin/main` —
+- **Code pin: `1116348`** (#73, E2 part 3 — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 1116348..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
-  `gh pr list --repo Pepper512/velo`. #43–#47, #50–#71 all landed 2026-09-02/03.
-- **Branches:** `main` plus the two dead worktree branches below. Remote branches for #43 and #44
-  were deleted at merge; their local copies linger only inside this session's worktree.
+  `gh pr list --repo Pepper512/velo`.
+- **Branches:** `main` plus the branches pinned by the dead worktrees below, plus **about twenty
+  merged feature branches** (`f297-bcc-strip`, `f240-pinned-tx`, `docs-post-*`, …) that nobody
+  pruned after #43–#71. All merged; `git branch -d` is safe on every one of them. A chore, not a
+  risk.
 - **Remotes:** `origin` = `github.com/Pepper512/velo` (fork, protected `main`) · `upstream` = `avihaymenahem/velo`
 - **Workspace:** the repo is `Velo-Build/velo/`; the workspace root holds only a pointer `CLAUDE.md`. Always `cd velo`.
-- **Seats, as of 2026-09-02 08:00 UTC.** One build seat (this session ran as **Fable 5.1** under
-  Jim's second delegation window, 06:12–08:12 UTC — LOG.md records the window, its terms, and the
-  two deviations it named). Name **seats, never session ids**, and run **`ListAgents`** before
-  assuming a peer is live.
+- **Seats, as of 2026-09-03.** One build seat (this session ran as **Fable 5.1**, Jim present
+  and directing: "go", the platform question, the review-model change). Name **seats, never
+  session ids**, and run **`ListAgents`** before assuming a peer is live.
   - **Merge permission** is with the build seat under the standing rule (green on the exact SHA,
-    up to date, no unresolved conversation) — exercised on #43 this session.
-  - **Independent review = two cross-vendor legs this session:** Gemini 3.7 via `agy` **and Grok
-    4.6 via the `grok` CLI** (`grok -m grok-4.6 --disable-web-search --prompt-file …`). Grok is a
-    **standing second Tier-2 leg since ADR-004** (Jim, 2026-09-02) — run both legs on every Tier-2
-    PR. Both legs found real defects on every PR this day that the author missed, and they found
-    *different* ones (LOG.md; on #50 Grok's three HIGHs were all real while Gemini approved).
-    `agy` gotchas unchanged: flags before `--print`, prompt via a `.sh` wrapper, tell it not to use
-    tools. Grok gotcha: with a long prompt it "offloads" the text and reads it back with its own
-    tools — takes 5–10 minutes, the output file stays near-empty until it finishes.
-  - **Worktrees:** the session's own worktree `.claude/worktrees/f5-move-hygiene` (branch
-    `docs-post-71` checked out at the end) plus the **two dead ones from before** (their
-    `src-tauri/target` build caches were deleted on 2026-09-02 when the disk hit 100 %; the
-    worktrees and branches themselves are untouched)
-    (`f1-decisions` locked, `f2-email-links-open`) — removal is still **Jim's**. Vitest excludes:
-    `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'` when run from
-    inside a worktree; the old `'**/.claude/**'` exclude hides the worktree's own tests.
-- **State on `main` @ `1b18160`:** frontend **172** files / **2,249** tests · Rust **159** + 1 ignored
-  (the live Dovecot test) · **28** migrations / 32 tables · npm audit 0 · 0 service import cycles.
-  **One dependency added, approved by Jim:** `sqlx = "=0.8.6"` direct (already in the graph via
-  `tauri-plugin-sql`; CI asserts one copy) — #54, LOG.md. **One dependency question open for
-  Jim:** `urlpattern` as a dev-dependency so the http-scope test can use the plugin's own matcher
-  (brief SPEC-280 §Open for Jim).
+    up to date, no unresolved conversation) — exercised on #73.
+  - **Independent review = two cross-vendor legs, and the Gemini leg is now 3.8 Flash High.**
+    Jim, 2026-09-03, mid-review: *"you should be on gemini 3.8 Flash High"* — not 3.7. So:
+    `agy --model gemini-3.8-flash-high --mode plan --print-timeout 20m --print="$(cat prompt)"`
+    from a `.sh` wrapper (flags **before** `--print`; tell it not to use tools; inline the diff
+    from committed SHAs), **and** Grok 4.6 (`grok -m grok-4.6 --disable-web-search
+    --prompt-file …`, ~14 minutes, output file stays near-empty until it finishes). On #73 the
+    two found *different* real defects again, and a follow-up pass on the fix delta found two
+    more — when a review makes you write new logic, review the new logic.
+  - **Worktrees:** this session's `.claude/worktrees/e2-part3-pool-carry` (branch
+    `worktree-e2-part3-pool-carry`, everything in it landed via #73 and this docs PR) plus the
+    **three dead ones from before** (`f1-decisions` locked, `f2-email-links-open`,
+    `f5-move-hygiene`). Removal is **Jim's** (`git worktree remove` is refused to the agent
+    seat). Vitest excludes when running from inside a worktree:
+    `--exclude '**/node_modules/**' --exclude '**/.claude/worktrees/*/.claude/**'`.
+  - **The format-on-save hook runs `rustfmt` on any `.rs` file you Edit or Write, and the crate
+    is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
+    `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
+    reviewer diff; `pool.rs` is clean and safe to Edit.
+- **State on `main` @ `1116348`:** frontend **172** files / **2,273** tests · Rust **173** +
+  3 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
+  import cycles. **No dependency added this session.** Still open for Jim: `urlpattern` as a
+  dev-dependency (SPEC-280 §Open for Jim).
 
 ---
 
 ## 1. Exact next step
 
-**The full ordered plan is `docs/ROADMAP.md`** (pinned 2026-09-02): F-4 follow-up → bug-fix queue
-(#297, #240, …) → carried hardening → Superhuman-parity waves, with the copy-paste prompt for the
-next session at the end. **Jim made all eight gating decisions on 2026-09-02** (LOG.md): widen
-`img-src` for #197, Rust fetch for #209, `@tanstack/react-virtual` approved, MCP ADR now, wire
-P19/F-3, signing and distribution not yet, **Grok 4.6 is a standing second Tier-2 review leg
-(ADR-004)** — run both legs on every Tier-2 PR.
+**The full ordered plan is `docs/ROADMAP.md`**: the bug-fix queue is done except #278 ("not
+yet"), F-3/P19 landed (#71), **E2 part 3 landed (#73)**. What remains in §3 and §4 of the
+roadmap, in order: **P11** → **PR D / PR E plans** → enhancement wave 1.
 
-**F-4 is complete in code: part 3 landed as #50 (`9bec56a`)** — the REQ-2.3 `NOT DELETED` belt,
-the REQ-4 reconcile queue op, the "folder gone" path, migration 27, plus one follow-up commit
-adopting Grok's three HIGHs (the op inserts suspects only and the next list *adopts* them; a
-short LIST cannot count folders as gone; the op is pinned to its UIDVALIDITY generation). Every
-disposition is on the PR and in LOG.md.
+**E2 part 3 landed as #73 (`1116348`) — the IMAP session pool owns its sessions.** Spec
+`docs/briefs/2026-09-03-e2-part3-pool-carry.md` (plan committed and the PR opened before any
+code). What it did: `Entry.session: Option<S>` — no `Arc`, no async mutex; the guard takes the
+session and gives it back; every path that removes a *clean* session from the map returns it
+for LOGOUT (the cap's victim, a clean release into a vanished entry, a refused open); one
+`logout(session)` under a 3 s budget replaces `logout_arc`'s conditional unwrap; `insert`
+refuses a retired credential generation (`StaleCredential`) and a malformed or duplicate id
+(`BadId`); `acquire`/`remove` refuse anything but 32 lowercase hex before the map; Rust emits
+`velo-imap-sessions-invalidated {username, host, nonce}` right after a bump. On the frontend,
+`sessionManager.ts` keeps a **per-account invalidation epoch** (bumped by its own invalidation
+and by other windows' events), records the identity before the open, snapshots the epoch,
+re-reads the account row, opens, and retries **once** if Rust refused or the epoch moved;
+pending invalidations are keyed by IMAP identity; the window ignores its own echo by nonce.
+**Four review passes** (Gemini 3.7, Grok 4.6, Gemini 3.8 on the fix delta, Gemini 3.8 on the
+whole diff), every finding dispositioned on the PR and in LOG.md; one HIGH declined with the
+reason verified (`Instant::duration_since` saturates since Rust 1.60; MSRV 1.89). Three accepted
+residuals are in the spec's threat pass: spawned LOGOUTs are best-effort and outside the exit
+drain; an in-flight operation completes against a socket the invalidation meant to kill; any
+renderer can emit the event (a cache-drop DoS bounded by the cap). **The two live Dovecot tests
+(`commands.rs` `mod live_tests`) compile but were not run — Docker was down.** Done-when 2
+(≤ 2 opens per delta sync) stays manual.
 
-**#297 landed as #52 (`64de404`)** — the Bcc header no longer leaves the client over SMTP: a Rust
-header-block scanner strips `Bcc`/`Resent-Bcc` after the envelope is built, a fail-closed guard
-re-parses the outgoing bytes and refuses if a Bcc field is still present, Sent/Drafts copies keep
-the header. Spec `docs/briefs/2026-09-02-297-bcc-strip.md`; Gemini and Grok both approve-with-nits,
-every finding adopted (LOG.md).
+**Next: P11** — the capability split (`docs/briefs/2026-09-01-batch-g-p11-capabilities.md`,
+Tier 2, `src-tauri/capabilities/*`). Re-read the brief's two blockers first: the second is
+**Jim's 5-step manual QA**, which an agent cannot do. Then the **PR D / PR E plans** (toolchain
+majors — TypeScript 5.9→6→7 with the `baseUrl` fix, Vite 8; Rust parser majors — both Tier 2,
+plans for Jim to approve before code, `2026-09-01_Velo_Dependency-Audit.md:93` in the vault).
+After that, enhancement wave 1 (ROADMAP §4; the speed budget needs the approved
+`@tanstack/react-virtual`).
 
-**#240 landed as #54 (`b95468e`) — SQLite transactions are pinned.** Rust holds one connection
-from the plugin's own pool per transaction (`db/tx.rs`: `BEGIN IMMEDIATE`, single open
-transaction, 30 s idle watchdog, drop guard, binding parity with the plugin except booleans →
-INTEGER); `withTransaction` and the migration runner run on that handle; the nine helpers the
-Task 0 audit named take a trailing optional `DbExecutor`. Three review rounds (Gemini ×2, Grok)
-all adopted or declined with reasons in LOG.md, including **one author process slip**: the first
-diff sent to reviewers omitted the new Rust files. Closes upstream #264; #204 is unrelated
-(ledger corrected); #205 is "re-test", a half-applied migration can no longer be produced but an
-already-broken database is not repaired.
-
-**#280 landed as #56 (`848ccaa`) and #241 as #57 (`51689ef`).** #280: four loopback http-scope
-entries (no `*:*`), a URLPattern test that pins the allow list exactly, the connection test's
-reason shown on both AI cards with credentials redacted, and the Ollama client refusing
-redirects. #241: `FETCH_*` constants, three sites parenthesised, and a source-scanning guard in
-`imap/fetch_guard.rs`. Both had two review legs, every finding dispositioned (LOG.md). Two
-process notes from this stretch, recorded in LOG.md: the disk filled to 100 % (dead worktrees'
-build caches removed), and the secret scan reads a PR's commit *history*, so a flagged test
-fixture has to be kept out of every commit — #56 was rebuilt as two clean commits for that.
-
-**#252/#253 landed as #59 (`b3725e7`) and #197 as #60 (`2d6d52a`).** #252: migration 28 adds
-`smtp_username` + encrypted `smtp_password`, one resolver feeds the form's SMTP test and save
-(the identical-ternary bug), `buildSmtpConfig` falls back per field so pre-28 accounts are
-unchanged, an empty separate password is refused. #197: `img-src 'self' data: https:` behind
-the sanitizer's opt-in; both reviews forced the right question and found one real gap — SVG
-`<image>`/`<use>` `href` fetched on render and the old four-host CSP had hidden it — now
-stripped by the blocker. Every review finding dispositioned (LOG.md). **The bug-fix queue's
-P0/P1 tier is done:** #297, #240, #280, #241, #252/#253, #197.
-
-**#276 landed as #62 (`4630e31`) and #243 as #63 (`7e767e5`)** — both Tier 1, one review leg
-each (Gemini), every finding dispositioned in LOG.md. #276: upstream PR #275 reviewed and its
-design adopted — `0` = no date filter (Gmail omits `after:`, IMAP passes `null` so the
-existing Rust `UID SEARCH ALL` branch fires, per-message cutoff off), 2 y / 5 y / All time
-options; one parser (`services/syncPeriod.ts`) replaces the two `parseInt(x) || 365` sites
-that silently ate a stored `0`. #243: one grouped unread-per-label query into `labelStore`,
-pills beside Inbox, Spam and user labels, and a typed **`velo-threads-changed`** event fired
-by `executeEmailAction` after its local update so the counts (and smart-folder counts) refresh
-on the user's own actions instead of the next sync; a first `Sidebar` render test. Carry from
-the #63 review: on a permanent provider error the local rows keep the change while the store
-reverts (pre-existing, `emailActions`).
-
-**#209/#265 landed as #65 (`c90d1f0`)** — Tier 2, Jim's decision 2 applied: a **custom
-OpenAI-compatible endpoint** reached through the Rust **`ai_fetch`** command
-(`src-tauri/src/ai_fetch.rs`: `https:` anywhere or `http:` to loopback only, any `@` in the
-authority refused, GET/POST, four request headers, no redirect followed and a 3xx refused
-without its `Location` — 304 passes —, three response headers, 8 MiB body caps both ways,
-8 KiB header values, 120 s timeout, errors and logs without the URL query), `rustFetch` as
-the OpenAI SDK's `fetch` with the invoke result zod-validated and an abort race, a `custom`
-provider, settings card with the same URL rule pre-checked inline and Test Connection on the
-fields as typed, help text naming OpenRouter and DeepSeek. Upstream PR #242 reviewed: shape
-adopted, transport replaced. No dependency, no capability entry, CSP untouched. **Four
-review passes** (Gemini 3.7 Flash, Grok 4.6, Gemini 3.1 Pro, Gemini 3.8 Flash twice) — every
-finding dispositioned on the PR and in LOG.md; both URL tables pin the parser-differential
-forms. **Review-leg rule (Jim, 2026-09-02):** if Grok is slow, the second leg is
-`gemini-3.8-flash-high` via `agy`; the LOG.md comparison shows 3.8 fast but shallower than
-Grok on the same diff (missed four code fixes) — Grok when its ~12 minutes are affordable.
-
-**The bug-fix queue's tail landed 2026-09-03:** #233 as #67 (`1ea767e`, Flatpak on GNOME 50
-with the Node 24 extension, `--runtime-repo` on the bundle, a dispatchable packaging job with
-both uploads gated — proven by a green dispatched Flatpak build), #204 as #68 (`2dfc1b2`,
-Tier 2: cancellable connection tests — a Rust abort-handle registry with a tombstone for a
-cancel that beats the register, a drop guard, duplicate-id abort; the form's Cancel; three
-review legs, Grok and Gemini 3.8 each found MEDIUM defects Gemini 3.7 missed), #281 as #69
-(`66a9355`, paste a screenshot into the composer: type allow-list, magic-byte sniff, 5 MiB
-cap, shipped as the existing CID part). **Only #278 (macOS signing) remains, "not yet" by
-decision 6.** Every bug-fix item Jim queued from the 2026-09-01 triage is done except that one.
-
-**F-3 / P19 landed as #71 (`1b18160`):** the phishing interstitial and banner are wired — a
-click on a link the detector rates past the sensitivity line stops at `LinkConfirmDialog`
-before opening; the banner shows on a flagged message with "Trust this sender"; the gate
-fails closed, only web links are analysed, and a middle click is gated too. Gemini's review
-found and closed a real hole (the gate had no error path) and a stale-dialog bug across
-message switches. Two follow-up questions recorded — Jim's call whether to spec them.
-
-**Next: the carried hardening items, then the enhancement queue.** In order: **E2 part 3**
-(#39's carry list — the redundant `Arc<Mutex>` removed with `logout_arc`'s `try_unwrap`
-that silently skips LOGOUT; evictions without LOGOUT; `bump_credential_version` evicting by
-ident regardless of version; the cross-window invalidation race; the unvalidated session-id
-wrapper; Done-when 9 and the live halves of 2/10 stay manual — **draft spec started at
-`docs/briefs/2026-09-03-e2-part3-pool-carry.md`**; Tier 2, Rust IMAP), then **P11**
-(capability split — brief exists, needs Jim's 5-step manual QA), then the **PR D / PR E**
-plans (toolchain and Rust parser majors — Tier 2, plans for Jim to approve). After that,
-enhancement wave 1 (ROADMAP §4). **Open for Jim:** the `urlpattern` dev-dependency; the
-**rebrand inventory** (`docs/audits/2026-09-03-rebrand-inventory.md` — the `com.velomail.app`
-identifier decision is a one-way door needing an ADR); the F-3 follow-up questions; reporter
-re-tests for #280, #241, #252, #197, #276, #209, #233 (install the next release's bundle),
-#281. **Manual, still open:** #240's Task 6 and F-4's live Done-when (the app runs with
-`npm run tauri dev`; the Dovecot containers are down).
-
-**Still open on F-4:** the live Dovecot Done-when (scenarios 1–5 in
-`docs/testing/dovecot/README.md`; manual, needs the running app — never run) and, Jim's call, a
-persistent per-folder hold for "Keep them". **Merges are the build seat's** under the standing
-rule — Jim reaffirmed it on 2026-09-02; Opus 5's Tier-2 carve-out was not adopted.
-
-**Before that, read the Opus 5 full review** (`docs/reviews/2026-09-02-opus5-window-review.md`;
-verdicts and dispositions in LOG.md). Its HIGH 1 — permanent delete had become a server-side
-no-op after F-5 — is **fixed (#45, `ef7c91c`)**. Its HIGH 2 — the re-key transaction depends on
-per-connection SQLite state over a pooled, unpinned `tauri-plugin-sql` connection — is **open and
-Jim's to scope**: it is pre-existing for every `withTransaction` in Velo, but F-5 made it
-load-bearing for a destructive identity rewrite. Own brief; candidate fix is a Rust command owning
-one connection. The five MEDIUMs (per-message reap cost, UIDVALIDITY guard off for never-synced
-folders, regex constraint detection, per-row inserts in `recordMissing`, and the **>50% stop
-eroding across passes** — part 2 must evaluate it against the row count at first confirmation)
-are recorded in LOG.md and belong to the next F-5/F-4 follow-up.
-
-**Carried, no PR:** E2 part 3 carry list (unchanged from the previous handoff — the `Arc`/
-`logout_arc` item, evictions without LOGOUT, `bump_credential_version` by ident, the cross-window
-invalidation race, the unvalidated session-id wrapper, Done-when 9 and the live halves of 2/10) ·
-**PR D** (TypeScript 5.9→6→7, Vite 8; Tier 2, needs Jim's plan approval) · **F-5 follow-ups**
-recorded on #43: an old→new id refresh for UI state after a re-key (Grok M4), `withTransaction`
-connection pinning (pre-existing, both reviewers), tombstones still visible to `threads.message_count`
-until the destination syncs.
+**Open for Jim:** the `urlpattern` dev-dependency; the **rebrand inventory**
+(`docs/audits/2026-09-03-rebrand-inventory.md` — the `com.velomail.app` identifier decision is a
+one-way door needing an ADR; the inventory recommends keeping it); the F-3 follow-up questions
+(disable "Trust this sender" when SPF/DKIM failed; one trust dismisses sibling banners); P11's
+5-step manual QA; PR D/E plan approvals; reporter re-tests for #280, #241, #252, #197, #276,
+#209, #233, #281; the "Keep them" hold. **Manual, still open:** #240's Task 6, F-4's live
+Done-when, E2's Done-when 2, and the two E2 part 3 live tests
+(`cargo test --locked -- --ignored live_dovecot` with the harness up).
 
 ### Resume commands
 
@@ -190,13 +104,13 @@ npm run graph:check && npm run docs:check
 gh repo set-default Pepper512/velo
 ```
 
-Expected on `main`: **172 test files, 2,249 tests; Rust 159 passed, 1 ignored.**
+Expected on `main`: **172 test files, 2,273 tests; Rust 173 passed, 3 ignored.**
 
 ### Re-verify before acting
 
-- `git log --oneline 1b18160..origin/main` — a non-`docs:` commit there means the pin is stale.
+- `git log --oneline 1116348..origin/main` — a non-`docs:` commit there means the pin is stale.
 - `gh pr list --repo Pepper512/velo` — none open at writing; this line ages fastest.
-- `git worktree list` — three worktrees at writing (this session's plus two dead ones).
+- `git worktree list` — four worktrees at writing (this session's plus three dead ones).
 - `gh run list --branch main --limit 2` — `ci` success, Release Please **skipped**.
 - **`ListAgents`** before assuming a peer seat exists.
 
@@ -204,22 +118,22 @@ Expected on `main`: **172 test files, 2,249 tests; Rust 159 passed, 1 ignored.**
 
 ## 2. Immediate / time-sensitive
 
-**No credentials to rotate.** The Dovecot harness's throwaway credentials were used against
-`127.0.0.1` only; the containers were torn down (`down -v`) at the end of the window.
+**No credentials to rotate.** None were created, read or logged; the Dovecot harness was not
+started (Docker down).
 
 **Jim only:**
 1. **Make `rust MSRV` a required check** — unchanged since 2026-09-01:
    `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`.
-2. **Remove the two dead worktrees** (unchanged; `f1-decisions` is locked, unlock first) — and now
-   also this session's `.claude/worktrees/f5-move-hygiene` (everything in it landed via #43, #44
-   and the wrap-up docs PR; its local branches `worktree-f5-move-hygiene`, `f4-vanished-uid-part1`
-   and `docs/window-wrapup` can go with it).
-3. ~~Mark the F-4 approval in the vault spec~~ — **done this session.** The vault
-   (`~/Vaults/Pepper Knowledge/10 Projects/Velo/…`) **is reachable from this machine**; the earlier
-   "not reachable from the checkout" note was wrong. The spec's approval line, Task 13 and the
-   F-5 coupling note were reconciled directly. Jim should glance at the edit.
+2. **Remove the four worktrees** (`f1-decisions` is locked, unlock first; `f2-email-links-open`;
+   `f5-move-hygiene`; and this session's `e2-part3-pool-carry`). Everything in all four landed.
+3. **Glance at the vault edits** to `SPEC-F-4` (approval line, Task 13, coupling note) — unchanged
+   from the previous handoff. The vault queue line for E2 part 3 was **not** written this session
+   (the vault was not opened); the repo-side spec carries the landed status.
 
-Still parked, unchanged: **P11** · **P19/F-3**.
+**Agent seat, cheap:** prune the merged local branches (`git branch -d` each; all merged).
+
+Still parked, unchanged: **#278** (decision 6) · **PR E** · the Rust image proxy (privacy
+enhancement) · E2 option (d) (raw fetch over the pooled session).
 
 ---
 
@@ -228,65 +142,77 @@ Still parked, unchanged: **P11** · **P19/F-3**.
 Velo is a local-first Tauri v2 (Rust) + React 19 desktop email client, forked from
 `avihaymenahem/velo` (v0.4.21). Jim is hardening it under his methodology (`docs/methodology/`,
 pinned). The optimization audit is landed; dependency audit A/B/C landed, D next (plan to write),
-E parked. **IMAP correctness line:** move/expunge shipped (#26); E2 pooling landed (#37/#39);
-**F-5 landed (#43)** with its permanent-delete regression fixed in #45; **F-4 part 1 landed (#44), part 2 planned.**
+E parked. **IMAP correctness line, complete for now:** move/expunge (#26), pooling (#37/#39/#73),
+F-5 (#43, #45), F-4 (#44/#47/#50), the bug-fix queue (#52–#69), F-3/P19 (#71). What is left is
+the capability split (P11) and the toolchain majors (PR D/E), then features.
 
-**Governance this session, in one paragraph.** Jim put the Fable seat in charge for two hours with
-every project decision pre-approved and named the review legs; every decision made is in LOG.md
-marked *(delegated)*; two deviations were named up front (Grok as reviewer, the Fable seat itself);
-the vault was edited directly once it turned out to be reachable; an Opus 5 full review was
-commissioned at the close as Jim asked.
+**It runs on Windows and Linux as well as macOS** (Jim asked, 2026-09-03): Tauri v2; upstream
+ships `.msi`/`.exe`, `.deb`/`.AppImage` (plus the Flatpak and RPM packaging #233 touched) and
+`.dmg`; the release workflow's matrix builds on `ubuntu-22.04` and `windows-latest`. Two caveats:
+the fork's own CI runs on Ubuntu only, so a Windows-only compile break would surface only in a
+release build; and the release workflow is guarded to upstream (EX-007), so the fork has never
+cut a Windows or Linux bundle. The platform-specific code is small (one Windows AUMID line, two
+Linux blocks in `lib.rs`) and untouched by the hardening work.
+
+**Governance this session, in one paragraph.** Jim was present: "go" on the E2 part 3 plan
+(with the roadmap prompt as the standing instruction), the platform question, and the
+review-model change mid-review. Every review finding across four passes is dispositioned on the
+PR and in LOG.md; one HIGH was declined with the reason verified against the MSRV. The build seat
+merged #73 under the standing rule.
 
 ---
 
-## 4. What just happened (2026-09-02 06:12 → ~08:10 UTC)
+## 4. What just happened (2026-09-03)
 
 | PR | Merged | What |
 |---|---|---|
-| #43 `2792251` | build seat | **F-5, option A rev 2.** Rust drains `COPYUID` from `async-imap`'s unsolicited channel inside the pooled checkout (no parser owned; backlog discarded before `UID MOVE` — a defect the brief did not know about); TS re-keys the row + attachments + soft refs in one transaction (deferred FKs, per-pair savepoints), tombstones the rest (`messages.moved_to`, migration 25), hides tombstones from thread view/search/actions, reaps on destination sync (folder-scoped), refuses a mapping from the wrong UIDVALIDITY generation; every provider action filters to live rows first. Live Dovecot: `:11143` mapping on the same turn, `:11144` COPY path with none. Gemini CHANGES REQUESTED (1H 2M 2L 1N) + Grok CHANGES REQUESTED (15) → 9 adopted, rest answered/recorded/declined with reasons on the PR |
-| #44 `ef7c91c` | build seat | **F-4 part 1.** `DeltaCheckResult` per-folder attestation (`checked`/`error`/nullable `exists`; timeout → `Err` → pool evicts), `imapDeltaSync` skips unchecked and records fallback failures, `imapSearchAllUids` validated, migration 26, `reconcile.ts` (pure budget/cap/diff + generation-scoped suspect state machine + atomic `applySearchAll`) on the harness. Gemini CHANGES REQUESTED (1H 2M 1L 2N) and Grok CHANGES REQUESTED (11): everything adopted or already fixed, nothing declined. Nothing in it deletes; the part 2 plan is in `docs/briefs/` |
+| #73 `1116348` | build seat | **E2 part 3.** Pool owns `Option<S>`; LOGOUT on every clean eviction under a 3 s budget; `StaleCredential` + `BadId`; session-id shape; the invalidation event with nonce; frontend invalidation epoch with once-only retry; pending invalidations by identity; `imapIdentityOf` shared by the config builder and the session manager (host lower-cased). Four review passes; Rust 159 → 173, frontend 2,249 → 2,273 |
 
-**Findings worth remembering.** *Both cross-vendor legs found defects the author missed, and
-different ones* (#43: Gemini the reap scoping and the zombie race, Grok the whole-batch rollback
-and the UIDVALIDITY generation). *CI caught a clippy lint the local run had not compiled* (first
-push of #43) — CI stays the source of test status. *`async-imap`'s unsolicited channel was never
-read by Velo* — it fills and drops silently; anything that needs an untagged response must clear
-it first. *The vault is reachable.* *Spec citations were stale again* (F-4 Task 5's command already
-existed) — re-grep, always.
+**Findings worth remembering.** *The carry item understated the bug*: #39 said a bump could
+evict a session opened on the new credential (one wasted login); the re-grep found the other
+interleaving — a bump landing inside `imap_session_open`'s one round trip inserted a session
+tagged with the *retired* generation that survived until the next bump. *Then Grok found the
+dual*: a config built before another window's bump whose Rust command starts after it — Rust
+cannot see that one, so the frontend epoch closes it. *Then Gemini 3.8 found two holes in the
+epoch fix* (identity recorded after the token-refreshing build; the retry reusing the old
+row). *Review the fix, not just the change.* Also: `Instant::duration_since` saturates since
+Rust 1.60 — a reviewer will call it a panic; check the MSRV before adopting. And: the vitest
+module cache makes listener-registration tests order-dependent; `vi.resetModules()` + a fresh
+`import` is the pattern.
 
 ---
 
 ## 5. Decisions
 
-**Made by Jim directly this session:** the delegation window and its terms (LOG.md, verbatim).
+**Made by Jim directly this session:** "go" on E2 part 3 under the roadmap prompt · the
+Gemini review leg is **3.8 Flash High** (supersedes "3.7 first, 3.8 if Grok is slow").
 
-**Made under delegation, all in LOG.md, marked *(delegated)*:** every F-5 build decision beyond the
-brief (channel discard, COPY-fallback-has-no-mapping accepted, live-row filter on every action,
-extra tables the re-key rewrites, option-B minimal build), every review disposition on #43 and
-#44 (adopted / recorded / declined — each with its reason on the PR), the merge of #43, the
-F-4 part 1 scope cut (substrate only), the vault edits, the part 2 plan.
+**Made by the build seat, all in LOG.md with reasons:** the ownership design (owned `Option<S>`
++ `BoxFuture` HRTB over the alternatives) · refuse a stale generation at `insert` rather than
+re-tag · Rust-side emit · frontend epoch + nonce for the dual race · pending invalidations by
+identity · every review disposition (adopted / residual / declined).
 
-**Deliberately deferred + reason:** F-4 part 2 (the deleting half; needs a plan read, not a
-window's last 40 minutes) · the `withTransaction` connection-pinning question (pre-existing, every
-transaction shares it; own brief) · the UI old→new id refresh after a re-key (small, separate) ·
-Grok L8 on #43 **declined** (RFC 3501 defines a range as unordered) · Gemini NIT on a `moved_to`
-index **declined** (already indexed via `message_id_header`).
+**Deliberately deferred + reason:** per-window session binding (ADR-003; P11 next) · LOGOUT on
+the error path (protocol state unknown; a destructor cannot await) · a join set for spawned
+LOGOUTs (three rare paths, bounded at 3 s) · E2 option (d) · the logging pass (#39 finding 5).
 
-**Operational notes that bit us:** the worktree guard refuses heredocs and `$(cat …)` — use the
-file tools and `.sh` wrappers · `cd` persists between Bash calls; a `cd src-tauri` left later
-`npx vitest` runs finding "no test files" · the harness translator rejects a `$n` used twice —
-bind the value twice · `runMigrations` in a harness test leaves its BEGIN/COMMIT in `statements`;
-slice from your own start index · Grok's long-prompt path is slow but works.
+**Operational notes that bit us:** `cd src-tauri && …` in one Bash call **persists the cwd**
+into the next call — use `(cd src-tauri && …)` subshells · the worktree guard refuses `for`
+loops with computed `sed` arguments — plain `grep -n` instead · `gh pr checks` may be refused;
+`gh pr view --json statusCheckRollup` works · Grok's long-prompt path offloads the prompt and
+reads it back with its own tools (~14 min) · a test that resolves an async mock synchronously
+cannot see a race in the awaited region (Gemini 3.8 N7) — hold the mock open with a deferred
+promise.
 
 ---
 
 ## 6. Standing instruction — verify measurements before building to them
 
-Two audits, ten falsified numbers, plus this session's: **the vault was reachable** when HANDOFF
-said it was not; **a spec task was already done in the tree**; **the reviewer's HIGH on the timeout
-path was real** and the author had written the opposite in a comment. Check the direction of
-staleness; treat review lanes as independent samples; a clean merge can still be wrong — including
-ours.
+Two audits, ten falsified numbers, plus this session's: **a carry-list item described the
+smaller of two interleavings**; **a reviewer's HIGH was a saturating call, not a panic** (check
+the MSRV); **the handoff on disk was 30 commits behind origin** at session start (pull before
+reading). Check the direction of staleness; treat review lanes as independent samples; a clean
+merge can still be wrong — including ours.
 
 ---
 
@@ -294,31 +220,27 @@ ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `1b18160`** (#71,
-F-3 phishing interstitial; the only SHA pinned — `git log --oneline 1b18160..origin/main`
-shows what is above it) · **no open PRs** · CI green · 172 files / 2,249 tests / Rust 159 + 1
-ignored · 28 migrations · npm audit 0 · `sqlx =0.8.6` is a direct dependency (approved).
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `1116348`** (#73,
+E2 part 3; the only SHA pinned — `git log --oneline 1116348..origin/main` shows what is above
+it) · **no open PRs** · CI green · 172 files / 2,273 tests / Rust 173 + 3 ignored · 28
+migrations · npm audit 0 · no dependency added.
 
-**Next action: E2 part 3 — the IMAP session-pool carry list from PR #39 (Tier 2, Rust IMAP
-pool: plan with threat pass and rollback before code, both review legs).** A draft spec is
-started at `docs/briefs/2026-09-03-e2-part3-pool-carry.md`; the item list is in §1. The
-bug-fix queue is done except #278 ("not yet"); F-3/P19 landed as #71. Then P11, PR D/E plans,
-enhancement wave 1. Review legs: Gemini 3.7 via `agy` first; second leg on Tier 2 = Grok 4.6
-when its ~12 minutes are affordable, else `gemini-3.8-flash-high` (Jim, 2026-09-02). Open for
-Jim: `urlpattern` dev-dependency (SPEC-280); the rebrand inventory / `com.velomail.app`
-identifier ADR; the F-3 follow-up questions; P11's 5-step manual QA; PR D/E plan approvals.
-Manual and open: #240 Task 6, F-4's live Done-when, the "Keep them" hold; reporter re-tests
-for #280, #241, #252, #197, #276, #209, #233, #281. Generate reviewer diffs from committed
-SHAs; keep fake credentials out of literal form; a PR that conflicts with `main` gets no CI
-run — rebase first. The build seat merges its own green PRs.
+**Next action: P11 — the capability split** (`docs/briefs/2026-09-01-batch-g-p11-capabilities.md`,
+Tier 2, `src-tauri/capabilities/*`; plan approved before code, both review legs). Its second
+blocker is **Jim's 5-step manual QA** — an agent can build and test, not sign it off. Then the
+**PR D / PR E plans** (Tier 2, Jim approves before code), then enhancement wave 1 (ROADMAP §4).
+**Review legs:** Gemini **3.8 Flash High** via `agy` (Jim, 2026-09-03) **and** Grok 4.6 via the
+`grok` CLI; diffs from committed SHAs; when a review makes you write new logic, run a pass on
+the delta. Open for Jim: `urlpattern` dev-dependency; the rebrand `com.velomail.app` ADR; the
+F-3 follow-ups; P11's QA; PR D/E approvals; reporter re-tests. Manual and open: #240 Task 6,
+F-4's live Done-when, E2 Done-when 2, the E2 part 3 live tests (Docker was down).
 
-**Seats:** one build seat. Independent review = Gemini via `agy` **and** Grok via `grok` CLI
-(a standing second Tier-2 leg since ADR-004). Both found real defects on every PR this day —
-on #50 Grok's three HIGHs were real while Gemini approved. Don't merge Tier 2 on one pair of eyes.
+**Seats:** one build seat. Don't merge Tier 2 on one pair of eyes; on #73 four passes each
+found something the others had not.
 
-**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the three worktrees
-(`f1-decisions` locked, `f2-email-links-open`, `f5-move-hygiene`) · glance at the vault edits
-(F-4 spec task list, queue lines) — the vault **is** reachable from this machine.
+**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **four** worktrees
+(`f1-decisions` locked — unlock first; `f2-email-links-open`; `f5-move-hygiene`;
+`e2-part3-pool-carry`) · glance at the vault edits to `SPEC-F-4`.
 
 **Verify first:** `git worktree list` · `gh pr list` · `ListAgents` · `gh run list --branch main --limit 2`.
 
@@ -326,8 +248,8 @@ on #50 Grok's three HIGHs were real while Gemini approved. Don't merge Tier 2 on
 `npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'`,
 `npx tsc --noEmit`, `npm run graph:check && npm run docs:check`,
 `(cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings)`.
-Live Dovecot: `docs/testing/dovecot/README.md` (F-5 section). Work in your own worktree
-(`EnterWorktree`); inside one, use plain commands and the file tools, and cd back to the root.
+Work in your own worktree (`EnterWorktree`); inside one, use plain commands, `(cd …)` subshells,
+and the file tools; the rustfmt hook reformats any `.rs` file you Edit.
 
 **Read §6:** verify numbers, check which side is stale, treat review lanes as independent, and
 remember a clean merge can still be wrong — including ours.
