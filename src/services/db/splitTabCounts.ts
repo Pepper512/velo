@@ -68,8 +68,8 @@ export async function getSplitTabCounts(
 
   if (request.reminders) {
     const rows = await db.select<{ total: number; unread: number | null }[]>(
-      `SELECT COUNT(*) as total,
-              SUM(CASE WHEN t.is_read = 0 THEN 1 ELSE 0 END) as unread
+      `SELECT COUNT(DISTINCT t.id) as total,
+              COUNT(DISTINCT CASE WHEN t.is_read = 0 THEN t.id END) as unread
        FROM threads t
        INNER JOIN follow_up_reminders f ON f.account_id = t.account_id AND f.thread_id = t.id AND f.status = 'pending'
        WHERE t.account_id = $1`,

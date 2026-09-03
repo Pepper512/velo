@@ -110,7 +110,7 @@ export async function getInboxThreadsForLabel(
        AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
      WHERE t.account_id = $1 AND tl.label_id = $2
      GROUP BY t.account_id, t.id
-     ORDER BY t.is_pinned DESC, t.last_message_at DESC
+     ORDER BY t.is_pinned DESC, t.last_message_at DESC, t.id DESC
      LIMIT $3 OFFSET $4`,
     [accountId, labelId, limit, offset],
   );
@@ -134,7 +134,7 @@ export async function getThreadsWithPendingReminders(
        AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
      WHERE t.account_id = $1
      GROUP BY t.account_id, t.id
-     ORDER BY MIN(f.remind_at) ASC, t.last_message_at DESC
+     ORDER BY MIN(f.remind_at) ASC, t.last_message_at DESC, t.id DESC
      LIMIT $2 OFFSET $3`,
     [accountId, limit, offset],
   );

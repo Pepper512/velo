@@ -132,6 +132,30 @@ describe("split-inbox tab queries (SPEC-SIT)", () => {
     expect(counts.get("reminders")).toEqual({ total: 2, unread: 1 });
   });
 
+  it("counts a thread once however many pending reminders it carries, and lists it once (Gemini H1)", async () => {
+    await seedThread(ACC, "twice", { labels: ["SENT"] });
+    await harness.db.execute(
+      "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status) VALUES ('fu-a', $1, 'twice', 'm-a', 500, 'pending')",
+      [ACC],
+    );
+    await harness.db.execute(
+      "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status) VALUES ('fu-b', $1, 'twice', 'm-b', 100, 'pending')",
+      [ACC],
+    );
+    const counts = await getSplitTabCounts(ACC, { categories: [], labelIds: [], reminders: true });
+    expect(counts.get("reminders")).toEqual({ total: 1, unread: 1 });
+    expect((await getThreadsWithPendingReminders(ACC, 50, 0)).map((t) => t.id)).toEqual(["twice"]);
+  });
+
+  it("uncategorised threads count under Primary only when Primary is a tab; otherwise they count nowhere (Gemini N1)", async () => {
+    await seedThread(ACC, "p1", { labels: ["INBOX"] });
+    const withPrimary = await getSplitTabCounts(ACC, { categories: ["Primary", "Updates"], labelIds: [], reminders: false });
+    expect(withPrimary.get("Primary")).toEqual({ total: 1, unread: 1 });
+    const without = await getSplitTabCounts(ACC, { categories: ["Updates"], labelIds: [], reminders: false });
+    expect(without.get("Updates")).toEqual({ total: 0, unread: 0 });
+    expect(without.has("Primary")).toBe(false);
+  });
+
   it("asks for nothing it was not given: no categories, no labels, no reminders → an empty map", async () => {
     expect((await getSplitTabCounts(ACC, { categories: [], labelIds: [], reminders: false })).size).toBe(0);
   });

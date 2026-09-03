@@ -27,8 +27,8 @@ export interface SplitTab {
 
 export const REMINDERS_TAB_ID = "reminders";
 export const SPLIT_TABS_SETTING_KEY = "split_inbox_tabs";
-/** More than this is a mistake, not a configuration. */
-const MAX_TABS = 32;
+/** More than this is a mistake, not a configuration — enforced on add and at the boundary alike. */
+export const MAX_TABS = 32;
 
 export function categoryTabId(category: ThreadCategory): string {
   return category;
@@ -196,7 +196,9 @@ export function resolveActiveTab(visible: VisibleTab[], requested: string): stri
 }
 
 export function addTab(tabs: SplitTab[], tab: SplitTab): SplitTab[] {
-  if (tabs.some((t) => t.id === tab.id)) return tabs;
+  // The cap the boundary enforces is enforced here too, or a 33rd tab would
+  // persist and reset everything to the default at the next boot (Gemini M1).
+  if (tabs.length >= MAX_TABS || tabs.some((t) => t.id === tab.id)) return tabs;
   return [...tabs, tab];
 }
 

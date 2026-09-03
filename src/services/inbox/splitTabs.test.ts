@@ -12,6 +12,7 @@ import {
   categoryTabId,
   labelTabId,
   REMINDERS_TAB_ID,
+  MAX_TABS,
   type SplitTab,
 } from "./splitTabs";
 
@@ -152,6 +153,17 @@ describe("editing helpers (REQ-4)", () => {
     const tabs = addTab(DEFAULT_SPLIT_TABS, reminders());
     expect(tabs.map((t) => t.id)).toEqual([...DEFAULT_SPLIT_TABS.map((t) => t.id), "reminders"]);
     expect(addTab(tabs, reminders())).toEqual(tabs);
+  });
+
+  it("refuses a tab past the cap the boundary enforces, so a saved list can always be read back (Gemini M1)", () => {
+    let tabs: SplitTab[] = [];
+    for (let i = 0; i < 40; i++) tabs = addTab(tabs, label(`lbl-${i}`));
+    expect(tabs).toHaveLength(MAX_TABS);
+    expect(parseSplitTabs(serializeSplitTabs(tabs))).toEqual(tabs);
+    const over = [...tabs, label("one-too-many")];
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(parseSplitTabs(serializeSplitTabs(over))).toEqual(DEFAULT_SPLIT_TABS);
+    warn.mockRestore();
   });
 
   it("removes a tab but never the last one", () => {

@@ -13,6 +13,7 @@ import {
   categoryTabId,
   labelTabId,
   REMINDERS_TAB_ID,
+  MAX_TABS,
   type SplitTab,
 } from "@/services/inbox/splitTabs";
 
@@ -31,6 +32,8 @@ export function SplitTabsEditor() {
 
   useEffect(() => {
     let cancelled = false;
+    // A candidate chosen under one account means nothing under another (Gemini M3).
+    setCandidate("");
     if (!activeAccountId) {
       setSmartLabelIds(new Set());
       return;
@@ -51,8 +54,14 @@ export function SplitTabsEditor() {
     () => labels.filter((l) => l.accountId === activeAccountId && !isSystemLabel(l.id)),
     [labels, activeAccountId],
   );
-  const labelName = (labelId: string) =>
-    accountLabels.find((l) => l.id === labelId)?.name ?? `${labelId} (not in this account)`;
+  // A label tab configured under another account still reads as a name here
+  // (Gemini L1); in the inbox it is simply not shown (REQ-2.5).
+  const labelName = (labelId: string): string => {
+    const own = accountLabels.find((l) => l.id === labelId);
+    if (own) return own.name;
+    const other = labels.find((l) => l.id === labelId);
+    return other ? `${other.name} (another account)` : `${labelId} (label not found)`;
+  };
 
   const tabName = (tab: SplitTab): string => {
     if (tab.kind === "category") return tab.category ?? tab.id;
@@ -152,7 +161,7 @@ export function SplitTabsEditor() {
         <button
           type="button"
           onClick={onAdd}
-          disabled={!candidate}
+          disabled={!candidate || tabs.length >= MAX_TABS}
           className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-white bg-accent hover:bg-accent-hover rounded-md disabled:opacity-50"
         >
           <Plus size={13} /> Add
