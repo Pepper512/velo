@@ -38,6 +38,11 @@ import {
 
 const PAGE_SIZE = 50;
 
+/** Which list is on screen — the key the stagger set and the scroll latch hang off. */
+function folderKeyOf(accountId: string | null, label: string, category: string): string {
+  return `${accountId ?? ""}|${label}|${category}`;
+}
+
 // Map sidebar labels to Gmail label IDs
 const LABEL_MAP: Record<string, string> = {
   inbox: "INBOX",
@@ -121,6 +126,9 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const [hasMore, setHasMore] = useState(true);
   // SPEC-SB REQ-3.4: which folder's freshly loaded rows may animate in.
   const [staggerSet, setStaggerSet] = useState<{ folder: string; ids: Set<string> } | null>(null);
+  // One key for "which list is this": the stagger set and the scroll latch
+  // both hang off it.
+  const folderKey = folderKeyOf(activeAccountId, activeLabel, activeCategory);
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [categoryMap, setCategoryMap] = useState<Map<string, string>>(() => new Map());
@@ -333,7 +341,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     // SPEC-SB REQ-3.4: the rows this load puts on screen are the ones that
     // animate in; captured here so a folder change can never stagger the
     // previous folder's rows, and `loadMore` never re-triggers it.
-    const folder = `${activeAccountId}|${activeLabel}|${activeCategory}`;
+    const folder = folderKeyOf(activeAccountId, activeLabel, activeCategory);
     const markStagger = (threadsLoaded: ReadonlyArray<{ id: string }>) =>
       setStaggerSet({ folder, ids: new Set(threadsLoaded.slice(0, 15).map((t) => t.id)) });
 
@@ -376,6 +384,8 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       }
     } catch (err) {
       console.error("Failed to load threads:", err);
+      // Nothing new landed, so nothing should animate in (Gemini third pass F-04).
+      setStaggerSet(null);
     } finally {
       setLoading(false);
     }
@@ -587,19 +597,25 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const virtualizerRef = useRef(virtualizer);
   virtualizerRef.current = virtualizer;
   const selectedPresent = !!selectedThreadId && items.some((it) => it.threadId !== undefined && it.threadId === selectedThreadId);
-  // Scrolled at most once per selection, the first time that thread appears in
-  // the list — so a deep link or a boot with a selection scrolls when the list
-  // arrives, and no later reload can snap a user who has scrolled away back
-  // (Gemini follow-up F-01).
+  // Scrolled once per selection *episode*: when the user picks a thread (even
+  // the same one again), and when a thread selected before the list existed
+  // first appears in it — but never again for the same selection in the same
+  // folder, so a reload that drops and re-adds the row cannot snap a user who
+  // has scrolled away (Gemini/Grok follow-up). The reset effect is declared
+  // first so it runs before the scroll effect in the same commit.
   const lastScrolledRef = useRef<string | null>(null);
   useEffect(() => {
+    lastScrolledRef.current = null;
+  }, [selectedThreadId]);
+  useEffect(() => {
     if (!selectedThreadId || !selectedPresent) return;
-    if (lastScrolledRef.current === selectedThreadId) return;
+    const episode = `${folderKey}|${selectedThreadId}`;
+    if (lastScrolledRef.current === episode) return;
     const index = itemsRef.current.findIndex((it) => it.threadId === selectedThreadId);
     if (index < 0) return;
-    lastScrolledRef.current = selectedThreadId;
+    lastScrolledRef.current = episode;
     virtualizerRef.current.scrollToIndex(index, { align: "auto" });
-  }, [selectedThreadId, selectedPresent]);
+  }, [selectedThreadId, selectedPresent, folderKey]);
 
   // REQ-3.3: load more when the last rendered row is within five of the end.
   // `loadMore` guards on `hasMore`/`loadingMore` itself; the guard here just
@@ -616,7 +632,6 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   // set is captured by `loadThreads` itself from the rows it just loaded, so
   // it is never the previous folder's, and it survives the virtualizer's
   // measure re-renders (Gemini follow-up F-02).
-  const folderKey = `${activeAccountId ?? ""}|${activeLabel}|${activeCategory}`;
   const staggerIds = staggerSet?.folder === folderKey ? staggerSet.ids : null;
 
   const renderItem = (item: ListItem, index: number) => {

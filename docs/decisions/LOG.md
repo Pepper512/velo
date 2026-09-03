@@ -2095,3 +2095,19 @@
   nothing; dropping the `kind === "thread"` filter is inert there and matters only if bundles
   ever move down the list. Raw outputs in
   `docs/reviews/2026-09-03-pr92-sb3-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-3 third pass on `7249e32..859ecef` (Gemini 3.8 Flash High): CHANGES
+  REQUESTED (1H 1M 2L)** — and the High was right again, in a fix to a fix. **Adopted — H
+  F-01:** latching "the id I scrolled for" forever meant re-selecting the same thread after
+  scrolling away never scrolled again (the id only changes if you select something else and
+  come back), and a folder switch holding the same selection never scrolled either. The latch
+  is now the *episode* `folder|id`, cleared by an effect keyed on the selection that is
+  declared before the scroll effect: picking a thread scrolls (even the same one again), a
+  folder switch scrolls once in the new folder, and a reload that drops and re-adds the row
+  does not. **Adopted — L F-03:** one `folderKeyOf` helper for both call sites; the render-time
+  key had also been declared *after* the effect that read it, a temporal-dead-zone crash
+  waiting for the first selection — hoisted. **Adopted — L F-04:** a failed load clears the
+  stagger set. **Adopted — M F-02 (partly):** a test now changes folder and pins the exact bug
+  the second pass found — the outgoing rows do not animate on the switch frame, the incoming
+  rows do once their load lands. The negative load-more assertion keeps its short real-timer
+  wait (the suite uses real timers throughout). Raw output in
+  `docs/reviews/2026-09-03-pr92-sb3-delta2-gemini38-raw.md`.

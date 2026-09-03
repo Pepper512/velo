@@ -8,9 +8,9 @@ import { render, screen, waitFor, act } from "@testing-library/react";
  */
 
 // Router hooks: inbox, "All", a mutable selection.
-const nav = vi.hoisted(() => ({ selectedThreadId: null as string | null }));
+const nav = vi.hoisted(() => ({ selectedThreadId: null as string | null, label: "inbox" }));
 vi.mock("@/hooks/useRouteNavigation", () => ({
-  useActiveLabel: () => "inbox",
+  useActiveLabel: () => nav.label,
   useSelectedThreadId: () => nav.selectedThreadId,
   useActiveCategory: () => null,
 }));
@@ -126,6 +126,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   nav.selectedThreadId = null;
+  nav.label = "inbox";
   mode.paged = false;
   mode.bundled = false;
   getThreadsForAccount.mockClear();
@@ -208,6 +209,21 @@ describe("EmailList — virtualized (SPEC-SB REQ-3)", () => {
     act(() => scroller.scrollTo({ top: 50 * ROW }));
     await waitFor(() => expect(useThreadStore.getState().threads).toHaveLength(100));
     expect(getThreadsForAccount).toHaveBeenLastCalledWith("acc1", "INBOX", 50, 50);
+  });
+
+  it("staggers the new folder's rows after a folder change, not the outgoing list's (REQ-3.4)", async () => {
+    const { rerender } = render(<EmailList />);
+    const row = (id: string) => document.querySelector<HTMLElement>(`[data-thread-id="${id}"]`);
+    await waitFor(() => expect(row("t0")).not.toBeNull());
+    expect(row("t0")!.classList.contains("stagger-in")).toBe(true);
+    // Settle the first folder: its rows keep the class, and a later re-render
+    // must not hand the class to the outgoing list under the new folder's key.
+    nav.label = "starred";
+    act(() => rerender(<EmailList />));
+    // The same rows are still on screen for a frame; they belong to the old folder.
+    expect(row("t0")!.classList.contains("stagger-in")).toBe(false);
+    // Once the new folder's load lands, its rows animate.
+    await waitFor(() => expect(row("t0")!.classList.contains("stagger-in")).toBe(true));
   });
 
   it("puts the 'Other emails' divider before the first unpinned thread (REQ-3.2)", async () => {
