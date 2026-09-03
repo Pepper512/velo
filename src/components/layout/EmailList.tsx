@@ -5,6 +5,8 @@ import { CategoryTabs } from "../email/CategoryTabs";
 import { SearchBar } from "../search/SearchBar";
 import { EmailListSkeleton } from "../ui/Skeleton";
 import { useThreadStore, type Thread } from "@/stores/threadStore";
+import { threadMessageCache, type PrefetchJob } from "@/services/threads/messageCache";
+import { prefetchOrder, PREFETCH_DELAY_MS } from "@/services/threads/neighbours";
 import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel, useSelectedThreadId, useActiveCategory } from "@/hooks/useRouteNavigation";
@@ -266,6 +268,23 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       return true;
     });
   }, [filteredThreads, activeLabel, activeCategory, categoryMap, bundledCategorySet, heldThreadIds]);
+
+  // SPEC-SB REQ-2.3: after a 150 ms quiet period, warm the message cache for
+  // the next three and previous one threads in visible order; a newer
+  // selection cancels a pending or running warm-up.
+  useEffect(() => {
+    if (!activeAccountId || !selectedThreadId) return;
+    const order = prefetchOrder(visibleThreads.map((t) => t.id), selectedThreadId);
+    if (order.length === 0) return;
+    let job: PrefetchJob | null = null;
+    const timer = setTimeout(() => {
+      job = threadMessageCache.prefetch(activeAccountId, order);
+    }, PREFETCH_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      job?.cancel();
+    };
+  }, [activeAccountId, selectedThreadId, visibleThreads]);
 
   const mapDbThreads = useCallback(async (dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>): Promise<Thread[]> => {
     return Promise.all(

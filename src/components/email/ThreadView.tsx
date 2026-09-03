@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { MessageItem } from "./MessageItem";
 import { ActionBar } from "./ActionBar";
 import { getMessagesForThread, type DbMessage } from "@/services/db/messages";
+import { threadMessageCache, sameMessages } from "@/services/threads/messageCache";
 import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore, type Thread } from "@/stores/threadStore";
@@ -99,14 +100,28 @@ export function ThreadView({ thread }: ThreadViewProps) {
     getSetting("block_remote_images").then((val) => setBlockImages(val !== "false"));
   }, []);
 
-  // Load messages
+  // Load messages. SPEC-SB REQ-2.1: paint the cached copy at once when there
+  // is one (no skeleton), then re-query and replace it only if the thread
+  // changed. A result that lands after the thread switched again is dropped.
   useEffect(() => {
     if (!activeAccountId) return;
-    setLoading(true);
-    getMessagesForThread(activeAccountId, thread.id)
-      .then(setMessages)
+    let cancelled = false;
+    const cached = threadMessageCache.peek(activeAccountId, thread.id);
+    if (cached) {
+      setMessages(cached);
+      setLoading(false);
+    } else {
+      setLoading(true);
+    }
+    threadMessageCache
+      .load(activeAccountId, thread.id)
+      .then((fresh) => {
+        if (cancelled) return;
+        setMessages((prev) => (cached && sameMessages(prev, fresh) ? prev : fresh));
+      })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [activeAccountId, thread.id]);
 
   // Check per-sender allowlist (single batch query instead of N queries)
