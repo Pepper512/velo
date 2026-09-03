@@ -55,13 +55,9 @@ export function createMessageCache(loader: MessageLoader, options: { capacity?: 
     }
   };
 
-  const peek: MessageCache["peek"] = (accountId, threadId) => {
-    const key = keyOf(accountId, threadId);
-    const value = entries.get(key);
-    if (!value) return null;
-    touch(key, value);
-    return value;
-  };
+  // Pure: no LRU touch, so the thread view may read it during render.
+  // Recency is refreshed by the load that always follows a peek.
+  const peek: MessageCache["peek"] = (accountId, threadId) => entries.get(keyOf(accountId, threadId)) ?? null;
 
   const load: MessageCache["load"] = async (accountId, threadId) => {
     const startedIn = generation;
@@ -99,9 +95,10 @@ export function createMessageCache(loader: MessageLoader, options: { capacity?: 
 }
 
 /**
- * A cheap "did the thread change" test for the re-query after a cached
- * paint: ids and dates in order, plus body lengths — a draft edited locally
- * keeps its id and date but not its length (Grok SB-2 F4).
+ * "Did the thread change" for the re-query after a cached paint: ids, dates,
+ * read/starred flags and the bodies themselves, in order. String equality is
+ * a pointer-or-length check first, so this is as cheap as a fingerprint and
+ * misses nothing a draft edit or a flag flip could do (Gemini follow-up F-02).
  */
 export function sameMessages(a: DbMessage[], b: DbMessage[]): boolean {
   if (a.length !== b.length) return false;
@@ -109,8 +106,8 @@ export function sameMessages(a: DbMessage[], b: DbMessage[]): boolean {
     const x = a[i]!;
     const y = b[i]!;
     if (x.id !== y.id || x.date !== y.date) return false;
-    if ((x.body_html?.length ?? 0) !== (y.body_html?.length ?? 0)) return false;
-    if ((x.body_text?.length ?? 0) !== (y.body_text?.length ?? 0)) return false;
+    if (x.is_read !== y.is_read || x.is_starred !== y.is_starred) return false;
+    if (x.body_html !== y.body_html || x.body_text !== y.body_text) return false;
   }
   return true;
 }

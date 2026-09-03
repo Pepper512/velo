@@ -92,18 +92,20 @@ export function ThreadView({ thread }: ThreadViewProps) {
   // read back only for the current thread, so the render right after a
   // `j`/`k` never shows the previous thread's messages under the new header,
   // and a cached thread paints on its very first render — no skeleton.
-  const [messagesState, setMessagesState] = useState<{ threadId: string; list: DbMessage[] } | null>(null);
+  const [messagesState, setMessagesState] = useState<{ accountId: string; threadId: string; list: DbMessage[] } | null>(null);
+  // `peek` is pure (no LRU touch), so reading it during render is safe.
   const cachedMessages = useMemo(
     () => (activeAccountId ? threadMessageCache.peek(activeAccountId, thread.id) : null),
     [activeAccountId, thread.id],
   );
-  const messages = messagesState?.threadId === thread.id ? messagesState.list : (cachedMessages ?? []);
+  const stateIsCurrent = messagesState !== null && messagesState.accountId === activeAccountId && messagesState.threadId === thread.id;
+  const messages = stateIsCurrent ? messagesState.list : (cachedMessages ?? []);
   const setMessages = useCallback(
-    (list: DbMessage[]) => setMessagesState({ threadId: thread.id, list }),
-    [thread.id],
+    (list: DbMessage[]) => { if (activeAccountId) setMessagesState({ accountId: activeAccountId, threadId: thread.id, list }); },
+    [activeAccountId, thread.id],
   );
   // Loading = nothing to show for this thread yet: no state for it, nothing cached.
-  const loading = messagesState?.threadId !== thread.id && cachedMessages === null;
+  const loading = !stateIsCurrent && cachedMessages === null;
   const markedReadRef = useRef<string | null>(null);
   // null = not yet loaded; defer iframe rendering until setting is known
   const [blockImages, setBlockImages] = useState<boolean | null>(null);
@@ -120,21 +122,25 @@ export function ThreadView({ thread }: ThreadViewProps) {
   useEffect(() => {
     if (!activeAccountId) return;
     let cancelled = false;
+    const accountId = activeAccountId;
     const threadId = thread.id;
-    const cached = threadMessageCache.peek(activeAccountId, threadId);
+    // Compare against what this render painted, not a fresh peek: a prefetch
+    // landing between render and effect must not leave the skeleton up
+    // (Gemini follow-up F-01).
+    const painted = cachedMessages;
     threadMessageCache
-      .load(activeAccountId, threadId)
+      .load(accountId, threadId)
       .then((fresh) => {
         if (cancelled) return;
-        if (!cached || !sameMessages(cached, fresh)) setMessagesState({ threadId, list: fresh });
+        if (!painted || !sameMessages(painted, fresh)) setMessagesState({ accountId, threadId, list: fresh });
       })
       .catch((err) => {
         console.error(err);
         // A failed read shows an empty thread rather than a skeleton forever, as before.
-        if (!cancelled && !cached) setMessagesState({ threadId, list: [] });
+        if (!cancelled && !painted) setMessagesState({ accountId, threadId, list: [] });
       });
     return () => { cancelled = true; };
-  }, [activeAccountId, thread.id]);
+  }, [activeAccountId, thread.id, cachedMessages]);
 
   // Check per-sender allowlist (single batch query instead of N queries)
   useEffect(() => {

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 
 // The app instance wraps the SQLite read; stub it so the singleton can be exercised.
 vi.mock("../db/messages", () => ({
@@ -9,6 +9,15 @@ import { createMessageCache, sameMessages, threadMessageCache, MESSAGE_CACHE_CAP
 import type { DbMessage } from "../db/messages";
 
 describe("threadMessageCache (the app instance)", () => {
+  afterEach(() => threadMessageCache.clear());
+
+  it("evicts the oldest entry past 30 (REQ-2.2)", async () => {
+    for (let i = 0; i < 31; i++) await threadMessageCache.load("acc", `t${i}`);
+    expect(threadMessageCache.size()).toBe(30);
+    expect(threadMessageCache.peek("acc", "t0")).toBeNull();
+    expect(threadMessageCache.peek("acc", "t30")).not.toBeNull();
+  });
+
   it("holds 30 threads and is cleared by velo-sync-done (REQ-2.2)", async () => {
     expect(MESSAGE_CACHE_CAPACITY).toBe(30);
     await threadMessageCache.load("acc", "t1");
@@ -69,7 +78,7 @@ describe("createMessageCache", () => {
     const cache = createMessageCache(async (_a, t) => [msg(t)], { capacity: 2 });
     await cache.load("acc", "t1");
     await cache.load("acc", "t2");
-    cache.peek("acc", "t1"); // t1 is now the most recently used
+    await cache.load("acc", "t1"); // t1 is now the most recently used (peek is pure and does not count)
     await cache.load("acc", "t3");
     expect(cache.peek("acc", "t2")).toBeNull();
     expect(cache.peek("acc", "t1")).not.toBeNull();
@@ -164,10 +173,16 @@ describe("sameMessages", () => {
     expect(sameMessages([], [])).toBe(true);
   });
 
-  it("sees a body edit that keeps id and date — a draft saved locally (Grok F4)", () => {
-    const before = { ...msg("d", 5), body_html: "<p>hi</p>", body_text: "hi" } as DbMessage;
-    const after = { ...msg("d", 5), body_html: "<p>hi there</p>", body_text: "hi there" } as DbMessage;
-    expect(sameMessages([before], [after])).toBe(false);
+  it("sees a body edit that keeps id, date and even length — a draft saved locally (Grok F4, Gemini F-02)", () => {
+    const before = { ...msg("d", 5), body_html: "<p>hi</p>", body_text: "hi", is_read: 1, is_starred: 0 } as DbMessage;
+    const sameLength = { ...before, body_html: "<p>ho</p>", body_text: "ho" } as DbMessage;
+    expect(sameMessages([before], [sameLength])).toBe(false);
     expect(sameMessages([before], [{ ...before }])).toBe(true);
+  });
+
+  it("sees a read or starred flag flip", () => {
+    const m = { ...msg("d", 5), body_html: null, body_text: "x", is_read: 0, is_starred: 0 } as DbMessage;
+    expect(sameMessages([m], [{ ...m, is_read: 1 }])).toBe(false);
+    expect(sameMessages([m], [{ ...m, is_starred: 1 }])).toBe(false);
   });
 });

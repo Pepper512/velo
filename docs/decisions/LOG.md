@@ -1996,3 +1996,43 @@
   the reload after a send (`ThreadView.tsx`, the inline-reply `onSent`). **Notes:** cancel does
   not abort the SELECT in flight, by design (Grok N F6). Raw outputs in
   `docs/reviews/2026-09-03-pr92-sb2-open-instantly-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-2 follow-up pass on `4878153..2766bd0`, two legs.** Gemini: CHANGES
+  REQUESTED (2H 2M 2L); Grok: CHANGES REQUESTED (3M 4L 2N) — and the two legs found the *same*
+  four holes in the first round's fix. **Adopted, both legs — the stuck skeleton** (Gemini H
+  F-01, Grok M F3): the effect re-peeked the cache and, when a neighbour warm-up landed between
+  render and effect, found a hit equal to the fresh rows and skipped the state write — so the
+  render that had painted a miss stayed on the skeleton; the effect now compares against what
+  that render painted (`cachedMessages` from the closure). **Adopted, both legs — the
+  fingerprint** (Gemini H F-02, Grok M F1): lengths could miss a same-length draft edit; the
+  compare is now ids, dates, read/starred flags and the body strings themselves (string
+  equality is a pointer-or-length check first). **Adopted, both legs — account-scoped state**
+  (Gemini L F-05, Grok M F2): the keyed state carries the account id, as the cache key does.
+  **Adopted, both legs — a pure peek** (Gemini M F-04, Grok L F4): reading the cache during
+  render no longer touches LRU order; the load that always follows does. **Adopted, both legs
+  — singleton tests** (Gemini L F-06, Grok L F6): 31 loads evict to 30; `afterEach` clears.
+  **Adopted (Grok L F5):** the prefetch key joins ids with the same NUL character the cache key
+  uses, via `String.fromCharCode(0)` — no escape to mistype. **Declined, verified — Gemini M
+  F-03** ("no selection warms the first three threads"): `prefetchOrder` returns `[]` for a
+  null or absent selection (`neighbours.ts`, both guards; tested). **Residual, recorded (Grok
+  L F7):** a thread load in flight across a sync paints pre-sync rows until the thread is
+  reopened — the same as before SB-2; the generation counter keeps the cache clean, the open
+  view is not subscribed to sync. Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb2-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — SB-3 (virtualized list) decisions.** `@tanstack/react-virtual` 3.14.10 exact
+  (SLSA provenance on both packages; `npm audit signatures` verifies 120 attestations
+  locally). One flat item model (`services/inbox/listItems.ts`, pure, 9 tests): bundle
+  headers, expanded children, threads with the divider computed on the **visible** sequence
+  (the old code read the previous row from a different array — the latent bug named in the
+  brief), two footers; per-kind, per-density estimates, measured after mount. `EmailList`
+  positions rows with `translateY`, scrolls the selection into view through
+  `scrollToIndex` keyed on the selection only (a reload while the user scrolled away must not
+  snap back), loads more when the last rendered row is within five of the end, and plays
+  `stagger-in` only on the first paint of a loaded list (reset per folder). The render test
+  (`EmailList.virtual.test.tsx`) stubs what jsdom lacks — `offsetHeight`/`clientHeight`
+  (the virtualizer reads the viewport from them), `scrollHeight` (it clamps `scrollToIndex`
+  to `scrollHeight - clientHeight`), a `scrollTop` backing field and `scrollTo` — and proves
+  200 threads render as 16 rows, a far selection scrolls into the window, and the divider sits
+  on the first unpinned row. `ThreadCard` is not memoised: with 16 rows on screen a reload
+  re-renders 16 cards, not 200. **Lesson recorded:** twice this session a single-space
+  literal I typed arrived as a NUL byte; every changed file is now scanned for NULs before a
+  commit (`nulscan.py` in the session scratchpad — worth a repo script if it recurs).
