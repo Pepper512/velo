@@ -298,7 +298,9 @@ describe("GmailApiProvider", () => {
         "base64data",
         "thread-1",
       );
-      expect(result).toEqual({ id: "sent-msg-1" });
+      // The thread comes back too (SPEC-AR): an automatic follow-up reminder
+      // for a brand-new message needs a thread to hang on.
+      expect(result).toEqual({ id: "sent-msg-1", threadId: "thread-1" });
     });
   });
 

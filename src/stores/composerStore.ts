@@ -35,6 +35,12 @@ export interface ComposerState {
   viewMode: ComposerViewMode;
   signatureHtml: string;
   signatureId: string | null;
+  /**
+   * SPEC-AR: the user's choice for this message's automatic follow-up
+   * reminder. `null` means "follow the rule" (external send → on); a
+   * boolean is a choice the user made and keeps for this message.
+   */
+  autoReminderOverride: boolean | null;
 
   openComposer: (opts?: {
     mode?: ComposerMode;
@@ -67,6 +73,7 @@ export interface ComposerState {
   setViewMode: (mode: ComposerViewMode) => void;
   setSignatureHtml: (html: string) => void;
   setSignatureId: (id: string | null) => void;
+  setAutoReminderOverride: (value: boolean | null) => void;
 }
 
 export const useComposerStore = create<ComposerState>((set) => ({
@@ -91,6 +98,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
   saveError: null,
   signatureHtml: "",
   signatureId: null,
+  autoReminderOverride: null,
 
   openComposer: (opts) =>
     set({
@@ -113,6 +121,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       saveError: null,
       signatureHtml: "",
       signatureId: null,
+      autoReminderOverride: null,
     }),
   closeComposer: () =>
     set({
@@ -135,6 +144,7 @@ export const useComposerStore = create<ComposerState>((set) => ({
       saveError: null,
       signatureHtml: "",
       signatureId: null,
+      autoReminderOverride: null,
     }),
   setTo: (to) => set({ to }),
   setCc: (cc) => set({ cc }),
@@ -159,4 +169,5 @@ export const useComposerStore = create<ComposerState>((set) => ({
   setViewMode: (viewMode) => set({ viewMode }),
   setSignatureHtml: (signatureHtml) => set({ signatureHtml }),
   setSignatureId: (signatureId) => set({ signatureId }),
+  setAutoReminderOverride: (autoReminderOverride) => set({ autoReminderOverride }),
 }));

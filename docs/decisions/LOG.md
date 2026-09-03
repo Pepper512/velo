@@ -1562,3 +1562,25 @@
   `async-imap`'s `Name`, never pre-quoted. Raw outputs in
   `docs/reviews/2026-09-03-pr78-plan-e-{gemini38,grok}-raw.md`. **Both plans stop here: no
   code until Jim approves each.**
+- **2026-09-03 — SPEC-AR (Auto Reminders on external sends) built, PR #80, Tier 1.**
+  Enhancement wave 1 item 1 (`docs/ROADMAP.md` §4), brief at
+  `docs/briefs/2026-09-03-auto-reminders.md` committed before code. A pure module
+  `src/services/followup/autoReminders.ts` holds the rule (recipient domain differs from the
+  sender's and is not an own address or alias), the due-time math (+N days at 09:00 local,
+  Saturday → Monday, Sunday → Monday), the effective decision (override wins, else rule),
+  the day-choice normaliser (1/2/3/7, default 3) and `scheduleAutoReminder`, which never
+  overwrites an existing reminder (`existing`), warns and sets nothing without a thread id
+  (`no-thread`) and reports insert failures (`failed`) without touching the send outcome.
+  Tests first (22 cases, red then green). REQ-5: `EmailProvider.sendMessage` now returns
+  `{ id, threadId? }` — Gmail from the API response, IMAP from the thread the Sent copy was
+  saved under (the reply's thread, or the new message's own id), with provider tests
+  asserting both. Composer: "Remind me if no reply in N days" checkbox in the footer, shown
+  only when the setting is on, defaulting to the external rule; the decision is taken at
+  Send from what the user saw and the reminder is set after a successful send with a message
+  id (a queued offline send has none, so nothing is set). Settings → Sending: "Auto
+  reminders on external sends" toggle and a "Remind after" select; both persisted
+  (`auto_reminders_enabled`, `auto_reminders_days`) and restored at boot. Help entry
+  extended. Not done, per the brief: auto-drafts, scheduled-send reminders, a Reminders tab,
+  domain allow-lists, checker changes. Gates run here: `tsc` clean, vitest 174 files /
+  2321 tests green, `graph:check` and `docs:check` green (test-file counts bumped 173 → 174,
+  services 95 → 96). CI is the source of the pass bit. No dependency added.

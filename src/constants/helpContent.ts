@@ -716,7 +716,9 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         description:
           "After sending an important email, set a follow-up reminder. If no one replies within your chosen timeframe (e.g., 2 days, 1 week), you'll get a notification reminding you to follow up. The reminder only triggers if the thread has no new replies — if someone responds before the deadline, the reminder is automatically dismissed. Follow-up reminders are checked in the background every 60 seconds.",
         tips: [
-          { text: "Set a follow-up reminder from the thread action bar." },
+          { text: "Automatic: when you send to someone outside your own domain, a reminder is set for you — 3 days later at 9:00, never on a weekend. The composer shows \"Remind me if no reply\" before you send; untick it for that message." },
+          { text: "Turn automatic reminders off, or change the delay (1, 2, 3 or 7 days), under Settings → Sending." },
+          { text: "Set a follow-up reminder by hand from the thread action bar; an automatic one never replaces it." },
           { text: "Choose a timeframe: 1 day, 2 days, 1 week, or custom." },
           { text: "Reminders auto-cancel if a reply arrives before the deadline." },
           { text: "You'll receive a desktop notification when the follow-up is due." },

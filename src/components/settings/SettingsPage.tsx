@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams } from "@tanstack/react-router";
 import { useUIStore } from "@/stores/uiStore";
+import { AUTO_REMINDER_DAY_CHOICES } from "@/services/followup/autoReminders";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
@@ -95,6 +96,10 @@ export function SettingsPage() {
   const setMarkAsReadBehavior = useUIStore((s) => s.setMarkAsReadBehavior);
   const sendAndArchive = useUIStore((s) => s.sendAndArchive);
   const setSendAndArchive = useUIStore((s) => s.setSendAndArchive);
+  const autoRemindersEnabled = useUIStore((s) => s.autoRemindersEnabled);
+  const setAutoRemindersEnabled = useUIStore((s) => s.setAutoRemindersEnabled);
+  const autoRemindersDays = useUIStore((s) => s.autoRemindersDays);
+  const setAutoRemindersDays = useUIStore((s) => s.setAutoRemindersDays);
   const inboxViewMode = useUIStore((s) => s.inboxViewMode);
   const setInboxViewMode = useUIStore((s) => s.setInboxViewMode);
   const reduceMotion = useUIStore((s) => s.reduceMotion);
@@ -773,6 +778,26 @@ export function SettingsPage() {
                       checked={sendAndArchive}
                       onToggle={() => setSendAndArchive(!sendAndArchive)}
                     />
+                    <ToggleRow
+                      label="Auto reminders on external sends"
+                      description="Set a follow-up reminder when you email someone outside your domain and get no reply"
+                      checked={autoRemindersEnabled}
+                      onToggle={() => setAutoRemindersEnabled(!autoRemindersEnabled)}
+                    />
+                    <SettingRow label="Remind after">
+                      <select
+                        value={autoRemindersDays}
+                        onChange={(e) => setAutoRemindersDays(Number(e.target.value))}
+                        disabled={!autoRemindersEnabled}
+                        className="w-48 bg-bg-tertiary text-text-primary text-sm px-3 py-1.5 rounded-md border border-border-primary focus:border-accent outline-none disabled:opacity-50"
+                      >
+                        {AUTO_REMINDER_DAY_CHOICES.map((d) => (
+                          <option key={d} value={d}>
+                            {d === 1 ? "1 day" : `${d} days`}
+                          </option>
+                        ))}
+                      </select>
+                    </SettingRow>
                   </Section>
 
                   <Section title="Behavior">

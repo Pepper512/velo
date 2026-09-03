@@ -667,6 +667,9 @@ describe("ImapSmtpProvider", () => {
         ["Seen"],
       );
       expect(result.id).toMatch(/^imap-sent-/);
+      // A new message's thread is the one the sent copy was saved under —
+      // its own id (SPEC-AR needs a thread to set the reminder on).
+      expect(result.threadId).toBe(result.id);
     });
 
     it("hands the Bcc-bearing bytes unchanged to both SMTP and the Sent copy — the wire strip is Rust's (#297 REQ-2.1)", async () => {
@@ -696,6 +699,7 @@ describe("ImapSmtpProvider", () => {
       vi.mocked(getThreadLabelIds).mockResolvedValue(["INBOX"]);
 
       const result = await provider.sendMessage(rawBase64Url, "existing-thread-1");
+      expect(result.threadId).toBe("existing-thread-1");
 
       // Should add SENT to existing labels
       expect(setThreadLabels).toHaveBeenCalledWith(

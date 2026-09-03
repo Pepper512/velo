@@ -57,6 +57,10 @@ interface UIState {
   fontScale: FontScale;
   colorTheme: ColorThemeId;
   sendAndArchive: boolean;
+  /** SPEC-AR: a follow-up reminder by default on external sends. On unless turned off. */
+  autoRemindersEnabled: boolean;
+  /** SPEC-AR: days until the automatic reminder falls due (1, 2, 3 or 7). */
+  autoRemindersDays: number;
   inboxViewMode: InboxViewMode;
   taskSidebarVisible: boolean;
   sidebarNavConfig: SidebarNavItem[] | null;
@@ -80,6 +84,8 @@ interface UIState {
   setFontScale: (scale: FontScale) => void;
   setColorTheme: (theme: ColorThemeId) => void;
   setSendAndArchive: (enabled: boolean) => void;
+  setAutoRemindersEnabled: (enabled: boolean) => void;
+  setAutoRemindersDays: (days: number) => void;
   setInboxViewMode: (mode: InboxViewMode) => void;
   toggleTaskSidebar: () => void;
   setTaskSidebarVisible: (visible: boolean) => void;
@@ -113,6 +119,8 @@ export const useUIStore = create<UIState>((set) => ({
   fontScale: "default",
   colorTheme: "indigo",
   sendAndArchive: false,
+  autoRemindersEnabled: true,
+  autoRemindersDays: 3,
   inboxViewMode: "unified",
   taskSidebarVisible: false,
   sidebarNavConfig: null,
@@ -172,6 +180,14 @@ export const useUIStore = create<UIState>((set) => ({
   setSendAndArchive: (sendAndArchive) => {
     setSetting("send_and_archive", String(sendAndArchive)).catch(() => {});
     set({ sendAndArchive });
+  },
+  setAutoRemindersEnabled: (autoRemindersEnabled) => {
+    setSetting("auto_reminders_enabled", String(autoRemindersEnabled)).catch(() => {});
+    set({ autoRemindersEnabled });
+  },
+  setAutoRemindersDays: (autoRemindersDays) => {
+    setSetting("auto_reminders_days", String(autoRemindersDays)).catch(() => {});
+    set({ autoRemindersDays });
   },
   setInboxViewMode: (inboxViewMode) => {
     setSetting("inbox_view_mode", inboxViewMode).catch(() => {});

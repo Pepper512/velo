@@ -30,6 +30,8 @@ import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/d
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
 import { startAutoSave, stopAutoSave } from "@/services/composer/draftAutoSave";
 import { getTemplatesForAccount, type DbTemplate } from "@/services/db/templates";
+import { effectiveAutoReminder, isExternalSend, scheduleAutoReminder } from "@/services/followup/autoReminders";
+import { getFollowUpForThread, insertFollowUpReminder } from "@/services/db/followUpReminders";
 import { readFileAsBase64 } from "@/utils/fileUtils";
 import { interpolateVariables } from "@/utils/templateVariables";
 import { sanitizeHtml } from "@/utils/sanitize";
@@ -48,6 +50,10 @@ export function Composer() {
   const signatureHtml = useComposerStore((s) => s.signatureHtml);
   const isSaving = useComposerStore((s) => s.isSaving);
   const lastSavedAt = useComposerStore((s) => s.lastSavedAt);
+  const autoReminderOverride = useComposerStore((s) => s.autoReminderOverride);
+  const setAutoReminderOverride = useComposerStore((s) => s.setAutoReminderOverride);
+  const autoRemindersEnabled = useUIStore((s) => s.autoRemindersEnabled);
+  const autoRemindersDays = useUIStore((s) => s.autoRemindersDays);
   const saveError = useComposerStore((s) => s.saveError);
   // Note: bodyHtml intentionally NOT subscribed — TipTap manages its own editor state.
   // Subscribing would cause full re-renders on every keystroke.
@@ -69,6 +75,15 @@ export function Composer() {
   const [showAiAssist, setShowAiAssist] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
   const [aliases, setAliases] = useState<SendAsAlias[]>([]);
+  // SPEC-AR REQ-1: is this message leaving the sender's domain? Drives the
+  // default of the "Remind me if no reply" control; the user's tick wins.
+  const autoReminderExternal = activeAccount
+    ? isExternalSend({
+        from: fromEmail ?? activeAccount.email,
+        recipients: [...to, ...cc, ...bcc],
+        ownAddresses: [activeAccount.email, ...aliases.map((a) => a.email)],
+      })
+    : false;
   const templateShortcutsRef = useRef<DbTemplate[]>([]);
   const dragCounterRef = useRef(0);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -280,6 +295,17 @@ export function Composer() {
 
     const html = getFullHtml();
     const senderEmail = state.fromEmail ?? activeAccount.email;
+    // SPEC-AR: decide the automatic follow-up reminder now, from what the
+    // user saw when they pressed Send; the send itself decides nothing.
+    const autoReminderWanted = effectiveAutoReminder({
+      enabled: useUIStore.getState().autoRemindersEnabled,
+      override: state.autoReminderOverride,
+      external: isExternalSend({
+        from: senderEmail,
+        recipients: [...state.to, ...state.cc, ...state.bcc],
+        ownAddresses: [activeAccount.email, ...aliases.map((a) => a.email)],
+      }),
+    });
     const raw = buildRawEmail({
       from: senderEmail,
       to: state.to,
@@ -308,7 +334,30 @@ export function Composer() {
 
     const timer = setTimeout(async () => {
       try {
-        await sendEmail(activeAccountId, raw, state.threadId ?? undefined);
+        const sendResult = await sendEmail(activeAccountId, raw, state.threadId ?? undefined);
+
+        // SPEC-AR: automatic follow-up reminder on an external send. It never
+        // touches the send outcome. A queued (offline) send has no message id
+        // yet, so there is nothing to hang a reminder on.
+        if (sendResult.success && autoReminderWanted) {
+          const sent = sendResult.data as { id?: string; threadId?: string } | undefined;
+          if (sent?.id) {
+            try {
+              await scheduleAutoReminder(
+                { getFollowUpForThread, insertFollowUpReminder },
+                {
+                  accountId: activeAccountId,
+                  threadId: sent.threadId ?? state.threadId,
+                  messageId: sent.id,
+                  sentAt: new Date(),
+                  days: useUIStore.getState().autoRemindersDays,
+                },
+              );
+            } catch (err) {
+              console.warn("[autoReminders] Could not set the automatic reminder:", err);
+            }
+          }
+        }
 
         // Delete draft if it was saved
         if (currentDraftId) {
@@ -334,7 +383,7 @@ export function Composer() {
 
     state.setUndoSendTimer(timer);
     closeComposer();
-  }, [activeAccountId, activeAccount, closeComposer, getFullHtml]);
+  }, [activeAccountId, activeAccount, closeComposer, getFullHtml, aliases]);
 
   const handleSchedule = useCallback(async (scheduledAt: number) => {
     if (!activeAccountId || !activeAccount) return;
@@ -626,6 +675,20 @@ export function Composer() {
             <TemplatePicker editor={editor} />
           </div>
           <div className="flex items-center gap-2">
+            {autoRemindersEnabled && (
+              <label
+                className="flex items-center gap-1.5 text-xs text-text-secondary cursor-pointer select-none"
+                title="Set a follow-up reminder if nobody replies. Change the delay or turn this off under Settings → Sending."
+              >
+                <input
+                  type="checkbox"
+                  className="accent-accent"
+                  checked={autoReminderOverride ?? autoReminderExternal}
+                  onChange={(e) => setAutoReminderOverride(e.target.checked)}
+                />
+                Remind me if no reply in {autoRemindersDays} {autoRemindersDays === 1 ? "day" : "days"}
+              </label>
+            )}
             <Button
               variant="secondary"
               onClick={handleDiscard}

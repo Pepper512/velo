@@ -76,10 +76,16 @@ export interface EmailProvider {
   removeLabel(threadId: string, labelId: string): Promise<void>;
 
   // Send/Draft operations
+  /**
+   * `threadId` is the thread the sent message belongs to, when the provider
+   * knows it at send time (SPEC-AR: the automatic follow-up reminder hangs on
+   * it). Gmail returns it in the API response; IMAP is the thread it saved the
+   * sent copy under. Callers that only need `id` are unaffected.
+   */
   sendMessage(
     rawBase64Url: string,
     threadId?: string,
-  ): Promise<{ id: string }>;
+  ): Promise<{ id: string; threadId?: string }>;
   createDraft(
     rawBase64Url: string,
     threadId?: string,
