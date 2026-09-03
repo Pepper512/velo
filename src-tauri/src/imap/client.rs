@@ -2122,6 +2122,11 @@ fn format_address_list(addr: Option<&mail_parser::Address>) -> Option<String> {
     }
 }
 
+// PR E REQ-0: the parser fixture suite lives in a child module so it can reach
+// `parse_message` and friends while keeping this file's own tests small.
+#[cfg(test)]
+mod parser_fixtures;
+
 #[cfg(test)]
 mod tests {
     use super::*;
