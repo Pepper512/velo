@@ -1695,3 +1695,51 @@
   `docs/reviews/2026-09-03-pr83-pr-d-{gemini38,grok}-raw.md`. **Landing:** rebase merge
   (REQ-1.6), six commits — the four planned plus two review-fix commits on `check-dist`
   and the brief.
+- **2026-09-03 — PR E built, PR #84, Tier 2, five commits for rebase merge.** Plan
+  `docs/briefs/2026-09-03-pr-e-rust-parsers.md`, approved by Jim 2026-09-03 (decision 3;
+  Approval line filled in commit 5). Commit 1 `a081246`: the REQ-0 fixture suite in
+  `imap/client/parser_fixtures.rs` — 14 invariant and 10 hardening cases pinned from a probe
+  of 0.9.4, not from the RFCs. Commit 2 `2bce89d`: `mail-parser =0.11.8`, `default-features =
+  false`, `full_encoding`; the three `u32 → usize` boundary conversions; lockfile +`hashify`
+  0.2.9. **Named deviation from REQ-1.1:** the `List-Unsubscribe-Post` and
+  `Authentication-Results` lookups moved from `HeaderName::Other(..)` to 0.11's known variants
+  — 0.11's `HeaderName` equality never matches `Other` against a known name, so the invariant
+  suite showed both fields vanishing from every IMAP message. **REQ-3 correction:**
+  `full_encoding` gates the multi-byte decoders only (single-byte tables are built in), so a
+  Shift_JIS invariant fixture was added and the fail-closed proof measured on it. Hardening
+  moves under 0.11: obsolete zone names parsed; stray-`=` quoted-printable decoded leniently.
+  Commit 3 `7249a2a`: `async-imap =0.11.3`; `imap/wire_bytes.rs` pins the measured bytes over
+  a duplex stream (quoted once, escaped once; `&AOQ-` untouched; LIST `"" *`; CR/LF refused
+  before any byte); one new ignored live test (folder with a space through the pool).
+  Commit 4 `f8bfc2b`: `socket2 =0.6.5`, one copy. Commit 5 `3d02c7f`: `reqwest =0.13.4` with
+  `native-tls-no-alpn` + `json` + `form`; `.use_native_tls()` on the three builders with build
+  tests; the mock-server test pins the token request's `Content-Type` and body encoding.
+  Gates: every REQ-2.1 gate green locally at every commit (the release-profile check is CI's,
+  this Mac's sqlx dylib problem being known); suite 173 → 203 passed, 4 ignored; audit exit 0
+  throughout; sqlx single. **Findings recorded, not fixed:** `List-Unsubscribe` is parsed as
+  an address list on both parser versions and never persisted on the IMAP path (one-click
+  unsubscribe cannot work on IMAP accounts today); a folded `Authentication-Results` of one
+  shape keeps its first line on both. **REQ-2.5:** Docker's engine on this machine answers
+  `Error reading remote info: EOF` (Docker Desktop lives in a quarantine folder); the harness
+  could not be started; the four ignored live tests stay open for Jim under the standing
+  instruction.
+- **2026-09-03 — PR #84 (PR E) review, two legs.** Gemini 3.8 Flash High: APPROVE (2L 1N);
+  Grok 4.6: APPROVE (2L). **Adopted:** the scripted IMAP server ends on the LOGOUT command
+  token, not a substring (Gemini L1); the token mock-server test bounds its wait at 10 s
+  (Gemini L2); the wire test also pins LIST with a pattern that would need quoting (Grok L1)
+  — and the measurement contradicted the finding's expectation: async-imap 0.11.3 sends the
+  LIST **pattern bare and unescaped** (`LIST "" Sent Mail`, `LIST "" a"b\c`), only the
+  reference is quoted; Velo passes `*` and nothing else as the pattern, so no production
+  path is affected, and the fact is now pinned in CI; the plan's §5, REQ-0.1 and Design now
+  name Shift_JIS as the fail-closed guard instead of the single-byte charsets (Grok L2).
+  **Acknowledged:** Gemini N1 — `walk` returns `()`, so the third boundary conversion is
+  `if let Ok(..)`, the same skip as `.ok()?`. Both reviewers confirmed from the diff: the
+  header-lookup deviation is the only `HeaderName::Other` use in the crate; the pinned
+  invariant values (trimmed multipart bodies, synthesised HTML, un-squeezed snippet spaces,
+  `Some("")` text for HTML-only mail) are 0.9.4 behaviour correctly locked, not bugs;
+  `usize::try_from(u32)` cannot fail on this crate's targets; the duplex server is faithful
+  so the bytes are the library's. Per-commit CI: the runs for commits 3 and 4 were cancelled
+  by the workflow's concurrency group when the next push arrived; both were re-run alone on
+  their exact SHAs and passed. Raw outputs in
+  `docs/reviews/2026-09-03-pr84-pr-e-{gemini38,grok}-raw.md`. **Landing:** rebase merge,
+  seven commits — the five planned plus two review-fix commits.

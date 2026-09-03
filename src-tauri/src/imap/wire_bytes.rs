@@ -79,6 +79,16 @@ mod tests {
             let names = session.list(Some(""), Some("*")).await.expect("LIST");
             let _: Vec<_> = names.collect().await;
         }
+        // LIST with patterns that would need quoting: what does the library do
+        // with them? (Grok L1 on #84 — see the expectations below.)
+        {
+            let names = session.list(Some(""), Some("Sent Mail")).await.expect("LIST space");
+            let _: Vec<_> = names.collect().await;
+        }
+        {
+            let names = session.list(Some(""), Some("a\"b\\c")).await.expect("LIST escaped");
+            let _: Vec<_> = names.collect().await;
+        }
         session.logout().await.expect("LOGOUT");
         server.await.expect("server task");
 
@@ -94,7 +104,15 @@ mod tests {
                 // Measured: the LIST reference is quoted, the wildcard pattern
                 // is sent bare — `*` is not a mailbox name.
                 "A0006 LIST \"\" *".to_string(),
-                "A0007 LOGOUT".to_string(),
+                // Measured (Grok L1 on #84 expected one layer of quoting here):
+                // 0.11.3 sends the LIST *pattern* bare and unescaped, whatever it
+                // holds — only the reference is quoted. Velo passes `*` and
+                // nothing else (`list_folders`, `raw` LIST), so no production
+                // path is affected; this pins the fact so a future caller with
+                // a real name learns it from CI, not from a server.
+                "A0007 LIST \"\" Sent Mail".to_string(),
+                "A0008 LIST \"\" a\"b\\c".to_string(),
+                "A0009 LOGOUT".to_string(),
             ],
             "every mailbox name is quoted exactly once and escaped exactly once"
         );
