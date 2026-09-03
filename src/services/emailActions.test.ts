@@ -28,6 +28,10 @@ vi.mock("@/services/imap/reconcileOp", () => ({
 vi.mock("@/services/db/pendingOperations", () => ({
   enqueuePendingOperation: vi.fn(() => Promise.resolve("op-1")),
 }));
+vi.mock("@/services/db/followUpReminders", () => ({
+  getFollowUpForThread: vi.fn(async () => null),
+  insertFollowUpReminder: vi.fn(async () => "fu-1"),
+}));
 
 vi.mock("@/services/db/connection", () => ({
   getDb: vi.fn(() =>
@@ -47,6 +51,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { useThreadStore } from "@/stores/threadStore";
 import { getEmailProvider } from "@/services/email/providerFactory";
 import { enqueuePendingOperation } from "@/services/db/pendingOperations";
+import { getFollowUpForThread, insertFollowUpReminder } from "@/services/db/followUpReminders";
 import {
   archiveThread,
   trashThread,
@@ -56,6 +61,8 @@ import {
   spamThread,
   moveThread,
   executeEmailAction,
+  executeQueuedAction,
+  sendEmail,
 } from "./emailActions";
 import { navigateToThread, getSelectedThreadId } from "@/router/navigate";
 import { createMockEmailProvider, createMockUIStoreState, createMockThreadStoreState } from "@/test/mocks";
@@ -431,6 +438,79 @@ describe("emailActions", () => {
       expect(result.success).toBe(false);
       expect(handler).toHaveBeenCalledTimes(1);
       stop();
+    });
+  });
+
+  describe("auto reminder on send (SPEC-QSR)", () => {
+    const raw = "cmF3";
+
+    beforeEach(() => {
+      vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: true }) as never);
+      vi.mocked(getFollowUpForThread).mockResolvedValue(null);
+      vi.mocked(insertFollowUpReminder).mockResolvedValue("fu-1");
+      mockProvider.sendMessage.mockResolvedValue({ id: "msg-1", threadId: "thr-9" });
+    });
+
+    it("sets the reminder on the provider's thread after an immediate send the user wanted it for (REQ-1.4, 2.1)", async () => {
+      const result = await sendEmail("acct-1", raw, undefined, { autoReminderDays: 3 });
+      expect(result.success).toBe(true);
+      expect(insertFollowUpReminder).toHaveBeenCalledWith("acct-1", "thr-9", "msg-1", expect.any(Number));
+    });
+
+    it("sets nothing when the user did not want one", async () => {
+      const result = await sendEmail("acct-1", raw);
+      expect(result.success).toBe(true);
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+    });
+
+    it("carries the wish and the frozen delay on the queued op when offline, and sets nothing yet (REQ-1.1)", async () => {
+      vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: false }) as never);
+      const result = await sendEmail("acct-1", raw, "thr-reply", { autoReminderDays: 2 });
+      expect(result.queued).toBe(true);
+      expect(enqueuePendingOperation).toHaveBeenCalledWith(
+        "acct-1",
+        "sendMessage",
+        "thr-reply",
+        expect.objectContaining({ rawBase64Url: raw, threadId: "thr-reply", autoReminderDays: 2 }),
+      );
+      expect(mockProvider.sendMessage).not.toHaveBeenCalled();
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+    });
+
+    it("sets the reminder when the queue processor's send succeeds, on the provider's thread (REQ-1.2)", async () => {
+      mockProvider.sendMessage.mockResolvedValue({ id: "msg-2", threadId: "thr-2" });
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, autoReminderDays: 7 });
+      expect(mockProvider.sendMessage).toHaveBeenCalledWith(raw, undefined);
+      expect(insertFollowUpReminder).toHaveBeenCalledWith("acct-1", "thr-2", "msg-2", expect.any(Number));
+    });
+
+    it("falls back to the thread the queued message replied to when the provider reports none", async () => {
+      mockProvider.sendMessage.mockResolvedValue({ id: "msg-3" });
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, threadId: "thr-old", autoReminderDays: 1 });
+      expect(insertFollowUpReminder).toHaveBeenCalledWith("acct-1", "thr-old", "msg-3", expect.any(Number));
+    });
+
+    it("sets nothing for a queued row without the wish (rows from before this change), and none when the send fails (REQ-1.3)", async () => {
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw });
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+
+      mockProvider.sendMessage.mockRejectedValue(new Error("Network error"));
+      await expect(
+        executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, autoReminderDays: 3 }),
+      ).rejects.toThrow("Network error");
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+    });
+
+    it("keeps the send outcome whatever the reminder does: a lookup that throws is logged, not surfaced (REQ-2.2)", async () => {
+      vi.mocked(getFollowUpForThread).mockRejectedValue(new Error("DB error"));
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const result = await sendEmail("acct-1", raw, undefined, { autoReminderDays: 3 });
+      expect(result.success).toBe(true);
+      expect(spy).toHaveBeenCalled();
+      await expect(
+        executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, autoReminderDays: 3 }),
+      ).resolves.toBeUndefined();
+      spy.mockRestore();
     });
   });
 });

@@ -1623,3 +1623,16 @@
   `docs/reviews/2026-09-03-pr80-auto-reminders-gemini38-delta-raw.md`. Lesson, again: a
   follow-up pass on a fix delta finds real polish (three adopted) but its Highs were both
   wrong this time — verify before adopting.
+- **2026-09-03 — SPEC-QSR (Auto Reminders on queued offline sends) built, PR #82, Tier 1.**
+  Jim's decision 5 (2026-09-03): "carry the wants-reminder flag and frozen delay on the queued
+  op, create the reminder when the queue processor's send succeeds, retire the PR 80 warn for
+  that path." Brief `docs/briefs/2026-09-03-queued-send-reminder.md` committed first. The
+  `sendMessage` action gains an optional `autoReminderDays` (presence = wanted; the delay
+  frozen at Send), which rides in the queued row's JSON `params` with no schema change.
+  Reminder creation moves to the action layer — `afterSuccessfulSend` in `emailActions.ts`,
+  called after the online provider call and after a successful queued execution — dated from
+  the actual send, on the provider's thread falling back to the reply's, through the same
+  scheduler as #80; anything the scheduler throws is logged, the send stands. The composer
+  passes `{ autoReminderDays }` when it wants a reminder and no longer schedules or warns
+  itself. Seven cases in `emailActions.test.ts`, red first. No dependency. Gates here: `tsc`
+  clean, full suite green, `graph:check`, `docs:check`.
