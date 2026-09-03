@@ -1118,6 +1118,7 @@ export const HELP_CATEGORIES: HelpCategory[] = [
           { text: "\"System\" follows your OS light/dark preference." },
           { text: "Dark mode is optimized for low-light environments." },
           { text: "The animated background gradient adapts to light/dark mode." },
+          { text: "Reduce effects (Settings > General) turns off the animated background, the blur behind panels and the hover animations — flat panels that are quieter on the CPU. It is on by default on Linux; switch it either way and your choice is kept." },
         ],
         relatedSettingsTab: "general",
       },

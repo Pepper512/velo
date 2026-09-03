@@ -212,4 +212,11 @@ describe("uiStore", () => {
     expect(useUIStore.getState().reduceMotion).toBe(false);
   });
 
+  it("restoreReduceMotion should update state without persisting (SPEC-SB REQ-1.3: the Linux default is not stored)", () => {
+    vi.clearAllMocks();
+    useUIStore.getState().restoreReduceMotion(true);
+    expect(useUIStore.getState().reduceMotion).toBe(true);
+    expect(setSetting).not.toHaveBeenCalled();
+  });
+
 });
