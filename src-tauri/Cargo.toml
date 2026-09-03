@@ -50,7 +50,9 @@ tauri-plugin-process = "2"
 tauri-plugin-os = "2"
 tokio = { version = "1", features = ["net", "io-util", "sync", "macros", "rt", "time"] }
 futures = "0.3"
-async-imap = { version = "0.10", default-features = false, features = ["runtime-tokio"] }
+# PR E REQ-1.2: exact pin; the wire test in imap/client.rs pins how this version
+# quotes mailbox names.
+async-imap = { version = "=0.11.3", default-features = false, features = ["runtime-tokio"] }
 tokio-native-tls = "0.3"
 # Session ids for the IMAP pool (brief E2/P15, Decision 2 — approved by Jim,
 # 2026-09-01). 128 unguessable bits from the OS CSPRNG. Chosen over `rand`

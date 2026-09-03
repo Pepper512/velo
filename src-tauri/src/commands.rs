@@ -806,4 +806,59 @@ mod live_tests {
         assert!(started.elapsed() < LOGOUT_TIMEOUT);
         assert_eq!(pool.acquire(&id).unwrap_err(), crate::imap::pool::PoolError::NoSuchSession);
     }
+
+    /// PR E REQ-2.5: a folder whose name has a space, created, selected and
+    /// copied into through the pooled path. The duplex test in
+    /// `imap/wire_bytes.rs` predicts the bytes (`CREATE "PR E Space"`, `UID
+    /// COPY 1 "PR E Space"`); this proves a real server accepts them.
+    #[tokio::test]
+    #[ignore = "needs the Dovecot harness on 127.0.0.1:11143"]
+    async fn live_dovecot_folder_with_a_space_round_trips_through_the_pool() {
+        let config = harness_config();
+        let pool = ImapPool::new();
+        let session = imap_client::connect(&config).await.expect("connect");
+        let id = new_session_id().unwrap();
+        pool.insert(id.clone(), account_key(&config, 0), session)
+            .map_err(|(e, _)| e)
+            .expect("insert");
+
+        let folder = format!("PR E Space {}", std::process::id());
+        let marker = format!("<pr-e-space-{}@example.com>", std::process::id());
+
+        let copied = with_pooled_session(&pool, &id, |session| {
+            let folder = folder.clone();
+            let marker = marker.clone();
+            async move {
+                let raw = format!(
+                    "From: a@example.com\r\nTo: b@example.com\r\nSubject: PR E space\r\n\
+                     Message-ID: {marker}\r\n\r\nspace folder\r\n"
+                );
+                imap_client::append_message(session, "INBOX", None, raw.as_bytes()).await?;
+                let inbox = imap_client::search_all_uids(session, "INBOX").await?;
+                let uid = *inbox.iter().max().expect("the marker is in INBOX");
+
+                let _ = session.create(&folder).await; // may exist from a prior run
+                session
+                    .select("INBOX")
+                    .await
+                    .map_err(|e| format!("SELECT INBOX: {e}"))?;
+                session
+                    .uid_copy(uid.to_string(), &folder)
+                    .await
+                    .map_err(|e| format!("UID COPY into {folder:?}: {e}"))?;
+                let in_folder = imap_client::search_all_uids(session, &folder).await?;
+                let copy_uid = *in_folder.iter().max().expect("the copy is in the folder");
+                imap_client::fetch_raw_message(session, &folder, copy_uid).await
+            }
+            .boxed()
+        })
+        .await
+        .expect("create, select and copy into a folder with a space");
+
+        assert!(copied.contains(&marker), "the copy in the spaced folder is the marker message");
+
+        for session in pool.drain() {
+            logout(session).await;
+        }
+    }
 }
