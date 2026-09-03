@@ -1424,3 +1424,43 @@
   and `opener:allow-default-urls` only (the subset test expands main's `opener:default`
   from the ACL manifest so the narrowing still reads as a subset). Raw output in
   `docs/reviews/2026-09-03-pr75-gemini38-raw.md`.
+- **2026-09-03 — PR #75 (P11) review, second leg (Tier 2).** Grok 4.6 via the `grok` CLI on
+  the same diff `2d764a9..40153dd` (~25 minutes): CHANGES REQUESTED (2H 3M 2L 3N). **Adopted:**
+  **H1 — the content grant's `$APPDATA/**` read/write reached `velo.key` and the database
+  file**; the grant is now path-level: the key is `exists` + `read-text-file` only (a pop-out
+  decrypts credentials in the page and never creates the key — `crypto.ts` does that on the
+  first-run branch `main` takes), the attachment cache is the only write root, `.eml` export
+  writes to a dialog-picked path through the runtime scope, `fs:default` (recursive read of
+  the app directories) and the blanket `fs:scope` are gone; tests pin the write roots and the
+  two key permissions. H2 — the same label-vs-URL finding as Gemini M3, adopted further: the
+  root in `main.tsx` is picked by the same label-first call as the gate. L7 — `dialog:default`
+  → `allow-save` (only `save` is called from a pop-out); `sql:default` → explicit
+  load/select/execute; `core:default` → `core:path:default` + event listen/unlisten and **no
+  emit** (`main` listens for `single-instance-args` and opens a composer on it — a pop-out
+  must not be able to send it) and no menu/tray/app/image/resources/window/webview sets.
+  M4's wording — the identical `http` scope is asserted as a **residual**, named as such in
+  the test and the file description, not as a requirement. M5 — a source scan pins that
+  `new WebviewWindow` appears in exactly the three known files and that the two
+  pop-out-reachable creators and `main.tsx` use the one rule. N — the composer comment now
+  says which path is given up (reply-composer pop-out from a thread pop-out); the splash
+  window's static URL is stated in the spec. **Declined, each verified:** M3 — "window
+  controls needed / windows bricked": `lib.rs:344` strips decorations from `main` only,
+  pop-outs are created with native decorations, and nothing reachable from a pop-out calls
+  `getCurrentWindow()`; M4's second half — `opener:allow-default-urls` *is* a scheme allow
+  list (`mailto`, `tel`, `http`, `https` — from the manifest), so `file://` and custom
+  schemes are refused; L6's `window.open` — no email markup reaches `window.open`
+  (scripts are sanitised out, anchors are intercepted by F-2's `openEmailLink`); L7's
+  "skip migrations in pop-outs" — idempotent and the same binary, not worth a behaviour
+  change; N `?thread=&account=` — pre-existing, and moot inside Tauri now that the label
+  decides. Raw output in `docs/reviews/2026-09-03-pr75-grok-raw.md`.
+- **2026-09-03 — PR #75 (P11) review, third leg on the follow-up delta (Tier 2).** Gemini 3.8
+  Flash High on `40153dd..46f874d` (the label gate was new logic): CHANGES REQUESTED (1H 2M 1L
+  1N). **Adopted:** H1 — `main.tsx` still routed by URL while the gate keyed on the label;
+  one `currentWindowKind()` now serves both (as Grok H2). M2 — the label is read through the
+  public `getCurrentWindow()` (synchronous; throws outside Tauri, caught), not by reaching
+  into `__TAURI_INTERNALS__`. M3 — the expansion table is checked against the generated ACL
+  manifest whenever a local build has produced it (`it.skipIf` in CI, where `gen/` does not
+  exist), scoped entries are compared by path and URL against main's scope, and the `.length`
+  assertion is replaced by a strict-difference check. N5 — tests for main-inside-Tauri and
+  malformed metadata. **Declined:** L4 — `revealItemInDir` has no caller in the tree
+  (grepped). Raw output in `docs/reviews/2026-09-03-pr75-gemini38-delta-raw.md`.

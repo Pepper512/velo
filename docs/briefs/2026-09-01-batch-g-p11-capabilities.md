@@ -145,16 +145,36 @@ grant makes a future bypass cost less.
 - **`src-tauri/capabilities/main.json`** — today's `default.json` with `identifier: "main"`,
   `windows: ["main"]`, permissions unchanged, byte for byte in order.
 - **`src-tauri/capabilities/content.json`** — `identifier: "content"`, `windows: ["thread-*",
-  "compose-*"]`, permissions per REQ-1.3, with a `description` that says why each group is there
-  so a later reader does not "tidy" one away.
+  "compose-*"]`, with a `description` that says why each entry is there so a later reader does
+  not "tidy" one away. *(Amended after review — Grok H1/L7, Gemini 3.8 N7: REQ-1.3's set-level
+  list became path-level.)* The grant is: `core:path:default` (`join()` in the cache);
+  `core:event:allow-listen` + `allow-unlisten` (the session manager's listener) and **no emit**
+  — `main` listens for `single-instance-args` and opens a composer on it, so a pop-out must not
+  be able to send it; `sql:allow-load/select/execute` (no `close`); `opener:allow-open-url` +
+  `allow-default-urls` (http, https, mailto, tel — not `reveal-item-in-dir`); `dialog:allow-save`
+  only; **fs by path**: `exists` and `read-text-file` on `$APPDATA/velo.key` (credentials
+  decrypt in the page; the key is read, never written, by a pop-out — `crypto.ts` creates it
+  only on the first-run branch, which `main` takes), `exists`/`read-file`/`mkdir`/`write-file`
+  on `$APPDATA/attachment_cache`, `write-text-file` with no static path (the `.eml` export goes
+  to a dialog-picked path) and `deny-default`; a dialog-picked save path reaches `write-file`
+  through the runtime scope the dialog plugin extends
+  (`tauri-plugin-dialog-2.7.3/src/commands.rs:195`; the fs plugin ORs it with the permission's
+  own scope, `tauri-plugin-fs/src/commands.rs:1564`). No `fs:default` (it carries recursive
+  read of the app directories), no blanket `fs:scope`: a pop-out cannot read the database file
+  or write beside the key. `http:default` with main's scope stays — the residual.
 - **`src-tauri/capabilities/default.json`** — deleted. No file for `splashscreen`.
 - **`src/utils/windowKind.ts`** (new, pure): `windowKindFromSearch(search): "main" | "thread" |
   "compose"` with `main.tsx`'s exact rule (`thread` **and** `account` → thread; `compose` →
   compose; else main), `windowKindFromLabel(label)` with the grant's globs, and
-  `isPopoutWindow(): boolean` — **by the window label when Tauri's metadata carries one**
-  (the grant is keyed by label, and a page cannot edit its label), by the URL rule otherwise
-  (dev server, tests). `main.tsx` routes by the URL rule as before. *(Amended after review:
-  Gemini 3.8 M3.)*
+  `currentWindowKind()` / `isPopoutWindow()` — **by the window label through the public
+  `getCurrentWindow()` when Tauri gives one** (the grant is keyed by label, and a page cannot
+  edit its label), by the URL rule otherwise (dev server, tests). **`main.tsx` picks its root
+  by the same call**, so the root and the gate cannot disagree: a `thread-*` window whose query
+  string went missing renders `ThreadWindow` (which then shows its own error), never the full
+  app under the narrow grant. *(Amended after review: Gemini 3.8 M3, Grok H2, delta F1/F2.)*
+- **The splash window** is `splashscreen.html`, a static file, in dev and in the bundle alike
+  (`tauri.conf.json` `windows[1].url`); it never boots the React app, so a grant of nothing is
+  fail-closed and correct. *(Grok N on #75.)*
 - **`opener`** in content is `opener:allow-open-url` + `opener:allow-default-urls`, not
   `opener:default`, which also carries `reveal-item-in-dir`. *(Amended after review: Gemini
   3.8 N7.)*

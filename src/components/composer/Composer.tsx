@@ -509,8 +509,10 @@ export function Composer() {
             >
               {isFullpage ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
-            {/* Not inside a pop-out: it is already a window, and the content
-                grant has no webview creation (SPEC-P11). */}
+            {/* Not inside a pop-out (SPEC-P11): the content grant has no
+                webview creation. In a compose window this composer already is
+                the window; in a thread pop-out's reply composer the pop-out
+                path is the one this deliberately gives up. */}
             {!isPopoutWindow() && (
               <button
                 onClick={handlePopOutComposer}
