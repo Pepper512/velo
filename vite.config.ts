@@ -13,7 +13,13 @@ export default defineConfig({
     },
   },
   build: {
-    rollupOptions: {
+    // PR D REQ-1.4: the browser floor stays Vite 7's Baseline set, so the
+    // emitted syntax and CSS do not change with the bundler. Lifting it to
+    // Vite 8's default (Chrome 111, Safari 16.4) is a separate decision that
+    // needs the minimum webview named per platform.
+    target: ["chrome107", "edge107", "firefox104", "safari16"],
+    cssTarget: ["chrome107", "edge107", "firefox104", "safari16"],
+    rolldownOptions: {
       input: {
         main: path.resolve(__dirname, "index.html"),
         splashscreen: path.resolve(__dirname, "splashscreen.html"),
