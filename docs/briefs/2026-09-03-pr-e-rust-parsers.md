@@ -9,7 +9,8 @@
   No `Cargo.toml`, `Cargo.lock` or source change until Jim approves it.
 - **Base:** `main` @ `a27398f` (code pin `e05f6cd`, #75). Every version and measurement below
   was taken on 2026-09-03 against this tree.
-- **Status:** **draft — awaiting Jim's approval. No code, no dependency change.** Amended
+- **Status:** **approved by Jim, 2026-09-03 (see §Approval); built on branch
+  `pr-e-rust-parsers`, five commits, rebase merge — PR #84.** Amended
   after both review legs on PR #78 (Gemini 3.8 Flash High, Grok 4.6; dispositions in LOG.md).
 - **Source:** the vault's `2026-09-01_Velo_Dependency-Audit.md` (PR E, the Cargo table, "What
   not to upgrade yet"); `docs/audits/2026-09-01-optimize-audit.md` P18 and the Batch G row;

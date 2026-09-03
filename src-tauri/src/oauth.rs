@@ -261,7 +261,12 @@ mod tests {
         assert_eq!(result.access_token, "at");
         assert_eq!(result.refresh_token.as_deref(), Some("rt"));
 
-        let request = server.await.unwrap();
+        // Bounded: a stalled exchange must fail the test, not hang the CI
+        // worker (Gemini L2 on #84).
+        let request = tokio::time::timeout(Duration::from_secs(10), server)
+            .await
+            .expect("the mock server saw the whole request within 10 s")
+            .unwrap();
         let (head, body) = request.split_once("\r\n\r\n").expect("a complete request");
         assert!(head.starts_with("POST /token HTTP/1.1\r\n"), "{head}");
         let content_type = head
