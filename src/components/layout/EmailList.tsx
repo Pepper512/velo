@@ -567,33 +567,42 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   });
   const virtualItems = virtualizer.getVirtualItems();
 
-  // REQ-3.3: the selected thread scrolls into view through the virtualizer,
-  // rendered or not. Keyed on the selection only, as before — a reload while
-  // the user has scrolled away must not snap back.
+  // REQ-3.3: the selected thread (a plain row or an expanded bundle child)
+  // scrolls into view through the virtualizer, rendered or not. Keyed on the
+  // selection and on whether it is present in the list — so a deep link or a
+  // boot with a selection scrolls once the list has loaded (Gemini F-01), while
+  // a reload that merely reorders items does not snap the user back.
   const virtualizerRef = useRef(virtualizer);
   virtualizerRef.current = virtualizer;
+  const selectedPresent = selectedThreadId !== null && items.some((it) => it.threadId === selectedThreadId);
   useEffect(() => {
-    if (!selectedThreadId) return;
-    const index = itemsRef.current.findIndex((it) => it.kind === "thread" && it.threadId === selectedThreadId);
+    if (!selectedThreadId || !selectedPresent) return;
+    const index = itemsRef.current.findIndex((it) => it.threadId === selectedThreadId);
     if (index >= 0) virtualizerRef.current.scrollToIndex(index, { align: "auto" });
-  }, [selectedThreadId]);
+  }, [selectedThreadId, selectedPresent]);
 
   // REQ-3.3: load more when the last rendered row is within five of the end.
+  // `loadMore` guards on `hasMore`/`loadingMore` itself; the guard here just
+  // keeps the effect quiet once everything is loaded.
   const lastRenderedIndex = virtualItems[virtualItems.length - 1]?.index ?? -1;
   useEffect(() => {
+    if (!hasMore || loadingMore) return;
     if (lastRenderedIndex >= 0 && lastRenderedIndex >= items.length - 5) loadMore();
-  }, [lastRenderedIndex, items.length, loadMore]);
+  }, [lastRenderedIndex, items.length, hasMore, loadingMore, loadMore]);
 
-  // REQ-3.4: stagger-in plays on the first paint of a loaded list only, never
-  // on rows that scroll into view later. Reset when the folder changes.
-  const firstPaintRef = useRef(true);
-  useEffect(() => {
-    firstPaintRef.current = true;
-  }, [activeAccountId, activeLabel, activeCategory]);
-  useEffect(() => {
-    if (items.length > 0) firstPaintRef.current = false;
-  });
-  const staggerOnThisPaint = firstPaintRef.current;
+  // REQ-3.4: stagger-in plays for the rows of a folder's first loaded paint
+  // only — not for rows that scroll into view later, and not for the old list
+  // still showing while the next folder loads. Those first rows keep the class
+  // (the virtualizer re-renders on measure within a frame, and dropping the
+  // class would cut the animation short); a later row never gets it. The set
+  // is decided once per folder, lazily, during the first render with a loaded
+  // list — idempotent, so safe in render.
+  const folderKey = `${activeAccountId ?? ""}|${activeLabel}|${activeCategory}`;
+  const staggerRef = useRef<{ folder: string; keys: Set<string> } | null>(null);
+  if (!isLoading && items.length > 0 && staggerRef.current?.folder !== folderKey) {
+    staggerRef.current = { folder: folderKey, keys: new Set(items.slice(0, 15).map((it) => it.key)) };
+  }
+  const staggerKeys = staggerRef.current?.folder === folderKey ? staggerRef.current.keys : null;
 
   const renderItem = (item: ListItem, index: number) => {
     switch (item.kind) {
@@ -638,7 +647,10 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       }
       case "bundle-child": {
         const thread = threadMap.get(item.threadId!);
-        if (!thread) return null;
+        // Never an empty wrapper: it would be measured at 0 and corrupt the
+        // layout (Gemini F-06). The store rebuilds threadMap with threads, so
+        // this is defensive.
+        if (!thread) return <div style={{ height: item.estimate }} />;
         return (
           <div className="pl-4">
             <ThreadCard
@@ -654,8 +666,11 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       }
       case "thread": {
         const thread = threadMap.get(item.threadId!);
-        if (!thread) return null;
-        const stagger = staggerOnThisPaint && index < 15;
+        // Never an empty wrapper: it would be measured at 0 and corrupt the
+        // layout (Gemini F-06). The store rebuilds threadMap with threads, so
+        // this is defensive.
+        if (!thread) return <div style={{ height: item.estimate }} />;
+        const stagger = staggerKeys?.has(item.key) ?? false;
         return (
           <div
             data-thread-id={thread.id}

@@ -92,8 +92,13 @@ export function buildListItems(input: ListItemsInput): ListItem[] {
     }
   }
 
+  // A thread emitted as a bundle child is never also a plain row (the caller
+  // already keeps bundled ids out of the visible list; this makes the model
+  // hold on its own — Grok SB-3 F-07).
+  const emitted = new Set(items.flatMap((it) => (it.threadId ? [it.threadId] : [])));
   let previousPinned = false;
   for (const thread of input.threads) {
+    if (emitted.has(thread.id)) continue;
     const dividerBefore = previousPinned && !thread.isPinned;
     items.push({
       kind: "thread",

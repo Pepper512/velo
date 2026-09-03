@@ -2036,3 +2036,40 @@
   re-renders 16 cards, not 200. **Lesson recorded:** twice this session a single-space
   literal I typed arrived as a NUL byte; every changed file is now scanned for NULs before a
   commit (`nulscan.py` in the session scratchpad — worth a repo script if it recurs).
+- **2026-09-03 — PR #92 SB-2 third, narrow pass on `2766bd0..909eca9` (Gemini 3.8 Flash High):
+  APPROVE (2N).** N-01: a dropped `useMemo` cache would only re-run a benign effect; N-02: the
+  fingerprint does not compare draft recipients/subject — a draft save updates `date`. Raw
+  output in `docs/reviews/2026-09-03-pr92-sb2-delta2-gemini38-raw.md`.
+- **2026-09-03 — PR #92 SB-3 (`5dfef06`) review, two legs.** Gemini: CHANGES REQUESTED (2H 3M
+  1L); Grok: CHANGES REQUESTED (2H 3M 4L 2N). **Adopted, both legs — the deep link** (Gemini H
+  F-01, Grok H F-01): the scroll-to-selection effect was keyed on the selection only, so a
+  selection known before the list loaded never scrolled; it is now keyed on the selection *and*
+  on whether the selection is present in the item model — a scroll when it first appears, none
+  on a reload that merely reorders (test: a far selection set before mount scrolls into the
+  window). **Adopted, both legs — the stagger** (Gemini M F-04, Grok M F-03): found by my own
+  re-read minutes before the reviews landed — the reset effect and the "flip to false" effect
+  ran in the same commit while the old list was still showing, and the virtualizer's measure
+  re-render would have stripped the class within a frame; the rows of a folder's first loaded
+  paint are now remembered as a set and keep the class, later rows never get it (test).
+  **Adopted (Gemini M F-03, Grok L F-06):** a selected bundle child scrolls into view too.
+  **Adopted (Gemini L F-06):** a row whose thread is missing from the map renders a placeholder
+  of its estimated height instead of an empty wrapper measured at 0. **Adopted (Grok L F-07):**
+  the item model never emits a thread as both a bundle child and a plain row (test). **Adopted
+  (Gemini M F-05, Grok M F-04 — tests):** a selection known before load, a bundle header first
+  with bundled rows held out until expanded, and `loadMore` firing near the end with the
+  second page requested at offset 50. **Declined, verified — the loadMore loop** (Gemini H
+  F-02, Grok H F-02): `loadMore` guards on `hasMore`/`loadingMore` itself (`EmailList.tsx`,
+  unchanged), `hasMore` is `dbThreads.length === PAGE_SIZE` after every page, and the effect's
+  dependencies do not change when a page adds no rows — no loop, no duplicate fetch; an
+  explicit `hasMore`/`loadingMore` guard was added to the effect anyway so it stays quiet once
+  everything is loaded. **Declined, verified — drag-to-label with a row that unmounts mid-drag**
+  (Grok M F-05): `DndProvider.tsx:112-128` mounts a `DragOverlay`, and `handleDragStart`
+  (`:78-84`) copies the payload from `event.active.data.current` at drag start — the visual and
+  the drop payload survive the source row unmounting; the brief already names this as the hand
+  check. **Notes:** estimates ignore the root font scale, corrected by measurement on mount
+  (Grok L F-08); the first fifteen *items* get the stagger, bundle headers among them count but
+  never animate (Grok M F-03 tail); the prefetch-key helper change rode in this commit and was
+  named in its message (Grok L F-09); the tests stub `ResizeObserver` as a no-op, so re-measure
+  on density or pane changes is untested — the initial measure goes through `measureElement` on
+  ref attach, which the stubs do exercise (Gemini M F-05, Grok M F-04). Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb3-virtualized-list-{gemini38,grok}-raw.md`.

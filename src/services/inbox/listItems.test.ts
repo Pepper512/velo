@@ -60,6 +60,18 @@ describe("buildListItems", () => {
     expect(items[2]!.threadId).toBe("x");
   });
 
+  it("never emits a thread both as a bundle child and as a plain row (Grok F-07)", () => {
+    const items = buildListItems({
+      threads: [t("x"), t("a")],
+      bundles: [bundle({ expanded: true, threads: [t("x")] })],
+      showBundles: true,
+      loadingMore: false,
+      allLoaded: false,
+      density: "default",
+    });
+    expect(items.map((i) => i.key)).toEqual(["bundle-Newsletters", "bundle-Newsletters-x", "a"]);
+  });
+
   it("skips bundles with no threads and ignores bundles entirely when they are not shown", () => {
     const empty = bundle({ count: 0 });
     expect(kinds(buildListItems({ threads: [t("a")], bundles: [empty], showBundles: true, loadingMore: false, allLoaded: false, density: "default" }))).toEqual(["thread"]);

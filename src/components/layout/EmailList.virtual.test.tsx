@@ -34,8 +34,15 @@ const rows = vi.hoisted(() =>
     from_address: "s@example.com",
   })),
 );
+// Switches for the paging and bundle cases; reset before each test.
+const mode = vi.hoisted(() => ({ paged: false, bundled: false }));
+const getThreadsForAccount = vi.hoisted(() =>
+  vi.fn(async (_acc: string, _label: string | undefined, limit: number, offset: number) =>
+    mode.paged ? rows.slice(offset, offset + limit) : rows,
+  ),
+);
 vi.mock("@/services/db/threads", () => ({
-  getThreadsForAccount: vi.fn(async () => rows),
+  getThreadsForAccount,
   getThreadsForCategory: vi.fn(async () => []),
   getInboxThreadsForLabel: vi.fn(async () => []),
   getThreadsWithPendingReminders: vi.fn(async () => []),
@@ -45,14 +52,17 @@ vi.mock("@/services/db/threads", () => ({
 }));
 vi.mock("@/services/db/threadCategories", () => ({
   ALL_CATEGORIES: ["Primary", "Updates", "Promotions", "Social", "Newsletters"],
-  getCategoriesForThreads: vi.fn(async () => new Map()),
+  // In the bundle case, t0 and t1 are Newsletters and get bundled away.
+  getCategoriesForThreads: vi.fn(async () => (mode.bundled ? new Map([["t0", "Newsletters"], ["t1", "Newsletters"]]) : new Map())),
 }));
 vi.mock("@/services/db/splitTabCounts", () => ({ getSplitTabCounts: vi.fn(async () => new Map()) }));
 vi.mock("@/services/db/followUpReminders", () => ({ getActiveFollowUpThreadIds: vi.fn(async () => new Set()) }));
 vi.mock("@/services/db/bundleRules", () => ({
-  getBundleRules: vi.fn(async () => []),
+  getBundleRules: vi.fn(async () => (mode.bundled ? [{ id: "r1", account_id: "acc1", category: "Newsletters", is_bundled: 1, delivery_schedule: "daily", enabled: 1 }] : [])),
   getHeldThreadIds: vi.fn(async () => new Set()),
-  getBundleSummaries: vi.fn(async () => new Map()),
+  getBundleSummaries: vi.fn(async () =>
+    mode.bundled ? new Map([["Newsletters", { count: 2, latestSubject: "Subject 0", latestSender: "Sender" }]]) : new Map(),
+  ),
 }));
 vi.mock("@/services/db/messages", () => ({ getMessagesForThread: vi.fn(async () => []) }));
 vi.mock("@/services/db/connection", () => ({ getDb: vi.fn() }));
@@ -116,6 +126,9 @@ beforeAll(() => {
 
 beforeEach(() => {
   nav.selectedThreadId = null;
+  mode.paged = false;
+  mode.bundled = false;
+  getThreadsForAccount.mockClear();
   useAccountStore.setState({ activeAccountId: "acc1", accounts: [{ id: "acc1", email: "me@example.com" }] } as never);
   useThreadStore.setState({ threads: [], isLoading: false, selectedThreadIds: new Set(), searchThreadIds: null, searchQuery: "" });
 });
@@ -143,6 +156,53 @@ describe("EmailList — virtualized (SPEC-SB REQ-3)", () => {
     act(() => rerender(<EmailList />));
     await waitFor(() => expect(renderedRows()).toContain("t150"));
     expect(renderedRows().length).toBeLessThan(40);
+  });
+
+  it("staggers the rows of the first loaded paint, keeps it for them, never gives it to rows scrolled in later (REQ-3.4)", async () => {
+    const { rerender } = render(<EmailList />);
+    await waitFor(() => expect(renderedRows().length).toBeGreaterThan(0));
+    const row = (id: string) => document.querySelector<HTMLElement>(`[data-thread-id="${id}"]`);
+    expect(row("t0")!.classList.contains("stagger-in")).toBe(true);
+    // A re-render (the virtualizer measures within a frame) must not strip it mid-animation.
+    act(() => rerender(<EmailList />));
+    expect(row("t0")!.classList.contains("stagger-in")).toBe(true);
+    // A row that scrolls into view later is not part of that first paint.
+    nav.selectedThreadId = "t150";
+    act(() => rerender(<EmailList />));
+    await waitFor(() => expect(row("t150")).not.toBeNull());
+    expect(row("t150")!.classList.contains("stagger-in")).toBe(false);
+  });
+
+  it("scrolls a selection known before the list loads into view once it has (REQ-3.3, Gemini F-01)", async () => {
+    nav.selectedThreadId = "t150";
+    render(<EmailList />);
+    await waitFor(() => expect(renderedRows()).toContain("t150"));
+    expect(renderedRows().length).toBeLessThan(40);
+  });
+
+  it("puts bundle headers first and keeps bundled threads out of the rows until expanded (REQ-3.1)", async () => {
+    mode.bundled = true;
+    render(<EmailList />);
+    await waitFor(() => expect(screen.getAllByText("Newsletters").length).toBeGreaterThan(0));
+    // Categories and bundle rules land in separate state updates; wait for both.
+    await waitFor(() => expect(renderedRows()).not.toContain("t0"));
+    expect(renderedRows()[0]).toBe("t2");
+    const firstWrapper = document.querySelector<HTMLElement>("[data-index='0']")!;
+    expect(firstWrapper.textContent).toContain("Newsletters");
+    act(() => firstWrapper.querySelector("button")!.click());
+    await waitFor(() => expect(document.querySelectorAll(".pl-4").length).toBe(2));
+  });
+
+  it("loads the next page when the last rendered row is within five of the end (REQ-3.3)", async () => {
+    mode.paged = true;
+    render(<EmailList />);
+    await waitFor(() => expect(useThreadStore.getState().threads).toHaveLength(50));
+    expect(getThreadsForAccount).toHaveBeenCalledTimes(1);
+    // Scroll to the end of the first page: the virtualizer renders the tail.
+    const scroller = document.querySelector<HTMLElement>(".overflow-y-auto")!;
+    act(() => scroller.scrollTo({ top: 50 * ROW }));
+    await waitFor(() => expect(useThreadStore.getState().threads).toHaveLength(100));
+    expect(getThreadsForAccount).toHaveBeenLastCalledWith("acc1", "INBOX", 50, 50);
   });
 
   it("puts the 'Other emails' divider before the first unpinned thread (REQ-3.2)", async () => {
