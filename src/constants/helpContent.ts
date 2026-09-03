@@ -321,11 +321,13 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         title: "Reply, Reply All & Forward",
         summary: "Respond to emails or forward them.",
         description:
-          "Reply sends your response to the original sender only. Reply All includes everyone on the thread (To and CC). Forward lets you send the email to someone new with your own message. You can set your default reply action (Reply vs Reply All) in Composing settings, so pressing the reply shortcut does what you expect. The inline reply feature also lets you reply to a specific message directly within the thread view.",
+          "Reply sends your response to the original sender only. Reply All includes everyone on the thread (To and CC). Forward lets you send the email to someone new with your own message. You can set your default reply action (Reply vs Reply All) in Composing settings, so pressing the reply shortcut does what you expect. The inline reply feature also lets you reply to a specific message directly within the thread view. Instant Intro answers an introduction the polite way: it replies to everyone, moves the person who introduced you to Bcc, and opens with \"Thanks {name}, moving you to Bcc.\" — press b on the thread or click the handshake in the action bar.",
         tips: [
           { text: "Reply", shortcut: "r" },
           { text: "Reply All", shortcut: "a" },
           { text: "Forward", shortcut: "f" },
+          { text: "Instant Intro — reply all, introducer to Bcc", shortcut: "b" },
+          { text: "Instant Intro is unavailable when nobody else is on the message or the last message is your own." },
           { text: "Set your default reply mode (Reply or Reply All) in Settings." },
           { text: "Inline reply lets you respond without opening the full composer." },
         ],

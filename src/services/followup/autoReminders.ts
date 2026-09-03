@@ -8,6 +8,7 @@
  * whether to create one and when it falls due.
  */
 import type { DbFollowUpReminder } from "../db/followUpReminders";
+import { bareAddress } from "@/utils/emailUtils";
 
 /** The delays the setting offers, in days. */
 export const AUTO_REMINDER_DAY_CHOICES = [1, 2, 3, 7] as const;
@@ -23,17 +24,6 @@ export function normaliseAutoReminderDays(value: string | number | null | undefi
   return (AUTO_REMINDER_DAY_CHOICES as readonly number[]).includes(n)
     ? (n as AutoReminderDays)
     : DEFAULT_AUTO_REMINDER_DAYS;
-}
-
-/**
- * The bare, lower-cased address inside a recipient string. Reply-all
- * prefills recipients straight from the To/Cc headers, so a chip can read
- * `"Alice Smith" <alice@acme.com>`; the rule must see `alice@acme.com`.
- */
-function bareAddress(raw: string): string {
-  const angle = raw.match(/<([^<>]+)>/);
-  // No bracketed address: take the chip as typed, minus any stray bracket.
-  return (angle ? angle[1]! : raw.replace(/[<>]/g, "")).trim().toLowerCase();
 }
 
 function domainOf(address: string): string | null {

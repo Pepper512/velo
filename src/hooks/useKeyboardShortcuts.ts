@@ -299,6 +299,12 @@ async function executeAction(actionId: string): Promise<void> {
         window.dispatchEvent(new CustomEvent("velo-inline-reply", { detail: { mode: "forward" } }));
       }
       break;
+    case "action.instantIntro":
+      // SPEC-II: the open thread decides whether an intro makes sense.
+      if (selectedId) {
+        window.dispatchEvent(new Event("velo-instant-intro"));
+      }
+      break;
     case "action.archive": {
       const multiIds = useThreadStore.getState().selectedThreadIds;
       if (multiIds.size > 0 && activeAccountId) {

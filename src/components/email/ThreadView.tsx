@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { MessageItem } from "./MessageItem";
 import { ActionBar } from "./ActionBar";
 import { getMessagesForThread, type DbMessage } from "@/services/db/messages";
@@ -23,6 +23,9 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
 import { RawMessageModal } from "./RawMessageModal";
 import { isPopoutWindow } from "@/utils/windowKind";
+import { buildInstantIntro } from "@/services/composer/instantIntro";
+import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/db/sendAsAliases";
+import { resolveFromAddress } from "@/utils/resolveFromAddress";
 
 interface ThreadViewProps {
   thread: Thread;
@@ -63,6 +66,19 @@ async function handlePopOut(thread: Thread) {
 
 export function ThreadView({ thread }: ThreadViewProps) {
   const activeAccountId = useAccountStore((s) => s.activeAccountId);
+  const accounts = useAccountStore((s) => s.accounts);
+  const activeAccount = accounts.find((a) => a.id === activeAccountId);
+  // SPEC-II: the account's own addresses (email + send-as aliases) decide who
+  // stays on an intro; loaded once per account.
+  const [aliases, setAliases] = useState<SendAsAlias[]>([]);
+  useEffect(() => {
+    if (!activeAccountId) return;
+    let cancelled = false;
+    getAliasesForAccount(activeAccountId)
+      .then((rows) => { if (!cancelled) setAliases(rows.map(mapDbAlias)); })
+      .catch(() => { if (!cancelled) setAliases([]); });
+    return () => { cancelled = true; };
+  }, [activeAccountId]);
   const contactSidebarVisible = useUIStore((s) => s.contactSidebarVisible);
   const toggleContactSidebar = useUIStore((s) => s.toggleContactSidebar);
   const taskSidebarVisible = useUIStore((s) => s.taskSidebarVisible);
@@ -170,6 +186,40 @@ export function ThreadView({ thread }: ThreadViewProps) {
       inReplyToMessageId: lastMessage.id,
     });
   }, [lastMessage, openComposer]);
+
+  // SPEC-II: reply all with the introducer moved to Bcc, opener written.
+  const ownAddresses = useMemo(
+    () => (activeAccount ? [activeAccount.email, ...aliases.map((a) => a.email)] : []),
+    [activeAccount, aliases],
+  );
+  const instantIntro = useMemo(
+    () => (lastMessage && activeAccount ? buildInstantIntro(lastMessage, ownAddresses) : null),
+    [lastMessage, activeAccount, ownAddresses],
+  );
+  const handleInstantIntro = useCallback(() => {
+    if (!lastMessage || !instantIntro) return;
+    // The key path has no disabled button in front of it.
+    if (isNoReplyAddress(lastMessage.reply_to ?? lastMessage.from_address)) return;
+    openComposer({
+      mode: "replyAll",
+      to: instantIntro.to,
+      cc: instantIntro.cc,
+      bcc: instantIntro.bcc,
+      subject: instantIntro.subject,
+      bodyHtml: instantIntro.openerHtml + buildQuote(lastMessage),
+      threadId: lastMessage.thread_id,
+      inReplyToMessageId: lastMessage.id,
+    });
+    // The composer picks the From alias from the reply's To/Cc, and the intro
+    // has removed me from both — resolve it from the original headers instead.
+    const from = resolveFromAddress(aliases, lastMessage.to_addresses, lastMessage.cc_addresses);
+    if (from) useComposerStore.getState().setFromEmail(from.email);
+  }, [lastMessage, instantIntro, aliases, openComposer]);
+
+  useEffect(() => {
+    window.addEventListener("velo-instant-intro", handleInstantIntro);
+    return () => window.removeEventListener("velo-instant-intro", handleInstantIntro);
+  }, [handleInstantIntro]);
 
   const handleForward = useCallback(() => {
     if (!lastMessage) return;
@@ -395,6 +445,8 @@ export function ThreadView({ thread }: ThreadViewProps) {
           onReply={handleReply}
           onReplyAll={handleReplyAll}
           onForward={handleForward}
+          onInstantIntro={handleInstantIntro}
+          introUnavailableReason={instantIntro ? null : "Nobody to introduce you to"}
           onPrint={handlePrint}
           onExport={handleExport}
           // Inside a pop-out the thread is already in its own window, and the

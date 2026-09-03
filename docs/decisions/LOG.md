@@ -1843,3 +1843,24 @@
   **Sibling audit (Gemini N1, Grok N2), done:** all 19 `ON CONFLICT` statements in
   `services/db` prepared against the migrated schema — this was the only invalid target. Raw
   outputs in `docs/reviews/2026-09-03-pr88-followup-upsert-{gemini38,grok}-raw.md`.
+- **2026-09-03 — SPEC-II (Instant Intro), Tier 1, PR #90.** Brief
+  `docs/briefs/2026-09-03-instant-intro.md`, committed before code. One key (`b`) or the
+  handshake on the action bar opens a reply-all on the thread's last message with the
+  introducer (`reply_to ?? from_address`, as Reply All targets it) moved to Bcc, the account's
+  own addresses removed, and the body opening "Thanks {first name}, moving you to Bcc." above
+  the usual quote. **Decisions:** (1) the rule is a pure module,
+  `services/composer/instantIntro.ts`, whose `replyAllRecipients` is the first shared copy of
+  the reply-all rule the four hand-written sites compute — replacing them is a later,
+  behaviour-preserving pass; (2) the intro opens the full composer, not the inline reply,
+  because Bcc needs a field; (3) `b` because the dispatcher looks single keys up by `e.key`, so
+  Superhuman's ⌘⇧I written as `Shift+I` could never match — **and the Settings recorder writes
+  exactly that string for any Shift-letter rebind**, a pre-existing gap recorded for Jim;
+  (4) unavailable, with the reason on the button, when there is no introducer address, the
+  last message is my own, or nobody is left once I and the introducer are set aside;
+  (5) the composer resolves the From alias from the reply's To/Cc, and the intro has removed me
+  from both, so `ThreadView` resolves it from the original headers and sets it after opening —
+  the composer's own resolution skips when `fromEmail` is already set; (6) the subject is not
+  given a second `Re:` (Reply All today always prefixes — a small, deliberate difference).
+  `bareAddress` moved from `autoReminders.ts` to `utils/emailUtils.ts` unchanged, now shared.
+  Tests: the module (17), the `b` dispatch (2), the action-bar button (3); the `ThreadView`
+  wiring has no render test, like its reply handlers — Jim's manual check covers it.

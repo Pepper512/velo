@@ -31,6 +31,7 @@ vi.mock("@/stores/shortcutStore", () => ({
     getState: () => ({
       keyMap: {
         "app.askInbox": "i",
+        "action.instantIntro": "b",
         "app.commandPalette": "/",
         "app.toggleSidebar": "Ctrl+Shift+E",
         "app.help": "?",
@@ -46,8 +47,9 @@ vi.mock("@/router/navigate", () => ({
   navigateToThread: vi.fn(),
   navigateBack: vi.fn(),
   getActiveLabel: () => "inbox",
-  getSelectedThreadId: () => null,
+  getSelectedThreadId: () => nav.selectedThreadId,
 }));
+const nav = vi.hoisted(() => ({ selectedThreadId: null as string | null }));
 vi.mock("@/services/emailActions", () => ({
   archiveThread: vi.fn(),
   trashThread: vi.fn(),
@@ -120,5 +122,35 @@ describe("useKeyboardShortcuts", () => {
     expect(listener).toHaveBeenCalledTimes(1);
 
     window.removeEventListener("velo-toggle-shortcuts-help", listener);
+  });
+
+  // SPEC-II REQ-3.1: `b` asks the open thread for an Instant Intro.
+  it("dispatches velo-instant-intro when 'b' is pressed with a thread selected", () => {
+    nav.selectedThreadId = "t1";
+    renderHook(() => useKeyboardShortcuts());
+
+    const listener = vi.fn();
+    window.addEventListener("velo-instant-intro", listener);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", bubbles: true }));
+
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    window.removeEventListener("velo-instant-intro", listener);
+    nav.selectedThreadId = null;
+  });
+
+  it("does nothing on 'b' when no thread is selected", () => {
+    nav.selectedThreadId = null;
+    renderHook(() => useKeyboardShortcuts());
+
+    const listener = vi.fn();
+    window.addEventListener("velo-instant-intro", listener);
+
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "b", bubbles: true }));
+
+    expect(listener).not.toHaveBeenCalled();
+
+    window.removeEventListener("velo-instant-intro", listener);
   });
 });
