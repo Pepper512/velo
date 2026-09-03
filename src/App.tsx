@@ -44,6 +44,7 @@ import {
 } from "./services/globalShortcut";
 import { initDeepLinkHandler } from "./services/deepLinkHandler";
 import { normaliseAutoReminderDays } from "./services/followup/autoReminders";
+import { parseSplitTabs } from "./services/inbox/splitTabs";
 import { updateBadgeCount } from "./services/badgeManager";
 import {
   startQueueProcessor,
@@ -307,6 +308,10 @@ export default function App() {
             if (Array.isArray(parsed)) ui.restoreSidebarNavConfig(parsed);
           } catch { /* ignore malformed JSON */ }
         }
+
+        // Restore the split inbox's tabs (SPEC-SIT): validated at the boundary,
+        // the default (today's five categories) on anything invalid.
+        ui.restoreSplitInboxTabs(parseSplitTabs(await getSetting("split_inbox_tabs")));
 
         // Load custom keyboard shortcuts
         await useShortcutStore.getState().loadKeyMap();

@@ -9,8 +9,10 @@ import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel, useSelectedThreadId, useActiveCategory } from "@/hooks/useRouteNavigation";
 import { navigateToThread, navigateToLabel } from "@/router/navigate";
-import { getThreadsForAccount, getThreadsForCategory, getThreadLabelIds, deleteThread as deleteThreadFromDb } from "@/services/db/threads";
-import { getCategoriesForThreads, getCategoryUnreadCounts } from "@/services/db/threadCategories";
+import { getThreadsForAccount, getThreadsForCategory, getInboxThreadsForLabel, getThreadsWithPendingReminders, getThreadLabelIds, deleteThread as deleteThreadFromDb } from "@/services/db/threads";
+import { getCategoriesForThreads } from "@/services/db/threadCategories";
+import { getSplitTabCounts } from "@/services/db/splitTabCounts";
+import { visibleSplitTabs, resolveActiveTab, type TabCount, type LabelInfo } from "@/services/inbox/splitTabs";
 import { getActiveFollowUpThreadIds } from "@/services/db/followUpReminders";
 import { getBundleRules, getHeldThreadIds, getBundleSummaries, type DbBundleRule } from "@/services/db/bundleRules";
 import { getGmailClient } from "@/services/gmail/tokenManager";
@@ -44,6 +46,17 @@ const LABEL_MAP: Record<string, string> = {
   all: "", // no filter
 };
 
+/**
+ * SPEC-SIT: the threads a split-inbox tab lists — a category (INBOX ∩
+ * category, Primary including uncategorised), a label (INBOX ∩ label), or
+ * Reminders (every thread with a pending follow-up reminder).
+ */
+function loadTabThreads(accountId: string, tabId: string, limit: number, offset: number) {
+  if (tabId === "reminders") return getThreadsWithPendingReminders(accountId, limit, offset);
+  if (tabId.startsWith("label:")) return getInboxThreadsForLabel(accountId, tabId.slice("label:".length), limit, offset);
+  return getThreadsForCategory(accountId, tabId, limit, offset);
+}
+
 export function EmailList({ width, listRef }: { width?: number; listRef?: React.Ref<HTMLDivElement> }) {
   const threads = useThreadStore((s) => s.threads);
   const selectedThreadId = useSelectedThreadId();
@@ -68,10 +81,23 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const activeSmartFolder = smartFolderId ? smartFolders.find((f) => f.id === smartFolderId) ?? null : null;
 
   const inboxViewMode = useUIStore((s) => s.inboxViewMode);
+  const splitInboxTabs = useUIStore((s) => s.splitInboxTabs);
   const routerCategory = useActiveCategory();
+  const [tabCounts, setTabCounts] = useState<Map<string, TabCount>>(() => new Map());
 
-  // In split mode, use the router's category; in unified mode, always use "All"
-  const activeCategory = inboxViewMode === "split" ? routerCategory : "All";
+  // SPEC-SIT: the tabs to draw — configured tabs, minus label tabs this
+  // account does not have and hide-when-empty tabs with nothing in them.
+  const visibleTabs = useMemo(() => {
+    if (inboxViewMode !== "split") return [];
+    const labelsById = new Map<string, LabelInfo>(
+      userLabels.map((l) => [l.id, { name: l.name, color: l.colorBg }]),
+    );
+    return visibleSplitTabs(splitInboxTabs, { labelsById, counts: tabCounts });
+  }, [inboxViewMode, splitInboxTabs, userLabels, tabCounts]);
+
+  // In split mode the router asks for a tab and the visible set decides
+  // (REQ-3.2); in unified mode it is always "All".
+  const activeCategory = inboxViewMode === "split" ? resolveActiveTab(visibleTabs, routerCategory) : "All";
   const setActiveCategory = inboxViewMode === "split"
     ? (cat: string) => navigateToLabel("inbox", { category: cat })
     : () => {};
@@ -80,7 +106,6 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [categoryMap, setCategoryMap] = useState<Map<string, string>>(() => new Map());
-  const [categoryUnreadCounts, setCategoryUnreadCounts] = useState<Map<string, number>>(() => new Map());
   const [followUpThreadIds, setFollowUpThreadIds] = useState<Set<string>>(() => new Set());
   const [bundleRules, setBundleRules] = useState<DbBundleRule[]>([]);
   const [heldThreadIds, setHeldThreadIds] = useState<Set<string>>(() => new Set());
@@ -284,7 +309,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
         let dbThreads;
         // Server-side category filtering for inbox
         if (activeLabel === "inbox" && activeCategory !== "All") {
-          dbThreads = await getThreadsForCategory(activeAccountId, activeCategory, PAGE_SIZE, 0);
+          dbThreads = await loadTabThreads(activeAccountId, activeCategory, PAGE_SIZE, 0);
         } else {
           const gmailLabelId = LABEL_MAP[activeLabel] ?? activeLabel;
           dbThreads = await getThreadsForAccount(
@@ -314,7 +339,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       const offset = threads.length;
       let dbThreads;
       if (activeLabel === "inbox" && activeCategory !== "All") {
-        dbThreads = await getThreadsForCategory(activeAccountId, activeCategory, PAGE_SIZE, offset);
+        dbThreads = await loadTabThreads(activeAccountId, activeCategory, PAGE_SIZE, offset);
       } else {
         const gmailLabelId = LABEL_MAP[activeLabel] ?? activeLabel;
         dbThreads = await getThreadsForAccount(
@@ -350,7 +375,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
 
     if (!activeAccountId) {
       setCategoryMap(new Map());
-      setCategoryUnreadCounts(new Map());
+      setTabCounts(new Map());
       setFollowUpThreadIds(new Set());
       setBundleRules([]);
       setHeldThreadIds(new Set());
@@ -378,15 +403,23 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
           setCategoryMap(new Map());
         }
 
-        // Unread counts (only for inbox)
-        if (isInbox) {
+        // Per-tab counts — total (what "empty" means) and unread (the pill),
+        // for the configured tabs only (SPEC-SIT REQ-2.4, 3.1); inbox only.
+        if (isInbox && inboxViewMode === "split") {
           promises.push(
-            getCategoryUnreadCounts(activeAccountId).then((result) => {
-              if (!cancelled) setCategoryUnreadCounts(result);
+            getSplitTabCounts(activeAccountId, {
+              categories: splitInboxTabs.filter((t) => t.kind === "category").map((t) => t.id),
+              labelIds: splitInboxTabs.flatMap((t) => (t.kind === "label" && t.labelId ? [t.labelId] : [])),
+              reminders: splitInboxTabs.some((t) => t.kind === "reminders"),
+            }).then((result) => {
+              if (!cancelled) setTabCounts(result);
+            }).catch(() => {
+              // Fail open on display: tabs stay, pills empty, nothing hides.
+              if (!cancelled) setTabCounts(new Map());
             }),
           );
         } else {
-          setCategoryUnreadCounts(new Map());
+          setTabCounts(new Map());
         }
 
         // Follow-up indicators
@@ -441,7 +474,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
 
     loadMetadata();
     return () => { cancelled = true; };
-  }, [threadIdKey, activeLabel, activeCategory, activeAccountId]);
+  }, [threadIdKey, activeLabel, activeCategory, activeAccountId, inboxViewMode, splitInboxTabs]);
 
   // Auto-scroll selected thread into view (triggered by keyboard navigation)
   useEffect(() => {
@@ -530,9 +563,9 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       {/* Category tabs (inbox + split mode only) */}
       {activeLabel === "inbox" && inboxViewMode === "split" && (
         <CategoryTabs
-          activeCategory={activeCategory}
-          onCategoryChange={setActiveCategory}
-          unreadCounts={Object.fromEntries(categoryUnreadCounts)}
+          tabs={visibleTabs}
+          activeTab={activeCategory}
+          onTabChange={setActiveCategory}
         />
       )}
 

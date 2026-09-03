@@ -728,11 +728,13 @@ export const HELP_CATEGORIES: HelpCategory[] = [
         id: "split-inbox",
         icon: Columns2,
         title: "Split inbox",
-        summary: "Divide your inbox into category tabs.",
+        summary: "Divide your inbox into the tabs you choose.",
         description:
-          "Split inbox organizes your inbox into five category tabs: Primary, Updates, Promotions, Social, and Newsletters. Each tab shows only the threads belonging to that category, letting you focus on what matters. New emails are automatically categorized using AI (or rule-based fallback). Toggle split inbox from the icon next to Inbox in the sidebar. When split mode is off, all categories are shown together.",
+          "Split inbox organizes your inbox into tabs. Out of the box they are the five AI categories — Primary, Updates, Promotions, Social, and Newsletters — and each shows only the inbox threads in that category. You can change the tabs under Settings → General → Split inbox tabs: reorder or remove them, add a tab for any label (a smart label works best), add a Reminders tab that lists every thread with a pending follow-up reminder, and mark a tab to hide itself when it has nothing in it. New emails are categorized automatically (rules first, AI second). Toggle split inbox from the icon next to Inbox in the sidebar; when it is off, everything is shown together.",
         tips: [
           { text: "Toggle split inbox from the Columns icon next to Inbox in the sidebar." },
+          { text: "Choose your tabs under Settings → General → Split inbox tabs: categories, any label, and Reminders." },
+          { text: "\"Hide when empty\" keeps a tab out of the strip until something lands in it." },
           { text: "Categories: Primary, Updates, Promotions, Social, Newsletters." },
           { text: "AI auto-categorizes new emails during sync." },
           { text: "Rule-based categorization runs first, AI fills in the rest." },

@@ -91,6 +91,55 @@ export async function getThreadsForCategory(
   );
 }
 
+/**
+ * SPEC-SIT REQ-2.2: a label tab — INBOX threads carrying the label, ordered
+ * like the category tabs.
+ */
+export async function getInboxThreadsForLabel(
+  accountId: string,
+  labelId: string,
+  limit = 50,
+  offset = 0,
+): Promise<DbThread[]> {
+  const db = await getDb();
+  return db.select<DbThread[]>(
+    `SELECT t.*, m.from_name, m.from_address FROM threads t
+     INNER JOIN thread_labels inbox ON inbox.account_id = t.account_id AND inbox.thread_id = t.id AND inbox.label_id = 'INBOX'
+     INNER JOIN thread_labels tl ON tl.account_id = t.account_id AND tl.thread_id = t.id
+     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+       AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+     WHERE t.account_id = $1 AND tl.label_id = $2
+     GROUP BY t.account_id, t.id
+     ORDER BY t.is_pinned DESC, t.last_message_at DESC
+     LIMIT $3 OFFSET $4`,
+    [accountId, labelId, limit, offset],
+  );
+}
+
+/**
+ * SPEC-SIT REQ-2.3: the Reminders tab — every thread of the account with a
+ * pending follow-up reminder, inbox or not (a reminder usually hangs on a
+ * sent thread), soonest due first.
+ */
+export async function getThreadsWithPendingReminders(
+  accountId: string,
+  limit = 50,
+  offset = 0,
+): Promise<DbThread[]> {
+  const db = await getDb();
+  return db.select<DbThread[]>(
+    `SELECT t.*, m.from_name, m.from_address FROM threads t
+     INNER JOIN follow_up_reminders f ON f.account_id = t.account_id AND f.thread_id = t.id AND f.status = 'pending'
+     LEFT JOIN messages m ON m.account_id = t.account_id AND m.thread_id = t.id
+       AND m.date = (SELECT MAX(m2.date) FROM messages m2 WHERE m2.account_id = t.account_id AND m2.thread_id = t.id)
+     WHERE t.account_id = $1
+     GROUP BY t.account_id, t.id
+     ORDER BY MIN(f.remind_at) ASC, t.last_message_at DESC
+     LIMIT $2 OFFSET $3`,
+    [accountId, limit, offset],
+  );
+}
+
 export async function upsertThread(thread: {
   id: string;
   accountId: string;

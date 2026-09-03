@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { setSetting } from "@/services/db/settings";
 import { normaliseAutoReminderDays } from "@/services/followup/autoReminders";
+import { DEFAULT_SPLIT_TABS, serializeSplitTabs, type SplitTab } from "@/services/inbox/splitTabs";
 import type { ColorThemeId } from "@/constants/themes";
 
 type Theme = "light" | "dark" | "system";
@@ -63,6 +64,8 @@ interface UIState {
   /** SPEC-AR: days until the automatic reminder falls due (1, 2, 3 or 7). */
   autoRemindersDays: number;
   inboxViewMode: InboxViewMode;
+  /** SPEC-SIT: the split inbox's tabs, in order; validated at the settings boundary. */
+  splitInboxTabs: SplitTab[];
   taskSidebarVisible: boolean;
   sidebarNavConfig: SidebarNavItem[] | null;
   reduceMotion: boolean;
@@ -88,6 +91,10 @@ interface UIState {
   setAutoRemindersEnabled: (enabled: boolean) => void;
   setAutoRemindersDays: (days: number) => void;
   setInboxViewMode: (mode: InboxViewMode) => void;
+  /** Persists; the Settings editor's path. */
+  setSplitInboxTabs: (tabs: SplitTab[]) => void;
+  /** Does not persist; boot restore only. */
+  restoreSplitInboxTabs: (tabs: SplitTab[]) => void;
   toggleTaskSidebar: () => void;
   setTaskSidebarVisible: (visible: boolean) => void;
   setSidebarNavConfig: (config: SidebarNavItem[]) => void;
@@ -123,6 +130,7 @@ export const useUIStore = create<UIState>((set) => ({
   autoRemindersEnabled: true,
   autoRemindersDays: 3,
   inboxViewMode: "unified",
+  splitInboxTabs: DEFAULT_SPLIT_TABS,
   taskSidebarVisible: false,
   sidebarNavConfig: null,
   reduceMotion: false,
@@ -196,6 +204,11 @@ export const useUIStore = create<UIState>((set) => ({
     setSetting("inbox_view_mode", inboxViewMode).catch(() => {});
     set({ inboxViewMode });
   },
+  setSplitInboxTabs: (splitInboxTabs) => {
+    setSetting("split_inbox_tabs", serializeSplitTabs(splitInboxTabs)).catch(() => {});
+    set({ splitInboxTabs });
+  },
+  restoreSplitInboxTabs: (splitInboxTabs) => set({ splitInboxTabs }),
   toggleTaskSidebar: () =>
     set((state) => {
       const visible = !state.taskSidebarVisible;

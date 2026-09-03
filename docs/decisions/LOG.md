@@ -1766,3 +1766,25 @@
   re-exported, so no dependency was named). **Kept:** the `*:*` assertion alongside the
   exact-list one (Grok N2; REQ-1 asks for both). Raw outputs in
   `docs/reviews/2026-09-03-pr85-urlpattern-{gemini38,grok}-raw.md`.
+- **2026-09-03 — SPEC-SIT (custom split-inbox tabs) built, PR #87, Tier 1.** Enhancement wave 1
+  item 2. Brief `docs/briefs/2026-09-03-split-inbox-tabs.md` committed first. A pure module
+  `src/services/inbox/splitTabs.ts` holds the tab list — category tabs keep the category name
+  as their id so the router param and the `g p/u/o/c/n` shortcuts are unchanged, label tabs are
+  `label:<id>`, Reminders is `reminders` — with a Zod schema at the settings boundary (the
+  default, today's five categories, on anything invalid: bad JSON, wrong shape, an unknown
+  kind, a duplicate, an id that does not match its kind, an empty list), the visibility rule
+  (a label the account does not have is not a tab; a hide-when-empty tab with a known total of
+  zero is dropped; an unknown count keeps the tab; never everything hidden), the active-tab
+  fallback, and the add/remove/move/hide helpers. Two queries in `db/threads.ts` (INBOX ∩ label;
+  every thread with a pending reminder, soonest due first — inbox or not, because the reminder
+  hangs on the sent thread) and `db/splitTabCounts.ts` (total + unread per tab in at most three
+  grouped queries), driven on the SQLite harness. `uiStore.splitInboxTabs` persisted as
+  `split_inbox_tabs`, restored at boot without a write-back. `CategoryTabs` now takes the
+  visible tabs (icon by kind, a colour dot for labels); `EmailList` loads by tab kind and
+  resolves the router's request against the visible set; the five shortcuts only navigate to a
+  configured tab; a `SplitTabsEditor` under Settings → General → Inbox view mode (reorder,
+  remove, hide-when-empty, add a category, any of the account's labels with smart labels
+  marked, or Reminders); the help card updated. Tests first: 16 pure cases, 4 SQLite cases, the
+  tab-strip tests rewritten (5). Gates: `tsc` clean, 176 files / 2,361 tests, `graph:check`,
+  `docs:check` (counts bumped 174 → 176, services 96 → 98). No dependency added (Zod was
+  already approved and in use at the model-output boundary).

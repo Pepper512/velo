@@ -4,6 +4,7 @@ import { useUIStore } from "@/stores/uiStore";
 import { AUTO_REMINDER_DAY_CHOICES } from "@/services/followup/autoReminders";
 import { navigateToLabel, navigateToSettings } from "@/router/navigate";
 import { useAccountStore } from "@/stores/accountStore";
+import { SplitTabsEditor } from "./SplitTabsEditor";
 import { getSetting, setSetting, getSecureSetting, setSecureSetting } from "@/services/db/settings";
 import { PROVIDER_MODELS, type AiProvider } from "@/services/ai/types";
 import { isAllowedAiUrl } from "@/services/ai/rustFetch";
@@ -537,6 +538,15 @@ export function SettingsPage() {
                         <option value="split">Split (Categories)</option>
                       </select>
                     </SettingRow>
+                    {inboxViewMode === "split" && (
+                      <div className="py-2">
+                        <div className="text-sm text-text-primary mb-1">Split inbox tabs</div>
+                        <div className="text-xs text-text-tertiary mb-2">
+                          Categories, any label (smart labels work best), and Reminders — in the order you want them.
+                        </div>
+                        <SplitTabsEditor />
+                      </div>
+                    )}
                     <ToggleRow
                       label="Reduce motion"
                       description="Disable animated background effects (fixes flickering on some GPUs)"

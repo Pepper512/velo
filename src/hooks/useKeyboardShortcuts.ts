@@ -81,6 +81,17 @@ function getCachedReverseMap(keyMap: Record<string, string>): ReturnType<typeof 
  * Global keyboard shortcuts handler (Superhuman-inspired).
  * Uses customizable key bindings from the shortcut store.
  */
+/**
+ * SPEC-SIT REQ-5.1: `g p/u/o/c/n` go to their category only in split mode and
+ * only when that category is one of the configured tabs — no phantom tab.
+ */
+function goToCategoryTab(category: string): void {
+  const ui = useUIStore.getState();
+  if (ui.inboxViewMode !== "split") return;
+  if (!ui.splitInboxTabs.some((t) => t.id === category)) return;
+  navigateToLabel("inbox", { category });
+}
+
 export function useKeyboardShortcuts() {
   const pendingKeyRef = useRef<string | null>(null);
   const pendingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -238,29 +249,19 @@ async function executeAction(actionId: string): Promise<void> {
       navigateToLabel("drafts");
       break;
     case "nav.goPrimary":
-      if (useUIStore.getState().inboxViewMode === "split") {
-        navigateToLabel("inbox", { category: "Primary" });
-      }
+      goToCategoryTab("Primary");
       break;
     case "nav.goUpdates":
-      if (useUIStore.getState().inboxViewMode === "split") {
-        navigateToLabel("inbox", { category: "Updates" });
-      }
+      goToCategoryTab("Updates");
       break;
     case "nav.goPromotions":
-      if (useUIStore.getState().inboxViewMode === "split") {
-        navigateToLabel("inbox", { category: "Promotions" });
-      }
+      goToCategoryTab("Promotions");
       break;
     case "nav.goSocial":
-      if (useUIStore.getState().inboxViewMode === "split") {
-        navigateToLabel("inbox", { category: "Social" });
-      }
+      goToCategoryTab("Social");
       break;
     case "nav.goNewsletters":
-      if (useUIStore.getState().inboxViewMode === "split") {
-        navigateToLabel("inbox", { category: "Newsletters" });
-      }
+      goToCategoryTab("Newsletters");
       break;
     case "nav.goTasks":
       navigateToLabel("tasks");
