@@ -1489,3 +1489,76 @@
   in `docs/reviews/2026-09-03-pr75-gemini38-final-raw.md`. Four passes; no fifth — the last
   round's real findings were test-tightening, and its HIGHs were re-litigations of verified
   facts.
+- **2026-09-03 — PR D and PR E plans written (SPEC-PR-D #77, SPEC-PR-E #78), plans only,
+  for Jim's approval; no dependency, lockfile or source change.** On Jim's roadmap
+  instruction. Evidence gathered without touching the repo: TypeScript 6.0.3 and 7.0.2 run
+  from the npx cache against today's tsconfig (one and two errors, all `baseUrl`; zero after
+  the one-line fix); a throwaway copy of `src-tauri` with the four crate bumps (`mail-parser`
+  0.11.8 breaks exactly three lines, its `usize → u32`; `async-imap` 0.11.3, `reqwest` 0.13.4
+  and `socket2` 0.6 compile unchanged; crate count 374 → 374, `hashify` the one new crate;
+  `cargo audit` clean beyond today's allowed warnings); a throwaway copy of the project with
+  TypeScript 7 + Vite 8 + plugin-react 6 installed (tsc 0, build 0 with both pages and zero
+  inline scripts, vitest 2,298 passed, lockfile 355 → 316, native packages 76 → 72, no
+  `@types/node`, no new install script). **Corrections to the vault audit, recorded in the
+  specs:** the reqwest duplicate stays (`tauri-plugin-http` 2.6.0 pins 0.12); `base64` is not
+  collapsible by Velo alone; `mail-parser` 0.11's default feature set is empty, so
+  `full_encoding` is a behaviour cliff; `async-imap` 0.11.2's quoting change is COPY/LIST
+  (SELECT was already quoted), and reqwest 0.13's `native-tls` now carries ALPN — today's
+  handshake is `native-tls-no-alpn`.
+- **2026-09-03 — PR #77 (PR D plan) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (4H 4M 2L 1N); Grok 4.6: CHANGES REQUESTED (7H 5M 2L 1N). **Adopted:** the
+  `baseUrl` fix as its own commit on 5.9.3 (bisect; Gemini M6); the legal revert sets and a
+  **rebase merge** instead of squash — commits 1 and 2 stack under TypeScript 7, and a
+  squash leaves no per-commit revert (Grok H1); a **throwaway build of the whole stack**
+  before approval, which Grok H3/H7 asked for and which is now §5 of the spec; the browser
+  floor **pinned to Vite 7's** (`build.target`/`cssTarget`), lifting it a named decision for
+  Jim with the webview minimums (Gemini M8, Grok H4); a **production-bundle smoke** via
+  `tauri build --debug` before commit 4 merges — the dev server never runs Rolldown or the
+  minifiers (Gemini H1, Grok H5); an automated `dist` check (Gemini L9, Grok H5); `npm audit
+  signatures` in CI from commit 1 (Gemini H4 — the house gate list names it; Tier 1 wiring,
+  approved with the plan); caches cleared on rollback (Gemini H3, Grok M10); REQ-1.4/1.5
+  carved out for the measured transitive changes (Grok M11, L14); the native-binary
+  publishers and attestation status written into the threat pass as a trust decision, with
+  the blast radius stated as build-time execution plus altered shipped JS/CSS (Grok H6);
+  `noEmit` quoted (Grok H2); `showConfig` compared (Grok M8); speed demoted to an observation
+  (Grok L13); wording (Gemini L10, N11). **Declined, each verified:** Gemini H2 — "npm cannot
+  filter platform binaries listed under both `dependencies` and `optionalDependencies`":
+  npm's documented rule is that the optional entry overrides, and this lockfile already
+  carries 51 `@esbuild/*`/`@rollup/rollup-*` platform packages that way with Linux CI green
+  since PR A; Gemini M5 — dropped React dedupe: measured, one copy and every hook test green
+  under plugin-react 6; Gemini M7 / Grok H2's emit half — `tsconfig.json:12` sets `noEmit`,
+  and a misspelled `rolldownOptions` is caught by the page-emission check (the throwaway
+  build shows the rename took); Grok M9 — CI runs `tsc`, `vitest` and the build
+  (`ci.yml:40-47`); Grok M12 — no bundler-owned source patterns in `src/` (grepped) and the
+  suite plus REQ-2.3 cover CJS interop. Raw outputs in
+  `docs/reviews/2026-09-03-pr77-plan-d-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #78 (PR E plan) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (3H 4M 2L 1N); Grok 4.6: CHANGES REQUESTED (6H 8M 5L 3N). **Adopted:** reqwest
+  **feature unification** with the updater plugin's rustls, confirmed in the scratch feature
+  tree, answered by `.use_native_tls()` on the three builders and a feature-tree gate in place
+  of the naive `cargo tree -i rustls` (Gemini H1, Grok H1); **`native-tls-no-alpn`** so the
+  OAuth handshake is byte-identical to today's — 0.12's `native-tls` had no ALPN, 0.13's does
+  (Grok H2); **exact `=` pins** and `default-features = false` on `mail-parser` with the
+  manifest quoted and a fail-closed proof step (Grok H6, M-version-path); **invariant versus
+  hardening fixtures**, covering every persisted field — addresses, threading headers, Date,
+  Content-ID, charsets, sections — with the 0.11.x panic cases as disposition fixtures
+  (Gemini M5, M6; Grok H3, M-corpus); the `u32` fix as a boundary conversion with unchanged
+  signatures (Gemini M4, Grok M-map); **five commits, one crate each, landed by rebase merge**
+  (Gemini L8, Grok M-commits); the async-imap **source diffstat** (8 files, +498/−243) and
+  the LOGIN change named, with a **duplex-stream wire test in CI** capturing LOGIN, SELECT,
+  UID COPY, UID MOVE, CREATE and LIST bytes (Grok H4, M-diff); a mock-server test pinning the
+  token request's form body (Grok M-oauth); what the parser persists and why a revert is safe
+  (Gemini H2, Grok M-rollback); a STRIDE block (Gemini L9); `hashify` named as the one pre-1.0
+  transitive addition Jim's approval covers, with correlated-trust stated as colour not
+  control (Gemini N10, Grok H5, L-provenance); MSRV wording (Grok M-MSRV); per-commit
+  `--all-targets` checks and the scratch check's limits stated (Grok M-scratch); the parse
+  size cap as a pre-existing residual (Grok M-blast); the live-harness merge gate as **Jim's
+  decision** on the plan — the standing instruction records manual checks as open, both
+  reviewers asked for a blocking gate (Gemini H3, Grok H2). **Declined, each verified against
+  source:** Gemini H1's mechanism — reqwest 0.13 picks native-tls whenever `__native-tls` is
+  compiled (`tls.rs:621-635`), so no silent switch; Gemini M7 / Grok H4's premise — 0.10.4
+  already quotes SELECT/MOVE/CREATE/DELETE/STATUS/APPEND through the same `quote!` macro
+  (`client.rs:1476`); 0.11.2 added COPY and LIST, and LIST names arrive decoded from
+  `async-imap`'s `Name`, never pre-quoted. Raw outputs in
+  `docs/reviews/2026-09-03-pr78-plan-e-{gemini38,grok}-raw.md`. **Both plans stop here: no
+  code until Jim approves each.**
