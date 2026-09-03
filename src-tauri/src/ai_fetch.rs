@@ -122,7 +122,9 @@ fn shared_client() -> Result<&'static reqwest::Client, String> {
     if let Some(client) = CLIENT.get() {
         return Ok(client);
     }
+    // PR E REQ-1.4: the backend is pinned, not defaulted (see oauth.rs).
     let built = reqwest::Client::builder()
+        .use_native_tls()
         .redirect(Policy::none())
         .build()
         .map_err(describe)?;
@@ -215,6 +217,13 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::TcpListener;
     use std::sync::mpsc;
+
+    // ---------- PR E REQ-2.2: the pinned TLS backend ----------
+
+    #[test]
+    fn the_shared_client_builds_with_native_tls() {
+        shared_client().expect("native-tls is compiled in");
+    }
 
     // ---------- REQ-2.1: the URL rule ----------
 

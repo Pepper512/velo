@@ -68,7 +68,11 @@ base64 = "0.22"
 utf7-imap = "0.3"
 # PR E REQ-1.3: exact pin; one copy in the tree (0.5 and 0.6 both used to be there).
 socket2 = "=0.6.5"
-reqwest = { version = "0.12", default-features = false, features = ["native-tls", "json"] }
+# PR E REQ-1.4: exact pin. `native-tls-no-alpn` is today's handshake (0.12's
+# `native-tls` had no ALPN; 0.13's does); `form` is what `.form()` in oauth.rs
+# needs; the three builders call `.use_native_tls()` so the updater plugin's
+# rustls, unified into this crate's feature set, can never become the backend.
+reqwest = { version = "=0.13.4", default-features = false, features = ["native-tls-no-alpn", "json", "form"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.58", features = ["Win32_UI_Shell"] }
