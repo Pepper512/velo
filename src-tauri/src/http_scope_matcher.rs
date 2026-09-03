@@ -15,8 +15,8 @@
 
 #[cfg(test)]
 mod tests {
-    use urlpattern::quirks::{process_construct_pattern_input, process_match_input, StringOrInit};
-    use urlpattern::UrlPattern;
+    use urlpattern::quirks::{process_construct_pattern_input, StringOrInit};
+    use urlpattern::{UrlPattern, UrlPatternMatchInput};
 
     /// `parse_url_pattern` from the plugin's `scope.rs`, line for line.
     fn plugin_pattern(s: &str) -> UrlPattern {
@@ -63,9 +63,13 @@ mod tests {
         let patterns: Vec<UrlPattern> =
             allow_urls(file).iter().map(|u| plugin_pattern(u)).collect();
         move |url: &str| {
-            let (input, _) = process_match_input(StringOrInit::String(url.to_string()), None)
-                .expect("a well-formed URL")
-                .expect("a URL the matcher can process");
+            // The plugin's input exactly: a parsed URL, not a constructor
+            // string — so `*`, `%` or `:name` in a future URL cannot be read as
+            // pattern syntax here while the plugin reads them literally (Grok
+            // L1 on #85). `tauri::Url` is the `url` crate the plugin and
+            // `urlpattern` share, re-exported, so nothing new is named.
+            let parsed = tauri::Url::parse(url).unwrap_or_else(|e| panic!("{url}: {e}"));
+            let input = UrlPatternMatchInput::Url(parsed);
             // A matcher error fails the test — `unwrap_or(false)` is the
             // plugin's fail-closed runtime answer, but here it would let a
             // refusal assertion pass for the wrong reason (Gemini N1 on #85).

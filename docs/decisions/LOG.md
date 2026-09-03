@@ -1743,3 +1743,26 @@
   their exact SHAs and passed. Raw outputs in
   `docs/reviews/2026-09-03-pr84-pr-e-{gemini38,grok}-raw.md`. **Landing:** rebase merge,
   seven commits — the five planned plus two review-fix commits.
+- **2026-09-03 — SPEC-280-U built, PR #85, Tier 1: the http scope matched by the plugin's own
+  matcher.** Closes SPEC-280's "Open for Jim" (Grok M1 on #56). Brief
+  `docs/briefs/2026-09-03-280-urlpattern-scope-test.md` committed first.
+  `src-tauri/src/http_scope_matcher.rs`, test-only: rebuilds every `http:default` allow entry
+  of both capability files the way `tauri-plugin-http`'s private `parse_url_pattern` does
+  (parse, then `*` for an empty search, hash, and empty-or-`/` pathname) and asserts, with the
+  `urlpattern` crate, the exact eight-entry allow list with no `*:*`, the accepted table and
+  the thirteen refused URLs the TypeScript test refuses. **Dependency, asked and approved
+  (Jim, 2026-09-03, decision 4):** `[dev-dependencies] urlpattern = "0.3.0"` — need: the
+  plugin's scope module is private, so this is the only way to test with the matcher the
+  binary runs; transitive cost: zero, the version the plugin already pulls, `cargo tree -e
+  normal` byte-identical, the lockfile gains one line and no package; not shipped. The crate's
+  `quirks` API builds pattern and input from strings, so `regex` and `url` were not named.
+  Gates: suite 206 / 4 ignored, clippy clean, build, audit exit 0, sqlx single.
+- **2026-09-03 — PR #85 (SPEC-280-U) review, two legs.** Gemini 3.8 Flash High: APPROVE (2N);
+  Grok 4.6: APPROVE (1L 2N). **Adopted:** a matcher error fails the test rather than reading
+  as "refused" (Gemini N1, Grok N1); `Path::join` for the capability path (Gemini N2); the
+  match input is the plugin's exact input — `UrlPatternMatchInput::Url(tauri::Url::parse(..))`
+  — instead of the URL parsed as a pattern string, so `*`, `%` or `:name` in a future URL
+  cannot diverge from the plugin (Grok L1; `tauri::Url` is the graph's one `url` crate,
+  re-exported, so no dependency was named). **Kept:** the `*:*` assertion alongside the
+  exact-list one (Grok N2; REQ-1 asks for both). Raw outputs in
+  `docs/reviews/2026-09-03-pr85-urlpattern-{gemini38,grok}-raw.md`.
