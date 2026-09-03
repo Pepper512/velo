@@ -512,5 +512,42 @@ describe("emailActions", () => {
       ).resolves.toBeUndefined();
       spy.mockRestore();
     });
+
+    it("carries the wish on the row queued after a retryable provider failure too (REQ-1.1, Gemini gap 1)", async () => {
+      mockProvider.sendMessage.mockRejectedValueOnce(new Error("Network error"));
+      const result = await sendEmail("acct-1", raw, undefined, { autoReminderDays: 3 });
+      expect(result.queued).toBe(true);
+      expect(enqueuePendingOperation).toHaveBeenCalledWith(
+        "acct-1",
+        "sendMessage",
+        expect.any(String),
+        expect.objectContaining({ autoReminderDays: 3 }),
+      );
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+    });
+
+    it("warns and sets nothing when the provider reports no message id (Gemini gap 2)", async () => {
+      mockProvider.sendMessage.mockResolvedValue({} as never);
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await sendEmail("acct-1", raw, undefined, { autoReminderDays: 3 });
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("no message id"));
+      expect(getFollowUpForThread).not.toHaveBeenCalled();
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+      spy.mockRestore();
+    });
+
+    it("never sets a second reminder on a thread that already has a pending one — a re-executed row is safe (Gemini gap 4)", async () => {
+      vi.mocked(getFollowUpForThread).mockResolvedValue({
+        id: "fu-0", account_id: "acct-1", thread_id: "thr-9", message_id: "old", remind_at: 1, status: "pending", created_at: 1,
+      });
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, autoReminderDays: 3 });
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+    });
+
+    it("falls back to the reply's thread when the provider reports an empty one (Gemini L2)", async () => {
+      mockProvider.sendMessage.mockResolvedValue({ id: "msg-4", threadId: "" });
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, threadId: "thr-old", autoReminderDays: 3 });
+      expect(insertFollowUpReminder).toHaveBeenCalledWith("acct-1", "thr-old", "msg-4", expect.any(Number));
+    });
   });
 });

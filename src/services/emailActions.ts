@@ -291,7 +291,9 @@ async function afterSuccessfulSend(
       { getFollowUpForThread, insertFollowUpReminder },
       {
         accountId,
-        threadId: sent.threadId ?? action.threadId,
+        // `||`, not `??`: a provider that reports an empty thread id still
+        // falls back to the thread the message replied to.
+        threadId: sent.threadId || action.threadId,
         messageId: sent.id,
         sentAt: new Date(),
         days: action.autoReminderDays,
@@ -396,7 +398,7 @@ export async function executeEmailAction(
   // 4. Try online execution
   try {
     const data = await executeViaProvider(accountId, action);
-    await afterSuccessfulSend(accountId, action, data);
+    if (action.type === "sendMessage") await afterSuccessfulSend(accountId, action, data);
     return { success: true, data, nextThreadId };
   } catch (err) {
     const classified = classifyError(err);
@@ -464,7 +466,7 @@ export async function executeQueuedAction(
     const result = await executeViaProvider(accountId, action);
     // SPEC-QSR: a queued send that goes out now gets the reminder the user
     // asked for when they pressed Send, dated from now.
-    await afterSuccessfulSend(accountId, action, result);
+    if (action.type === "sendMessage") await afterSuccessfulSend(accountId, action, result);
   } catch (err) {
     // F-4 REQ-4.1 on the queued path too (Grok M5 on #50): a queued move or
     // delete whose outcome is unknown gets the same observer as an online
