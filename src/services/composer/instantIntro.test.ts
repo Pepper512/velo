@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildInstantIntro,
+  instantIntroUnavailableReason,
   introducerFirstName,
   replyAllRecipients,
   type IntroSource,
@@ -71,6 +72,35 @@ describe("introducerFirstName (REQ-2.1)", () => {
   it("reads the address out of a display-name chip", () => {
     expect(introducerFirstName(null, "Alice <alice@intro.io>")).toBe("alice");
   });
+
+  it("strips quotes and punctuation around the first word (Gemini N F-04)", () => {
+    expect(introducerFirstName('"Alice" Smith', "alice@intro.io")).toBe("Alice");
+    expect(introducerFirstName("'Alice', Smith", "alice@intro.io")).toBe("Alice");
+    expect(introducerFirstName("Élodie D.", "e@intro.io")).toBe("Élodie");
+  });
+
+  it("falls back to the address when the display name is only punctuation", () => {
+    expect(introducerFirstName('"" -', "alice@intro.io")).toBe("alice");
+  });
+});
+
+describe("instantIntroUnavailableReason (REQ-1.3, Gemini L F-03)", () => {
+  it("is null when the intro is available", () => {
+    expect(instantIntroUnavailableReason(msg(), me)).toBeNull();
+  });
+
+  it("names the missing introducer address", () => {
+    expect(instantIntroUnavailableReason(msg({ from_address: null }), me)).toBe("No sender address to move to Bcc");
+  });
+
+  it("names my own last message even when others are on the thread", () => {
+    const m = msg({ from_address: "alias@acme.com", to_addresses: "bob@third.org, carol@third.org" });
+    expect(instantIntroUnavailableReason(m, me)).toBe("The last message is your own");
+  });
+
+  it("names the empty introduction", () => {
+    expect(instantIntroUnavailableReason(msg({ to_addresses: "me@acme.com" }), me)).toBe("Nobody to introduce you to");
+  });
 });
 
 describe("buildInstantIntro (REQ-1, REQ-2)", () => {
@@ -102,8 +132,8 @@ describe("buildInstantIntro (REQ-1, REQ-2)", () => {
   });
 
   it("escapes the introducer's name in the opener", () => {
-    const m = msg({ from_name: "<b>Alice</b> Smith" });
-    expect(buildInstantIntro(m, me)!.openerHtml).toBe("<p>Thanks &lt;b&gt;Alice&lt;/b&gt;, moving you to Bcc.</p>");
+    const m = msg({ from_name: "A<b>lice</b>&co Smith" });
+    expect(buildInstantIntro(m, me)!.openerHtml).toBe("<p>Thanks A&lt;b&gt;lice&lt;/b&gt;&amp;co, moving you to Bcc.</p>");
   });
 
   it("does not prefix Re: twice", () => {

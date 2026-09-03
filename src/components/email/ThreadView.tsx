@@ -23,7 +23,7 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
 import { RawMessageModal } from "./RawMessageModal";
 import { isPopoutWindow } from "@/utils/windowKind";
-import { buildInstantIntro } from "@/services/composer/instantIntro";
+import { buildInstantIntro, instantIntroUnavailableReason } from "@/services/composer/instantIntro";
 import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/db/sendAsAliases";
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
 
@@ -69,9 +69,11 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccount = accounts.find((a) => a.id === activeAccountId);
   // SPEC-II: the account's own addresses (email + send-as aliases) decide who
-  // stays on an intro; loaded once per account.
-  const [aliases, setAliases] = useState<SendAsAlias[]>([]);
+  // stays on an intro; loaded once per account. `null` = not loaded yet, so
+  // the intro never runs on a half-known address list (Gemini F-02).
+  const [aliases, setAliases] = useState<SendAsAlias[] | null>(null);
   useEffect(() => {
+    setAliases(null);
     if (!activeAccountId) return;
     let cancelled = false;
     getAliasesForAccount(activeAccountId)
@@ -189,12 +191,19 @@ export function ThreadView({ thread }: ThreadViewProps) {
 
   // SPEC-II: reply all with the introducer moved to Bcc, opener written.
   const ownAddresses = useMemo(
-    () => (activeAccount ? [activeAccount.email, ...aliases.map((a) => a.email)] : []),
+    () => (activeAccount && aliases ? [activeAccount.email, ...aliases.map((a) => a.email)] : null),
     [activeAccount, aliases],
   );
   const instantIntro = useMemo(
-    () => (lastMessage && activeAccount ? buildInstantIntro(lastMessage, ownAddresses) : null),
-    [lastMessage, activeAccount, ownAddresses],
+    () => (lastMessage && ownAddresses ? buildInstantIntro(lastMessage, ownAddresses) : null),
+    [lastMessage, ownAddresses],
+  );
+  const introUnavailableReason = useMemo(
+    () =>
+      lastMessage && ownAddresses
+        ? instantIntroUnavailableReason(lastMessage, ownAddresses)
+        : "Instant Intro is not ready yet",
+    [lastMessage, ownAddresses],
   );
   const handleInstantIntro = useCallback(() => {
     if (!lastMessage || !instantIntro) return;
@@ -212,7 +221,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
     });
     // The composer picks the From alias from the reply's To/Cc, and the intro
     // has removed me from both — resolve it from the original headers instead.
-    const from = resolveFromAddress(aliases, lastMessage.to_addresses, lastMessage.cc_addresses);
+    const from = resolveFromAddress(aliases ?? [], lastMessage.to_addresses, lastMessage.cc_addresses);
     if (from) useComposerStore.getState().setFromEmail(from.email);
   }, [lastMessage, instantIntro, aliases, openComposer]);
 
@@ -446,7 +455,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
           onReplyAll={handleReplyAll}
           onForward={handleForward}
           onInstantIntro={handleInstantIntro}
-          introUnavailableReason={instantIntro ? null : "Nobody to introduce you to"}
+          introUnavailableReason={introUnavailableReason}
           onPrint={handlePrint}
           onExport={handleExport}
           // Inside a pop-out the thread is already in its own window, and the

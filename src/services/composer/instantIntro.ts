@@ -75,13 +75,31 @@ export function replyAllRecipients(
   return { to, cc };
 }
 
-/** REQ-2.1: the first word of the display name, else the address's local part. */
+/**
+ * REQ-2.1: the first word of the display name — quotes and punctuation
+ * around it dropped — else the address's local part.
+ */
 export function introducerFirstName(fromName: string | null, address: string): string {
-  const first = fromName?.trim().split(/\s+/)[0];
+  const first = fromName
+    ?.trim()
+    .split(/\s+/)[0]
+    ?.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
   if (first) return first;
   const bare = bareAddress(address);
   const at = bare.indexOf("@");
   return at > 0 ? bare.slice(0, at) : bare;
+}
+
+/**
+ * REQ-1.3: why an intro is unavailable on this message, or `null` when it is
+ * available. The button shows the reason; the key path checks for `null`.
+ */
+export function instantIntroUnavailableReason(message: IntroSource, ownAddresses: string[]): string | null {
+  const target = replyTarget(message);
+  if (!target) return "No sender address to move to Bcc";
+  const own = new Set(ownAddresses.map(bareAddress));
+  if (own.has(bareAddress(target))) return "The last message is your own";
+  return buildInstantIntro(message, ownAddresses) ? null : "Nobody to introduce you to";
 }
 
 function reSubject(subject: string | null): string {

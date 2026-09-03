@@ -1864,3 +1864,19 @@
   `bareAddress` moved from `autoReminders.ts` to `utils/emailUtils.ts` unchanged, now shared.
   Tests: the module (17), the `b` dispatch (2), the action-bar button (3); the `ThreadView`
   wiring has no render test, like its reply handlers — Jim's manual check covers it.
+- **2026-09-03 — PR #90 (SPEC-II) review, Gemini 3.8 Flash High leg:** CHANGES REQUESTED
+  (1H 1M 1L 1N). **Declined, verified against source — H F-01** ("the composer's own effect
+  clobbers the From alias set by `ThreadView`"): the composer's only automatic From write is
+  `if (!store.fromEmail && mapped.length > 0)` (`Composer.tsx:216`), inside the async
+  alias-loading effect; `ThreadView` sets `fromEmail` synchronously right after `openComposer`,
+  before any commit, so the guard sees it set and skips. The reviewer flagged the dependence on
+  code outside the diff; the diff's comment described exactly that guard. **Adopted — M F-02:**
+  aliases start `null` (not loaded) rather than `[]`, are reset on account change, and the intro
+  is not computed until they are known — the button reads "Instant Intro is not ready yet" for
+  the milliseconds the SQLite read takes, never a half-known own-address list. **Adopted —
+  L F-03:** `instantIntroUnavailableReason` in the module (tested) names the three cases — no
+  sender address, the last message is your own, nobody to introduce you to — instead of one
+  string for all. **Adopted — N F-04:** the first name drops surrounding quotes/punctuation
+  (`"Alice" Smith` → Alice); `Smith, Alice` still yields "Smith" — a surname-first display name
+  cannot be told from a first name, recorded. Raw output in
+  `docs/reviews/2026-09-03-pr90-instant-intro-gemini38-raw.md`.
