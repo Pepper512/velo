@@ -6,7 +6,9 @@ import { SearchBar } from "../search/SearchBar";
 import { EmailListSkeleton } from "../ui/Skeleton";
 import { useThreadStore, type Thread } from "@/stores/threadStore";
 import { threadMessageCache, type PrefetchJob } from "@/services/threads/messageCache";
-import { prefetchOrder, PREFETCH_DELAY_MS } from "@/services/threads/neighbours";
+import { prefetchOrder, joinIds, splitIds, PREFETCH_DELAY_MS } from "@/services/threads/neighbours";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { buildListItems, type ListItem } from "@/services/inbox/listItems";
 import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel, useSelectedThreadId, useActiveCategory } from "@/hooks/useRouteNavigation";
@@ -74,6 +76,8 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const readFilter = useUIStore((s) => s.readFilter);
   const setReadFilter = useUIStore((s) => s.setReadFilter);
   const readingPanePosition = useUIStore((s) => s.readingPanePosition);
+  const emailDensity = useUIStore((s) => s.emailDensity);
+  const threadMap = useThreadStore((s) => s.threadMap);
   const userLabels = useLabelStore((s) => s.labels);
   const smartFolders = useSmartFolderStore((s) => s.folders);
 
@@ -275,12 +279,12 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   // ids themselves, so a reload that leaves the neighbours unchanged does not
   // restart the timer or cancel a warm-up in flight (Gemini F-03).
   const prefetchKey = useMemo(
-    () => prefetchOrder(visibleThreads.map((t) => t.id), selectedThreadId).join("\n"),
+    () => joinIds(prefetchOrder(visibleThreads.map((t) => t.id), selectedThreadId)),
     [visibleThreads, selectedThreadId],
   );
   useEffect(() => {
     if (!activeAccountId || prefetchKey === "") return;
-    const order = prefetchKey.split("\n");
+    const order = splitIds(prefetchKey);
     let job: PrefetchJob | null = null;
     const timer = setTimeout(() => {
       job = threadMessageCache.prefetch(activeAccountId, order);
@@ -510,15 +514,6 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     return () => { cancelled = true; };
   }, [threadIdKey, activeLabel, activeCategory, activeAccountId, inboxViewMode, splitInboxTabs]);
 
-  // Auto-scroll selected thread into view (triggered by keyboard navigation)
-  useEffect(() => {
-    if (!selectedThreadId || !scrollContainerRef.current) return;
-    const el = scrollContainerRef.current.querySelector(`[data-thread-id="${CSS.escape(selectedThreadId)}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedThreadId]);
-
   // Listen for sync completion to reload (debounced to avoid waterfall from multiple emitters)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -533,21 +528,171 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     };
   }, [loadThreads, activeAccountId, activeLabel]);
 
-  // Infinite scroll: load more when near bottom
+  // SPEC-SB SB-3: one flat item model for the scroller — bundle headers and
+  // children, threads (with the pinned divider), footers — and a virtualizer
+  // that renders only the rows in view (REQ-3.1).
+  const showBundles = activeLabel === "inbox" && activeCategory === "All";
+  const items = useMemo<ListItem[]>(
+    () =>
+      buildListItems({
+        threads: visibleThreads,
+        bundles: bundleRules.map((rule) => {
+          const summary = bundleSummaries.get(rule.category);
+          const expanded = expandedBundles.has(rule.category);
+          return {
+            category: rule.category,
+            count: summary?.count ?? 0,
+            latestSender: summary?.latestSender ?? null,
+            latestSubject: summary?.latestSubject ?? null,
+            expanded,
+            threads: expanded ? filteredThreads.filter((t) => categoryMap.get(t.id) === rule.category) : [],
+          };
+        }),
+        showBundles,
+        loadingMore,
+        allLoaded: !hasMore && threads.length > PAGE_SIZE,
+        density: emailDensity,
+      }),
+    [visibleThreads, bundleRules, bundleSummaries, expandedBundles, filteredThreads, categoryMap, showBundles, loadingMore, hasMore, threads.length, emailDensity],
+  );
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: (index) => itemsRef.current[index]?.estimate ?? 72,
+    getItemKey: (index) => itemsRef.current[index]?.key ?? index,
+    overscan: 8,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  // REQ-3.3: the selected thread scrolls into view through the virtualizer,
+  // rendered or not. Keyed on the selection only, as before — a reload while
+  // the user has scrolled away must not snap back.
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
   useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
+    if (!selectedThreadId) return;
+    const index = itemsRef.current.findIndex((it) => it.kind === "thread" && it.threadId === selectedThreadId);
+    if (index >= 0) virtualizerRef.current.scrollToIndex(index, { align: "auto" });
+  }, [selectedThreadId]);
 
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      if (scrollHeight - scrollTop - clientHeight < 200) {
-        loadMore();
+  // REQ-3.3: load more when the last rendered row is within five of the end.
+  const lastRenderedIndex = virtualItems[virtualItems.length - 1]?.index ?? -1;
+  useEffect(() => {
+    if (lastRenderedIndex >= 0 && lastRenderedIndex >= items.length - 5) loadMore();
+  }, [lastRenderedIndex, items.length, loadMore]);
+
+  // REQ-3.4: stagger-in plays on the first paint of a loaded list only, never
+  // on rows that scroll into view later. Reset when the folder changes.
+  const firstPaintRef = useRef(true);
+  useEffect(() => {
+    firstPaintRef.current = true;
+  }, [activeAccountId, activeLabel, activeCategory]);
+  useEffect(() => {
+    if (items.length > 0) firstPaintRef.current = false;
+  });
+  const staggerOnThisPaint = firstPaintRef.current;
+
+  const renderItem = (item: ListItem, index: number) => {
+    switch (item.kind) {
+      case "bundle": {
+        const category = item.category!;
+        const summary = bundleSummaries.get(category);
+        const isExpanded = expandedBundles.has(category);
+        return (
+          <button
+            onClick={() => {
+              setExpandedBundles((prev) => {
+                const next = new Set(prev);
+                if (next.has(category)) next.delete(category);
+                else next.add(category);
+                return next;
+              });
+            }}
+            className="w-full text-left px-4 py-3 border-b border-border-secondary hover:bg-bg-hover transition-colors flex items-center gap-3"
+          >
+            <div className="w-9 h-9 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
+              <Package size={16} className="text-accent" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-text-primary">
+                  {category}
+                </span>
+                <span className="text-xs bg-accent/15 text-accent px-1.5 rounded-full">
+                  {summary?.count ?? 0}
+                </span>
+              </div>
+              <span className="text-xs text-text-tertiary truncate block mt-0.5">
+                {summary?.latestSender && `${summary.latestSender}: `}{summary?.latestSubject ?? ""}
+              </span>
+            </div>
+            <ChevronRight
+              size={14}
+              className={`text-text-tertiary transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+            />
+          </button>
+        );
       }
-    };
-
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [loadMore]);
+      case "bundle-child": {
+        const thread = threadMap.get(item.threadId!);
+        if (!thread) return null;
+        return (
+          <div className="pl-4">
+            <ThreadCard
+              thread={thread}
+              isSelected={thread.id === selectedThreadId}
+              onClick={handleThreadClick}
+              onContextMenu={handleThreadContextMenu}
+              category={item.category}
+              hasFollowUp={followUpThreadIds.has(thread.id)}
+            />
+          </div>
+        );
+      }
+      case "thread": {
+        const thread = threadMap.get(item.threadId!);
+        if (!thread) return null;
+        const stagger = staggerOnThisPaint && index < 15;
+        return (
+          <div
+            data-thread-id={thread.id}
+            className={stagger ? "stagger-in" : undefined}
+            style={stagger ? { animationDelay: `${index * 30}ms` } : undefined}
+          >
+            {item.dividerBefore && (
+              <div className="px-4 py-1.5 text-xs font-medium text-text-tertiary uppercase tracking-wider bg-bg-tertiary/50 border-b border-border-secondary">
+                Other emails
+              </div>
+            )}
+            <ThreadCard
+              thread={thread}
+              isSelected={thread.id === selectedThreadId}
+              onClick={handleThreadClick}
+              onContextMenu={handleThreadContextMenu}
+              category={categoryMap.get(thread.id)}
+              showCategoryBadge={showBundles}
+              hasFollowUp={followUpThreadIds.has(thread.id)}
+            />
+          </div>
+        );
+      }
+      case "loading":
+        return (
+          <div className="px-4 py-3 text-center text-xs text-text-tertiary">
+            Loading more...
+          </div>
+        );
+      case "all-loaded":
+        return (
+          <div className="px-4 py-3 text-center text-xs text-text-tertiary">
+            All conversations loaded
+          </div>
+        );
+    }
+  };
 
   return (
     <div
@@ -665,102 +810,28 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
             activeCategory={activeCategory}
           />
         ) : (
-          <>
-            {/* Bundle rows for "All" inbox view */}
-            {activeLabel === "inbox" && activeCategory === "All" && bundleRules.map((rule) => {
-              const summary = bundleSummaries.get(rule.category);
-              if (!summary || summary.count === 0) return null;
-              const isExpanded = expandedBundles.has(rule.category);
-              const bundledThreads = isExpanded
-                ? filteredThreads.filter((t) => categoryMap.get(t.id) === rule.category)
-                : [];
-              return (
-                <div key={`bundle-${rule.category}`}>
-                  <button
-                    onClick={() => {
-                      setExpandedBundles((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(rule.category)) next.delete(rule.category);
-                        else next.add(rule.category);
-                        return next;
-                      });
-                    }}
-                    className="w-full text-left px-4 py-3 border-b border-border-secondary hover:bg-bg-hover transition-colors flex items-center gap-3"
-                  >
-                    <div className="w-9 h-9 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
-                      <Package size={16} className="text-accent" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-text-primary">
-                          {rule.category}
-                        </span>
-                        <span className="text-xs bg-accent/15 text-accent px-1.5 rounded-full">
-                          {summary.count}
-                        </span>
-                      </div>
-                      <span className="text-xs text-text-tertiary truncate block mt-0.5">
-                        {summary.latestSender && `${summary.latestSender}: `}{summary.latestSubject ?? ""}
-                      </span>
-                    </div>
-                    <ChevronRight
-                      size={14}
-                      className={`text-text-tertiary transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
-                    />
-                  </button>
-                  {isExpanded && bundledThreads.map((thread) => (
-                    <div key={thread.id} className="pl-4">
-                      <ThreadCard
-                        thread={thread}
-                        isSelected={thread.id === selectedThreadId}
-                        onClick={handleThreadClick}
-                        onContextMenu={handleThreadContextMenu}
-                        category={rule.category}
-                        hasFollowUp={followUpThreadIds.has(thread.id)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-            {visibleThreads.map((thread, idx) => {
-              const prevThread = idx > 0 ? filteredThreads[idx - 1] : undefined;
-              const showDivider = prevThread?.isPinned && !thread.isPinned;
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+            {virtualItems.map((virtualRow) => {
+              const item = items[virtualRow.index];
+              if (!item) return null;
               return (
                 <div
-                  key={thread.id}
-                  data-thread-id={thread.id}
-                  className={idx < 15 ? "stagger-in" : undefined}
-                  style={idx < 15 ? { animationDelay: `${idx * 30}ms` } : undefined}
+                  key={item.key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
                 >
-                  {showDivider && (
-                    <div className="px-4 py-1.5 text-xs font-medium text-text-tertiary uppercase tracking-wider bg-bg-tertiary/50 border-b border-border-secondary">
-                      Other emails
-                    </div>
-                  )}
-                  <ThreadCard
-                    thread={thread}
-                    isSelected={thread.id === selectedThreadId}
-                    onClick={handleThreadClick}
-                    onContextMenu={handleThreadContextMenu}
-                    category={categoryMap.get(thread.id)}
-                    showCategoryBadge={activeLabel === "inbox" && activeCategory === "All"}
-                    hasFollowUp={followUpThreadIds.has(thread.id)}
-                  />
+                  {renderItem(item, virtualRow.index)}
                 </div>
               );
             })}
-            {loadingMore && (
-              <div className="px-4 py-3 text-center text-xs text-text-tertiary">
-                Loading more...
-              </div>
-            )}
-            {!hasMore && threads.length > PAGE_SIZE && (
-              <div className="px-4 py-3 text-center text-xs text-text-tertiary">
-                All conversations loaded
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     </div>
