@@ -9,7 +9,8 @@
   package.json, lockfile or config line changes until Jim approves it.
 - **Base:** `main` @ `a27398f` (code pin `e05f6cd`, #75). Every version and measurement below
   was taken on 2026-09-03 against this tree.
-- **Status:** **draft — awaiting Jim's approval. No code, no dependency change.** Amended
+- **Status:** **approved by Jim, 2026-09-03 (see §Approval); being built on branch
+  `pr-d-toolchain-majors`, four commits, rebase merge.** Amended
   after both review legs on PR #77 (Gemini 3.8 Flash High, Grok 4.6; dispositions in LOG.md)
   and a throwaway build of the whole stack (§5).
 - **Source:** the vault's `2026-09-01_Velo_Dependency-Audit.md` (PR D, the TypeScript and Vite
@@ -315,7 +316,9 @@ both done, dispositions on PR #77 and in LOG.md — then two legs on the code PR
 committed SHAs. Findings verified against source before adoption.
 
 ## Approval
-- Plan approved by: __________ date: ______ — **required before any package.json, lockfile or
-  config change.** Approving it also decides: the native-binary trust in §Threat pass; the
+- Plan approved by: **Jim** date: **2026-09-03** (decision 2 of the 2026-09-03 next-session
+  prompt: "APPROVED, including every decision its Approval section names (native-binary trust,
+  Vite 7 browser floor, npm audit signatures step, rebase merge)") — **required before any
+  package.json, lockfile or config change.** Approving it also decides: the native-binary trust in §Threat pass; the
   browser floor stays Vite 7's (REQ-1.4); the `npm audit signatures` CI step (REQ-2.4); the
   rebase merge (REQ-1.6).
