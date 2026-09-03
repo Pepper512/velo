@@ -191,6 +191,90 @@ fn urlencoding_decode(s: &str) -> String {
 mod tests {
     use super::*;
 
+    // ---------- PR E REQ-2.2: the pinned TLS backend and the form body ----------
+
+    #[test]
+    fn the_token_client_builds_with_native_tls() {
+        // A builder asked for a backend that is not compiled errors at
+        // `build()`; this passing is the proof that `native-tls-no-alpn` is on
+        // the feature tree of this crate.
+        native_client().expect("native-tls is compiled in");
+    }
+
+    /// A one-request HTTP server on loopback that records the request and
+    /// answers with a token document. Returns the URL and the captured bytes.
+    async fn one_shot_token_server() -> (String, tokio::task::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}/token", listener.local_addr().unwrap());
+        let task = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = Vec::new();
+            let mut tmp = [0u8; 4096];
+            loop {
+                let n = socket.read(&mut tmp).await.unwrap();
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                let text = String::from_utf8_lossy(&buf);
+                if let Some(head_end) = text.find("\r\n\r\n") {
+                    let head = &text[..head_end];
+                    let len: usize = head
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse().unwrap()))
+                        .unwrap_or(0);
+                    if buf.len() >= head_end + 4 + len {
+                        break;
+                    }
+                }
+            }
+            let body = r#"{"access_token":"at","refresh_token":"rt","expires_in":3600,"token_type":"Bearer"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            socket.write_all(response.as_bytes()).await.unwrap();
+            socket.shutdown().await.ok();
+            String::from_utf8_lossy(&buf).to_string()
+        });
+        (url, task)
+    }
+
+    #[tokio::test]
+    async fn the_token_exchange_posts_a_form_body_with_the_encoding_a_provider_expects() {
+        // REQ-2.2: the `form` feature's serializer is pinned, not assumed —
+        // `Content-Type: application/x-www-form-urlencoded`, spaces as `+`,
+        // reserved characters percent-encoded, keys in the order pushed.
+        let (url, server) = one_shot_token_server().await;
+        let result = oauth_exchange_token(
+            url,
+            "a b&c=d".to_string(),
+            "client id".to_string(),
+            "http://127.0.0.1:17248/callback".to_string(),
+            Some("ver_ifier-1".to_string()),
+            None,
+            Some("mail read".to_string()),
+        )
+        .await
+        .expect("the mock server answers 200 with a token document");
+        assert_eq!(result.access_token, "at");
+        assert_eq!(result.refresh_token.as_deref(), Some("rt"));
+
+        let request = server.await.unwrap();
+        let (head, body) = request.split_once("\r\n\r\n").expect("a complete request");
+        assert!(head.starts_with("POST /token HTTP/1.1\r\n"), "{head}");
+        let content_type = head
+            .lines()
+            .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-type:").map(|v| v.trim().to_string()))
+            .expect("a Content-Type header");
+        assert_eq!(content_type, "application/x-www-form-urlencoded");
+        assert_eq!(
+            body,
+            "code=a+b%26c%3Dd&client_id=client+id&redirect_uri=http%3A%2F%2F127.0.0.1%3A17248%2Fcallback&grant_type=authorization_code&code_verifier=ver_ifier-1&scope=mail+read"
+        );
+    }
+
     // ---------- urlencoding_decode (audit P2: reachable panic) ----------
 
     #[test]
@@ -318,6 +402,18 @@ pub struct TokenExchangeResult {
     pub id_token: Option<String>,
 }
 
+/// The HTTP client for the two token requests. `.use_native_tls()` pins the
+/// backend explicitly (PR E REQ-1.4): reqwest 0.13 picks native-tls whenever
+/// `__native-tls` is compiled, but the updater plugin unifies `rustls` into the
+/// same crate, and a pinned builder is cheaper than betting on the default
+/// forever. `native-tls-no-alpn` keeps the handshake byte-identical to 0.12's.
+fn native_client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .use_native_tls()
+        .build()
+        .map_err(|e| format!("HTTP client: {}", e.without_url()))
+}
+
 /// Exchange an OAuth authorization code for tokens via Rust HTTP client (avoids CORS).
 #[tauri::command]
 pub async fn oauth_exchange_token(
@@ -347,7 +443,7 @@ pub async fn oauth_exchange_token(
         params.push(("scope", s));
     }
 
-    let client = reqwest::Client::new();
+    let client = native_client()?;
     let response = client
         .post(&token_url)
         .form(&params)
@@ -392,7 +488,7 @@ pub async fn oauth_refresh_token(
         params.push(("scope", s));
     }
 
-    let client = reqwest::Client::new();
+    let client = native_client()?;
     let response = client
         .post(&token_url)
         .form(&params)

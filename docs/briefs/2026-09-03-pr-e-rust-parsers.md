@@ -414,7 +414,9 @@ both done, dispositions on PR #78 and in LOG.md — then two legs on the code PR
 committed SHAs. Findings verified against source before adoption.
 
 ## Approval
-- Plan approved by: __________ date: ______ — **required before any `Cargo.toml`, `Cargo.lock`
-  or source change.** Approving this plan also approves the one transitive addition it
+- Plan approved by: **Jim** date: **2026-09-03** (decision 3 of the 2026-09-03 next-session
+  prompt: "APPROVED, including hashify 0.2.9 as the one pre-1.0 transitive crate (build-time
+  proc-macro) and the REQ-2.5 live-harness decision") — **required before any `Cargo.toml`,
+  `Cargo.lock` or source change.** Approving this plan also approves the one transitive addition it
   brings, **`hashify` 0.2.9 (pre-1.0, build-time proc-macro, Stalwart Labs)**, and the
   REQ-2.5 decision on the live harness.
