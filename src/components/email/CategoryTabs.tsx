@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useCallback, useRef, useState } from "react";
-import { Inbox, Bell, Tag, Users, Newspaper, type LucideIcon } from "lucide-react";
-import { ALL_CATEGORIES } from "@/services/db/threadCategories";
+import { Inbox, Bell, Tag, Users, Newspaper, AlarmClock, type LucideIcon } from "lucide-react";
+import type { VisibleTab } from "@/services/inbox/splitTabs";
 
 export interface CategoryTabsProps {
-  activeCategory: string;
-  onCategoryChange: (category: string) => void;
-  unreadCounts?: Record<string, number>;
+  /** The tabs to draw, already filtered for hide-when-empty and missing labels (SPEC-SIT). */
+  tabs: VisibleTab[];
+  activeTab: string;
+  onTabChange: (tabId: string) => void;
 }
 
 const CATEGORY_ICONS: Record<string, LucideIcon> = {
@@ -16,7 +17,13 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   Newsletters: Newspaper,
 };
 
-export function CategoryTabs({ activeCategory, onCategoryChange, unreadCounts }: CategoryTabsProps) {
+function iconFor(tab: VisibleTab): LucideIcon | null {
+  if (tab.kind === "reminders") return AlarmClock;
+  if (tab.kind === "category") return CATEGORY_ICONS[tab.id] ?? null;
+  return null;
+}
+
+export function CategoryTabs({ tabs, activeTab, onTabChange }: CategoryTabsProps) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const tabRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
   const [indicatorStyle, setIndicatorStyle] = useState<{ left: number; width: number } | null>(null);
@@ -43,13 +50,16 @@ export function CategoryTabs({ activeCategory, onCategoryChange, unreadCounts }:
     };
   }, [checkOverflow]);
 
-  // Update sliding indicator position when active category changes — useLayoutEffect prevents flicker
+  // Update sliding indicator position when the active tab (or the set of tabs)
+  // changes — useLayoutEffect prevents flicker
   useLayoutEffect(() => {
-    const el = tabRefs.current.get(activeCategory);
+    const el = tabRefs.current.get(activeTab);
     if (el) {
       setIndicatorStyle({ left: el.offsetLeft, width: el.offsetWidth });
+    } else {
+      setIndicatorStyle(null);
     }
-  }, [activeCategory]);
+  }, [activeTab, tabs]);
 
   return (
     <div className="relative border-b border-border-secondary shrink-0">
@@ -64,29 +74,38 @@ export function CategoryTabs({ activeCategory, onCategoryChange, unreadCounts }:
       <div
         ref={scrollRef}
         className="flex px-2 overflow-x-auto hide-scrollbar relative"
+        role="tablist"
       >
-        {ALL_CATEGORIES.map((cat) => {
-          const Icon = CATEGORY_ICONS[cat];
-          const count = unreadCounts?.[cat] ?? 0;
+        {tabs.map((tab) => {
+          const Icon = iconFor(tab);
           return (
             <button
-              key={cat}
-              ref={(el) => { if (el) tabRefs.current.set(cat, el); else tabRefs.current.delete(cat); }}
+              key={tab.id}
+              role="tab"
+              aria-selected={activeTab === tab.id}
+              ref={(el) => { if (el) tabRefs.current.set(tab.id, el); else tabRefs.current.delete(tab.id); }}
               onClick={(e) => {
-                onCategoryChange(cat);
+                onTabChange(tab.id);
                 e.currentTarget.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
               }}
               className={`px-2.5 py-1.5 text-xs font-medium transition-colors relative whitespace-nowrap flex items-center gap-1.5 ${
-                activeCategory === cat
+                activeTab === tab.id
                   ? "text-accent"
                   : "text-text-tertiary hover:text-text-primary"
               }`}
             >
               {Icon && <Icon size={13} />}
-              {cat}
-              {count > 0 && (
+              {tab.kind === "label" && (
+                <span
+                  aria-hidden="true"
+                  className="inline-block w-2 h-2 rounded-full bg-text-tertiary"
+                  style={tab.color ? { backgroundColor: tab.color } : undefined}
+                />
+              )}
+              {tab.name}
+              {tab.unread > 0 && (
                 <span className="text-[0.625rem] bg-accent/15 text-accent px-1.5 rounded-full leading-normal">
-                  {count}
+                  {tab.unread}
                 </span>
               )}
             </button>

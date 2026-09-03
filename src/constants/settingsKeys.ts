@@ -29,6 +29,7 @@ export const SETTING_KEYS = [
   "auto_archive_categories",
   "auto_reminders_days",
   "auto_reminders_enabled",
+  "split_inbox_tabs",
   "block_remote_images",
   "claude_model",
   "color_theme",
