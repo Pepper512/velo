@@ -548,8 +548,8 @@ export function SettingsPage() {
                       </div>
                     )}
                     <ToggleRow
-                      label="Reduce motion"
-                      description="Disable animated background effects (fixes flickering on some GPUs)"
+                      label="Reduce effects"
+                      description="Flat panels, no blur or animation — quieter on the CPU (on by default on Linux; also fixes flickering on some GPUs)"
                       checked={reduceMotion}
                       onToggle={() => setReduceMotion(!reduceMotion)}
                     />

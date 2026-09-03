@@ -100,6 +100,8 @@ interface UIState {
   setSidebarNavConfig: (config: SidebarNavItem[]) => void;
   restoreSidebarNavConfig: (config: SidebarNavItem[]) => void;
   setReduceMotion: (reduce: boolean) => void;
+  /** SPEC-SB: apply a session value (the Linux default) without persisting it. */
+  restoreReduceMotion: (reduce: boolean) => void;
   setOnline: (online: boolean) => void;
   setCredentialError: (message: string | null) => void;
   setPendingOpsCount: (count: number) => void;
@@ -225,6 +227,7 @@ export const useUIStore = create<UIState>((set) => ({
     setSetting("reduce_motion", String(reduceMotion)).catch(() => {});
     set({ reduceMotion });
   },
+  restoreReduceMotion: (reduceMotion) => set({ reduceMotion }),
   setOnline: (isOnline) => set({ isOnline }),
   setCredentialError: (credentialError) => set({ credentialError }),
   setPendingOpsCount: (pendingOpsCount) => set({ pendingOpsCount }),

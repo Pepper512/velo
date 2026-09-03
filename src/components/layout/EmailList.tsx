@@ -5,6 +5,10 @@ import { CategoryTabs } from "../email/CategoryTabs";
 import { SearchBar } from "../search/SearchBar";
 import { EmailListSkeleton } from "../ui/Skeleton";
 import { useThreadStore, type Thread } from "@/stores/threadStore";
+import { threadMessageCache, type PrefetchJob } from "@/services/threads/messageCache";
+import { prefetchOrder, joinIds, splitIds, PREFETCH_DELAY_MS } from "@/services/threads/neighbours";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { buildListItems, type ListItem } from "@/services/inbox/listItems";
 import { useAccountStore } from "@/stores/accountStore";
 import { useUIStore } from "@/stores/uiStore";
 import { useActiveLabel, useSelectedThreadId, useActiveCategory } from "@/hooks/useRouteNavigation";
@@ -33,6 +37,11 @@ import {
 } from "../ui/illustrations";
 
 const PAGE_SIZE = 50;
+
+/** Which list is on screen — the key the stagger set and the scroll latch hang off. */
+function folderKeyOf(accountId: string | null, label: string, category: string): string {
+  return `${accountId ?? ""}|${label}|${category}`;
+}
 
 // Map sidebar labels to Gmail label IDs
 const LABEL_MAP: Record<string, string> = {
@@ -72,6 +81,8 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const readFilter = useUIStore((s) => s.readFilter);
   const setReadFilter = useUIStore((s) => s.setReadFilter);
   const readingPanePosition = useUIStore((s) => s.readingPanePosition);
+  const emailDensity = useUIStore((s) => s.emailDensity);
+  const threadMap = useThreadStore((s) => s.threadMap);
   const userLabels = useLabelStore((s) => s.labels);
   const smartFolders = useSmartFolderStore((s) => s.folders);
 
@@ -113,6 +124,20 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     : () => {};
 
   const [hasMore, setHasMore] = useState(true);
+  // SPEC-SB REQ-3.4: which folder's freshly loaded rows may animate in.
+  const [staggerSet, setStaggerSet] = useState<{ folder: string; ids: Set<string> } | null>(null);
+  // Which folder the rows on screen belong to. On the frame right after a
+  // folder switch the previous folder's rows are still mounted under the new
+  // key, so the scroll-to-selection must not act on them. (The stagger has its
+  // own folder tag on `staggerSet`.)
+  const [loadedFolder, setLoadedFolder] = useState<string | null>(null);
+  // Only the most recent load may write these: two loads race whenever the
+  // user switches folders quickly, and the older one must not land last
+  // (Gemini fifth pass F-01).
+  const loadSeqRef = useRef(0);
+  // One key for "which list is this": the stagger set and the scroll latch
+  // both hang off it.
+  const folderKey = folderKeyOf(activeAccountId, activeLabel, activeCategory);
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [categoryMap, setCategoryMap] = useState<Map<string, string>>(() => new Map());
@@ -267,6 +292,28 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     });
   }, [filteredThreads, activeLabel, activeCategory, categoryMap, bundledCategorySet, heldThreadIds]);
 
+  // SPEC-SB REQ-2.3: after a 150 ms quiet period, warm the message cache for
+  // the next three and previous one threads in visible order; a newer
+  // selection cancels a pending or running warm-up. Keyed on the neighbour
+  // ids themselves, so a reload that leaves the neighbours unchanged does not
+  // restart the timer or cancel a warm-up in flight (Gemini F-03).
+  const prefetchKey = useMemo(
+    () => joinIds(prefetchOrder(visibleThreads.map((t) => t.id), selectedThreadId)),
+    [visibleThreads, selectedThreadId],
+  );
+  useEffect(() => {
+    if (!activeAccountId || prefetchKey === "") return;
+    const order = splitIds(prefetchKey);
+    let job: PrefetchJob | null = null;
+    const timer = setTimeout(() => {
+      job = threadMessageCache.prefetch(activeAccountId, order);
+    }, PREFETCH_DELAY_MS);
+    return () => {
+      clearTimeout(timer);
+      job?.cancel();
+    };
+  }, [activeAccountId, prefetchKey]);
+
   const mapDbThreads = useCallback(async (dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>): Promise<Thread[]> => {
     return Promise.all(
       dbThreads.map(async (t) => {
@@ -296,8 +343,20 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const loadThreads = useCallback(async () => {
     if (!activeAccountId) {
       setThreads([]);
+      setStaggerSet(null);
       return;
     }
+
+    // SPEC-SB REQ-3.4: the rows this load puts on screen are the ones that
+    // animate in; captured here so a folder change can never stagger the
+    // previous folder's rows, and `loadMore` never re-triggers it.
+    const folder = folderKeyOf(activeAccountId, activeLabel, activeCategory);
+    const seq = ++loadSeqRef.current;
+    const markStagger = (threadsLoaded: ReadonlyArray<{ id: string }>) => {
+      if (seq !== loadSeqRef.current) return; // a newer load has started
+      setStaggerSet({ folder, ids: new Set(threadsLoaded.slice(0, 15).map((t) => t.id)) });
+      setLoadedFolder(folder);
+    };
 
     clearSearch();
     setLoading(true);
@@ -314,6 +373,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
         const rows = await db.select<SmartFolderRow[]>(sql, params);
         const mapped = await mapSmartFolderRows(rows);
         setThreads(mapped);
+        markStagger(mapped);
         setHasMore(false); // Smart folders load all at once
       } else {
         let dbThreads;
@@ -332,10 +392,15 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
 
         const mapped = await mapDbThreads(dbThreads);
         setThreads(mapped);
+        markStagger(mapped);
         setHasMore(dbThreads.length === PAGE_SIZE);
       }
     } catch (err) {
       console.error("Failed to load threads:", err);
+      // The stagger set is left alone: it is folder-tagged, so it can only
+      // belong to rows that are still on screen from an earlier successful
+      // load of this same folder, and clearing it would strip the animation
+      // from rows mid-flight (Gemini fifth pass F-03).
     } finally {
       setLoading(false);
     }
@@ -486,15 +551,6 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     return () => { cancelled = true; };
   }, [threadIdKey, activeLabel, activeCategory, activeAccountId, inboxViewMode, splitInboxTabs]);
 
-  // Auto-scroll selected thread into view (triggered by keyboard navigation)
-  useEffect(() => {
-    if (!selectedThreadId || !scrollContainerRef.current) return;
-    const el = scrollContainerRef.current.querySelector(`[data-thread-id="${CSS.escape(selectedThreadId)}"]`);
-    if (el) {
-      el.scrollIntoView({ block: "nearest" });
-    }
-  }, [selectedThreadId]);
-
   // Listen for sync completion to reload (debounced to avoid waterfall from multiple emitters)
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -509,21 +565,198 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     };
   }, [loadThreads, activeAccountId, activeLabel]);
 
-  // Infinite scroll: load more when near bottom
+  // SPEC-SB SB-3: one flat item model for the scroller — bundle headers and
+  // children, threads (with the pinned divider), footers — and a virtualizer
+  // that renders only the rows in view (REQ-3.1).
+  const showBundles = activeLabel === "inbox" && activeCategory === "All";
+  const items = useMemo<ListItem[]>(
+    () =>
+      buildListItems({
+        threads: visibleThreads,
+        bundles: bundleRules.map((rule) => {
+          const summary = bundleSummaries.get(rule.category);
+          const expanded = expandedBundles.has(rule.category);
+          return {
+            category: rule.category,
+            count: summary?.count ?? 0,
+            latestSender: summary?.latestSender ?? null,
+            latestSubject: summary?.latestSubject ?? null,
+            expanded,
+            threads: expanded ? filteredThreads.filter((t) => categoryMap.get(t.id) === rule.category) : [],
+          };
+        }),
+        showBundles,
+        loadingMore,
+        allLoaded: !hasMore && threads.length > PAGE_SIZE,
+        density: emailDensity,
+      }),
+    [visibleThreads, bundleRules, bundleSummaries, expandedBundles, filteredThreads, categoryMap, showBundles, loadingMore, hasMore, threads.length, emailDensity],
+  );
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
+
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => scrollContainerRef.current,
+    estimateSize: (index) => itemsRef.current[index]?.estimate ?? 72,
+    getItemKey: (index) => itemsRef.current[index]?.key ?? index,
+    overscan: 8,
+  });
+  const virtualItems = virtualizer.getVirtualItems();
+
+  // REQ-3.3: the selected thread (a plain row or an expanded bundle child)
+  // scrolls into view through the virtualizer, rendered or not. Keyed on the
+  // selection and on whether it is present in the list — so a deep link or a
+  // boot with a selection scrolls once the list has loaded (Gemini F-01), while
+  // a reload that merely reorders items does not snap the user back.
+  const virtualizerRef = useRef(virtualizer);
+  virtualizerRef.current = virtualizer;
+  const selectedPresent = !!selectedThreadId && items.some((it) => it.threadId !== undefined && it.threadId === selectedThreadId);
+  // Scrolled once per selection *episode* — a new selection, or a selection
+  // that was already set when this folder's rows arrived. Never twice for the
+  // same selection in the same folder, so a reload that drops and re-adds the
+  // row cannot snap a user who has scrolled away. `loadedFolder === folderKey`
+  // keeps the whole thing off the frame where the previous folder's rows are
+  // still mounted under the new folder's key (Gemini fourth pass F-01).
+  // Re-picking the thread that is already selected changes nothing and scrolls
+  // nothing, as before this commit. The reset effect is declared first so it
+  // runs before the scroll effect in the same commit.
+  const lastScrolledRef = useRef<string | null>(null);
   useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
+    lastScrolledRef.current = null;
+  }, [selectedThreadId]);
+  useEffect(() => {
+    if (!selectedThreadId || !selectedPresent) return;
+    if (loadedFolder !== folderKey) return;
+    const episode = `${folderKey}|${selectedThreadId}`;
+    if (lastScrolledRef.current === episode) return;
+    const index = itemsRef.current.findIndex((it) => it.threadId === selectedThreadId);
+    if (index < 0) return;
+    lastScrolledRef.current = episode;
+    virtualizerRef.current.scrollToIndex(index, { align: "auto" });
+  }, [selectedThreadId, selectedPresent, folderKey, loadedFolder]);
 
-    const handleScroll = () => {
-      const { scrollTop, scrollHeight, clientHeight } = container;
-      if (scrollHeight - scrollTop - clientHeight < 200) {
-        loadMore();
+  // REQ-3.3: load more when the last rendered row is within five of the end.
+  // `loadMore` guards on `hasMore`/`loadingMore` itself; the guard here just
+  // keeps the effect quiet once everything is loaded.
+  const lastRenderedIndex = virtualItems[virtualItems.length - 1]?.index ?? -1;
+  useEffect(() => {
+    if (!hasMore || loadingMore) return;
+    if (lastRenderedIndex >= 0 && lastRenderedIndex >= items.length - 5) loadMore();
+  }, [lastRenderedIndex, items.length, hasMore, loadingMore, loadMore]);
+
+  // REQ-3.4: stagger-in plays for the first rows of a folder's freshly loaded
+  // list — not for rows that scroll into view later, not for the next page,
+  // and not for the old list still on screen while the next folder loads. The
+  // set is captured by `loadThreads` itself from the rows it just loaded, so
+  // it is never the previous folder's, and it survives the virtualizer's
+  // measure re-renders (Gemini follow-up F-02).
+  const staggerIds = staggerSet?.folder === folderKey ? staggerSet.ids : null;
+
+  const renderItem = (item: ListItem, index: number) => {
+    switch (item.kind) {
+      case "bundle": {
+        const category = item.category!;
+        const summary = bundleSummaries.get(category);
+        const isExpanded = expandedBundles.has(category);
+        return (
+          <button
+            onClick={() => {
+              setExpandedBundles((prev) => {
+                const next = new Set(prev);
+                if (next.has(category)) next.delete(category);
+                else next.add(category);
+                return next;
+              });
+            }}
+            className="w-full text-left px-4 py-3 border-b border-border-secondary hover:bg-bg-hover transition-colors flex items-center gap-3"
+          >
+            <div className="w-9 h-9 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
+              <Package size={16} className="text-accent" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-text-primary">
+                  {category}
+                </span>
+                <span className="text-xs bg-accent/15 text-accent px-1.5 rounded-full">
+                  {summary?.count ?? 0}
+                </span>
+              </div>
+              <span className="text-xs text-text-tertiary truncate block mt-0.5">
+                {summary?.latestSender && `${summary.latestSender}: `}{summary?.latestSubject ?? ""}
+              </span>
+            </div>
+            <ChevronRight
+              size={14}
+              className={`text-text-tertiary transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
+            />
+          </button>
+        );
       }
-    };
-
-    container.addEventListener("scroll", handleScroll, { passive: true });
-    return () => container.removeEventListener("scroll", handleScroll);
-  }, [loadMore]);
+      case "bundle-child": {
+        const thread = threadMap.get(item.threadId!);
+        // Never an empty wrapper: it would be measured at 0 and corrupt the
+        // layout (Gemini F-06). The store rebuilds threadMap with threads, so
+        // this is defensive.
+        if (!thread) return <div style={{ height: item.estimate }} />;
+        return (
+          <div className="pl-4">
+            <ThreadCard
+              thread={thread}
+              isSelected={thread.id === selectedThreadId}
+              onClick={handleThreadClick}
+              onContextMenu={handleThreadContextMenu}
+              category={item.category}
+              hasFollowUp={followUpThreadIds.has(thread.id)}
+            />
+          </div>
+        );
+      }
+      case "thread": {
+        const thread = threadMap.get(item.threadId!);
+        // Never an empty wrapper: it would be measured at 0 and corrupt the
+        // layout (Gemini F-06). The store rebuilds threadMap with threads, so
+        // this is defensive.
+        if (!thread) return <div style={{ height: item.estimate }} />;
+        const stagger = staggerIds?.has(thread.id) ?? false;
+        return (
+          <div
+            data-thread-id={thread.id}
+            className={stagger ? "stagger-in" : undefined}
+            style={stagger ? { animationDelay: `${index * 30}ms` } : undefined}
+          >
+            {item.dividerBefore && (
+              <div className="px-4 py-1.5 text-xs font-medium text-text-tertiary uppercase tracking-wider bg-bg-tertiary/50 border-b border-border-secondary">
+                Other emails
+              </div>
+            )}
+            <ThreadCard
+              thread={thread}
+              isSelected={thread.id === selectedThreadId}
+              onClick={handleThreadClick}
+              onContextMenu={handleThreadContextMenu}
+              category={categoryMap.get(thread.id)}
+              showCategoryBadge={showBundles}
+              hasFollowUp={followUpThreadIds.has(thread.id)}
+            />
+          </div>
+        );
+      }
+      case "loading":
+        return (
+          <div className="px-4 py-3 text-center text-xs text-text-tertiary">
+            Loading more...
+          </div>
+        );
+      case "all-loaded":
+        return (
+          <div className="px-4 py-3 text-center text-xs text-text-tertiary">
+            All conversations loaded
+          </div>
+        );
+    }
+  };
 
   return (
     <div
@@ -641,102 +874,28 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
             activeCategory={activeCategory}
           />
         ) : (
-          <>
-            {/* Bundle rows for "All" inbox view */}
-            {activeLabel === "inbox" && activeCategory === "All" && bundleRules.map((rule) => {
-              const summary = bundleSummaries.get(rule.category);
-              if (!summary || summary.count === 0) return null;
-              const isExpanded = expandedBundles.has(rule.category);
-              const bundledThreads = isExpanded
-                ? filteredThreads.filter((t) => categoryMap.get(t.id) === rule.category)
-                : [];
-              return (
-                <div key={`bundle-${rule.category}`}>
-                  <button
-                    onClick={() => {
-                      setExpandedBundles((prev) => {
-                        const next = new Set(prev);
-                        if (next.has(rule.category)) next.delete(rule.category);
-                        else next.add(rule.category);
-                        return next;
-                      });
-                    }}
-                    className="w-full text-left px-4 py-3 border-b border-border-secondary hover:bg-bg-hover transition-colors flex items-center gap-3"
-                  >
-                    <div className="w-9 h-9 rounded-full bg-accent/15 flex items-center justify-center shrink-0">
-                      <Package size={16} className="text-accent" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold text-text-primary">
-                          {rule.category}
-                        </span>
-                        <span className="text-xs bg-accent/15 text-accent px-1.5 rounded-full">
-                          {summary.count}
-                        </span>
-                      </div>
-                      <span className="text-xs text-text-tertiary truncate block mt-0.5">
-                        {summary.latestSender && `${summary.latestSender}: `}{summary.latestSubject ?? ""}
-                      </span>
-                    </div>
-                    <ChevronRight
-                      size={14}
-                      className={`text-text-tertiary transition-transform shrink-0 ${isExpanded ? "rotate-90" : ""}`}
-                    />
-                  </button>
-                  {isExpanded && bundledThreads.map((thread) => (
-                    <div key={thread.id} className="pl-4">
-                      <ThreadCard
-                        thread={thread}
-                        isSelected={thread.id === selectedThreadId}
-                        onClick={handleThreadClick}
-                        onContextMenu={handleThreadContextMenu}
-                        category={rule.category}
-                        hasFollowUp={followUpThreadIds.has(thread.id)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              );
-            })}
-            {visibleThreads.map((thread, idx) => {
-              const prevThread = idx > 0 ? filteredThreads[idx - 1] : undefined;
-              const showDivider = prevThread?.isPinned && !thread.isPinned;
+          <div style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%" }}>
+            {virtualItems.map((virtualRow) => {
+              const item = items[virtualRow.index];
+              if (!item) return null;
               return (
                 <div
-                  key={thread.id}
-                  data-thread-id={thread.id}
-                  className={idx < 15 ? "stagger-in" : undefined}
-                  style={idx < 15 ? { animationDelay: `${idx * 30}ms` } : undefined}
+                  key={item.key}
+                  data-index={virtualRow.index}
+                  ref={virtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
                 >
-                  {showDivider && (
-                    <div className="px-4 py-1.5 text-xs font-medium text-text-tertiary uppercase tracking-wider bg-bg-tertiary/50 border-b border-border-secondary">
-                      Other emails
-                    </div>
-                  )}
-                  <ThreadCard
-                    thread={thread}
-                    isSelected={thread.id === selectedThreadId}
-                    onClick={handleThreadClick}
-                    onContextMenu={handleThreadContextMenu}
-                    category={categoryMap.get(thread.id)}
-                    showCategoryBadge={activeLabel === "inbox" && activeCategory === "All"}
-                    hasFollowUp={followUpThreadIds.has(thread.id)}
-                  />
+                  {renderItem(item, virtualRow.index)}
                 </div>
               );
             })}
-            {loadingMore && (
-              <div className="px-4 py-3 text-center text-xs text-text-tertiary">
-                Loading more...
-              </div>
-            )}
-            {!hasMore && threads.length > PAGE_SIZE && (
-              <div className="px-4 py-3 text-center text-xs text-text-tertiary">
-                All conversations loaded
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
     </div>

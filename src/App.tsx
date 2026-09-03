@@ -13,6 +13,7 @@ import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
 import { runMigrations } from "./services/db/migrations";
 import { getAllAccounts } from "./services/db/accounts";
 import { getSetting } from "./services/db/settings";
+import { readPlatform, resolveReduceEffects } from "./services/effects/reduceEffects";
 import {
   startBackgroundSync,
   stopBackgroundSync,
@@ -288,11 +289,19 @@ export default function App() {
           ui.setInboxViewMode(savedViewMode);
         }
 
-        // Restore reduce motion preference
+        // Restore "Reduce effects" (stored as reduce_motion). SPEC-SB REQ-1.3:
+        // with nothing stored, Linux defaults on for the session — not
+        // persisted, so the user's first touch of the toggle is what sticks.
         const savedReduceMotion = await getSetting("reduce_motion");
-        if (savedReduceMotion === "true") {
-          ui.setReduceMotion(true);
-        }
+        // A stored "true"/"false" decides on its own; only an absent (or
+        // unrecognised) value needs the platform, so the plugin is loaded
+        // only then.
+        const decided = savedReduceMotion === "true" || savedReduceMotion === "false";
+        const reduce = resolveReduceEffects({
+          stored: savedReduceMotion,
+          platform: decided ? "unknown" : await readPlatform(),
+        });
+        ui.restoreReduceMotion(reduce.value);
 
         // Restore task sidebar visibility
         const savedTaskSidebar = await getSetting("task_sidebar_visible");

@@ -1926,3 +1926,228 @@
   are unknown — it is ("Instant Intro is not ready yet" whenever `ownAddresses` is null). Merged
   as `91e01f6` (squash) on green for `223102b`. Raw output in
   `docs/reviews/2026-09-03-pr90-instant-intro-delta2-gemini38-raw.md`.
+- **2026-09-03 — SPEC-SB (speed budget), Tier 1, PR #92.** Brief
+  `docs/briefs/2026-09-03-speed-budget.md`, committed before code; one PR, three rebase-merged
+  commits (SB-1 reduce effects, SB-2 open instantly, SB-3 virtualized list), each reviewed on
+  its own diff. **Correction before code:** the brief's first draft blamed the follow-up
+  checker for a needless list reload every minute; its query is due-only
+  (`followUpReminders.ts:55-62`), so every reminder it touches changes state and the reload is
+  warranted — withdrawn (`1cc8e85`). The per-minute reload that remains is sync's own; a
+  changed-flag from the sync path is a recorded follow-up. **Decisions:** the existing
+  `reduce_motion` key widens in effect rather than a second toggle; the Linux default is a
+  session value (`restoreReduceMotion`, not persisted) so the user's first touch is what sticks;
+  bodies are local, so "prefetch" is a SQLite stale-while-revalidate cache, not a network
+  warm-up; `@tanstack/react-virtual` 3.14.10 exact (approved 2026-09-02 decision 3; SLSA
+  provenance on both packages; no transitive deps).
+- **2026-09-03 — PR #92 SB-1 (`b7861ca`) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (4M 3L); Grok 4.6: CHANGES REQUESTED (1H 3M 4L 1N). **Adopted:** the hover rule no
+  longer zeroes `box-shadow` — shadows stay, only the lift transform goes (Gemini M F-03, Grok
+  L F6); the boot path always reads the platform and restores the resolved value
+  unconditionally, so a junk stored value behaves as "absent" the way the resolver's test says
+  (Gemini M F-04 + L F-06, Grok L F7); `backdrop-filter: none` added to `.backdrop-animate`
+  for clarity — the base rule carries no static filter, the blur came only from the keyframes
+  the same rule already disables (Gemini M F-02, Grok M F3: belt and braces, not a fix);
+  `readPlatform` awaits `platform()` and has an async-stub test (Grok **H F1** — **declined as
+  a bug**: `@tauri-apps/plugin-os` 2.x declares `platform(): Platform`, synchronous, verified in
+  `dist-js/index.d.ts:39`; adopted as hardening); the CSS comment names the tab (Grok L F5);
+  the brief's REQ-1.1 copy updated to the shipped description, which keeps the old toggle's
+  "fixes flickering" promise (Gemini L F-05, Grok M F2). **Declined, verified:** "help says
+  Settings > General but the toggle is in Appearance" (Gemini M F-01) — Appearance is a
+  `Section` inside the General tab (`SettingsPage.tsx:442-444`), and the help already says
+  "Settings > General" six times for that section. **Declined, accepted risk:** the boot
+  restore can land after a toggle made in the first milliseconds of a session (Grok M F4) —
+  the same shape as every other setting restored in that boot effect, and the user's toggle
+  persists regardless. **Notes:** first paint on a fresh Linux install still shows the blobs
+  until the async restore lands (Grok L F8) — spec-compliant, recorded; the override rules are
+  unlayered after `@import "tailwindcss"` and so beat layered utilities (Grok N F9); the
+  default loader of `readPlatform` is untested because it imports the Tauri plugin (Gemini L
+  F-07). Raw outputs in `docs/reviews/2026-09-03-pr92-sb1-reduce-effects-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-1 follow-up pass on `b7861ca..9df6584`, two legs.** Gemini: CHANGES
+  REQUESTED (1M 1L 2N); Grok: APPROVE (2L 1N). **Adopted:** the boot path loads the OS plugin
+  only when the stored value is neither "true" nor "false" — a returning user with a saved
+  choice no longer waits on a dynamic import (Gemini M1, Grok L R2-2); a test for a plugin
+  whose `platform()` call rejects (Gemini L1). **Notes:** `backdrop-filter: none` on
+  `.backdrop-animate` is belt and braces (Gemini N1); `persisted` is informational (Gemini N2);
+  the hover rule no longer touches `box-shadow` at all, so whatever shadow the base hover rule
+  declares still applies, un-animated (Grok L R2-1 — and the base rule's hover shadow is the
+  8 px lift shadow, static, cheap). Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb1-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-2 (`4878153`) review, two legs.** Gemini: CHANGES REQUESTED (2H 2M
+  2L); Grok: CHANGES REQUESTED (1H 2M 2L 1N). **The "binary diff" High (Gemini F-01, Grok
+  F2) was real and mine:** the cache's key separator had been written as a literal NUL byte,
+  so git treated `messageCache.ts` as binary and neither leg could read it; replaced by the
+  ASCII escape `\u0000`, and every changed file scanned for NULs before each commit from now
+  on (a scratchpad script). **Adopted — first paint (Gemini H F-02, Grok H F1):** the cached
+  copy was applied in an effect, one paint late, and the render before that effect showed the
+  *previous* thread's messages under the new header (a pre-existing flash the old code had
+  too); messages are now stored with the thread they belong to and read back during render
+  only for the current thread, with the cache peeked in a memo keyed by thread — a cached
+  thread paints on its first render, an uncached one shows the skeleton, and the previous
+  thread never leaks. **Adopted — warm-up thrash (Gemini M F-03, Grok M F3):** the effect is
+  keyed on the neighbour ids themselves, so a reload that leaves them unchanged neither
+  restarts the timer nor cancels a warm-up in flight. **Adopted — singleton coverage (Gemini
+  M F-04, Grok M F2):** tests for the 30-entry default, `velo-sync-done` clearing the app
+  instance, and account/thread key separation. **Adopted — clear-during-load race (Grok M
+  F2):** a generation counter; a load that started before a clear returns its rows but does
+  not store them. **Adopted — fingerprint (Grok L F4):** `sameMessages` also compares body
+  lengths, so a draft saved locally (same id and date) replaces the cached copy. **Adopted
+  (Gemini L F-05):** an explicit lower bound in the neighbour loop. **Declined, verified:**
+  "`getMessagesForThread` is now an unused import in `ThreadView`" (Grok L F5) — it is still
+  the reload after a send (`ThreadView.tsx`, the inline-reply `onSent`). **Notes:** cancel does
+  not abort the SELECT in flight, by design (Grok N F6). Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb2-open-instantly-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-2 follow-up pass on `4878153..2766bd0`, two legs.** Gemini: CHANGES
+  REQUESTED (2H 2M 2L); Grok: CHANGES REQUESTED (3M 4L 2N) — and the two legs found the *same*
+  four holes in the first round's fix. **Adopted, both legs — the stuck skeleton** (Gemini H
+  F-01, Grok M F3): the effect re-peeked the cache and, when a neighbour warm-up landed between
+  render and effect, found a hit equal to the fresh rows and skipped the state write — so the
+  render that had painted a miss stayed on the skeleton; the effect now compares against what
+  that render painted (`cachedMessages` from the closure). **Adopted, both legs — the
+  fingerprint** (Gemini H F-02, Grok M F1): lengths could miss a same-length draft edit; the
+  compare is now ids, dates, read/starred flags and the body strings themselves (string
+  equality is a pointer-or-length check first). **Adopted, both legs — account-scoped state**
+  (Gemini L F-05, Grok M F2): the keyed state carries the account id, as the cache key does.
+  **Adopted, both legs — a pure peek** (Gemini M F-04, Grok L F4): reading the cache during
+  render no longer touches LRU order; the load that always follows does. **Adopted, both legs
+  — singleton tests** (Gemini L F-06, Grok L F6): 31 loads evict to 30; `afterEach` clears.
+  **Adopted (Grok L F5):** the prefetch key joins ids with the same NUL character the cache key
+  uses, via `String.fromCharCode(0)` — no escape to mistype. **Declined, verified — Gemini M
+  F-03** ("no selection warms the first three threads"): `prefetchOrder` returns `[]` for a
+  null or absent selection (`neighbours.ts`, both guards; tested). **Residual, recorded (Grok
+  L F7):** a thread load in flight across a sync paints pre-sync rows until the thread is
+  reopened — the same as before SB-2; the generation counter keeps the cache clean, the open
+  view is not subscribed to sync. Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb2-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — SB-3 (virtualized list) decisions.** `@tanstack/react-virtual` 3.14.10 exact
+  (SLSA provenance on both packages; `npm audit signatures` verifies 120 attestations
+  locally). One flat item model (`services/inbox/listItems.ts`, pure, 9 tests): bundle
+  headers, expanded children, threads with the divider computed on the **visible** sequence
+  (the old code read the previous row from a different array — the latent bug named in the
+  brief), two footers; per-kind, per-density estimates, measured after mount. `EmailList`
+  positions rows with `translateY`, scrolls the selection into view through
+  `scrollToIndex` keyed on the selection only (a reload while the user scrolled away must not
+  snap back), loads more when the last rendered row is within five of the end, and plays
+  `stagger-in` only on the first paint of a loaded list (reset per folder). The render test
+  (`EmailList.virtual.test.tsx`) stubs what jsdom lacks — `offsetHeight`/`clientHeight`
+  (the virtualizer reads the viewport from them), `scrollHeight` (it clamps `scrollToIndex`
+  to `scrollHeight - clientHeight`), a `scrollTop` backing field and `scrollTo` — and proves
+  200 threads render as 16 rows, a far selection scrolls into the window, and the divider sits
+  on the first unpinned row. `ThreadCard` is not memoised: with 16 rows on screen a reload
+  re-renders 16 cards, not 200. **Lesson recorded:** twice this session a single-space
+  literal I typed arrived as a NUL byte; every changed file is now scanned for NULs before a
+  commit (`nulscan.py` in the session scratchpad — worth a repo script if it recurs).
+- **2026-09-03 — PR #92 SB-2 third, narrow pass on `2766bd0..909eca9` (Gemini 3.8 Flash High):
+  APPROVE (2N).** N-01: a dropped `useMemo` cache would only re-run a benign effect; N-02: the
+  fingerprint does not compare draft recipients/subject — a draft save updates `date`. Raw
+  output in `docs/reviews/2026-09-03-pr92-sb2-delta2-gemini38-raw.md`.
+- **2026-09-03 — PR #92 SB-3 (`5dfef06`) review, two legs.** Gemini: CHANGES REQUESTED (2H 3M
+  1L); Grok: CHANGES REQUESTED (2H 3M 4L 2N). **Adopted, both legs — the deep link** (Gemini H
+  F-01, Grok H F-01): the scroll-to-selection effect was keyed on the selection only, so a
+  selection known before the list loaded never scrolled; it is now keyed on the selection *and*
+  on whether the selection is present in the item model — a scroll when it first appears, none
+  on a reload that merely reorders (test: a far selection set before mount scrolls into the
+  window). **Adopted, both legs — the stagger** (Gemini M F-04, Grok M F-03): found by my own
+  re-read minutes before the reviews landed — the reset effect and the "flip to false" effect
+  ran in the same commit while the old list was still showing, and the virtualizer's measure
+  re-render would have stripped the class within a frame; the rows of a folder's first loaded
+  paint are now remembered as a set and keep the class, later rows never get it (test).
+  **Adopted (Gemini M F-03, Grok L F-06):** a selected bundle child scrolls into view too.
+  **Adopted (Gemini L F-06):** a row whose thread is missing from the map renders a placeholder
+  of its estimated height instead of an empty wrapper measured at 0. **Adopted (Grok L F-07):**
+  the item model never emits a thread as both a bundle child and a plain row (test). **Adopted
+  (Gemini M F-05, Grok M F-04 — tests):** a selection known before load, a bundle header first
+  with bundled rows held out until expanded, and `loadMore` firing near the end with the
+  second page requested at offset 50. **Declined, verified — the loadMore loop** (Gemini H
+  F-02, Grok H F-02): `loadMore` guards on `hasMore`/`loadingMore` itself (`EmailList.tsx`,
+  unchanged), `hasMore` is `dbThreads.length === PAGE_SIZE` after every page, and the effect's
+  dependencies do not change when a page adds no rows — no loop, no duplicate fetch; an
+  explicit `hasMore`/`loadingMore` guard was added to the effect anyway so it stays quiet once
+  everything is loaded. **Declined, verified — drag-to-label with a row that unmounts mid-drag**
+  (Grok M F-05): `DndProvider.tsx:112-128` mounts a `DragOverlay`, and `handleDragStart`
+  (`:78-84`) copies the payload from `event.active.data.current` at drag start — the visual and
+  the drop payload survive the source row unmounting; the brief already names this as the hand
+  check. **Notes:** estimates ignore the root font scale, corrected by measurement on mount
+  (Grok L F-08); the first fifteen *items* get the stagger, bundle headers among them count but
+  never animate (Grok M F-03 tail); the prefetch-key helper change rode in this commit and was
+  named in its message (Grok L F-09); the tests stub `ResizeObserver` as a no-op, so re-measure
+  on density or pane changes is untested — the initial measure goes through `measureElement` on
+  ref attach, which the stubs do exercise (Gemini M F-05, Grok M F-04). Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb3-virtualized-list-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-3 follow-up pass on `5dfef06..7249e32`, two legs.** Gemini: CHANGES
+  REQUESTED (2H 1M 1L); Grok: CHANGES REQUESTED (1M 3L 1N). Both found the same two holes in
+  the *fix*, and both were right — the third time this session that reviewing the fix paid.
+  **Adopted, both legs — the stagger latch was still wrong** (Gemini H F-02, Grok M M1): the
+  render-time latch fired on the folder-switch frame, when `folderKey` had already changed but
+  the previous folder's rows were still on screen and `isLoading` was still false — so it
+  stored the *old* rows' keys under the *new* folder, animating the outgoing list and never
+  the incoming one. It was also a ref written during render, which React 19 forbids. The set is
+  now captured inside `loadThreads` from the rows that load just returned
+  (`markStagger(mapped)`, both query paths) and held in state: it can never be another
+  folder's, `loadMore` never re-triggers it, and it survives the measure re-renders.
+  **Adopted, both legs — presence as a scroll key** (Gemini H F-01, Grok L L1): a reload that
+  dropped and re-added the selected thread would have re-scrolled a user who had scrolled away;
+  the effect now latches the id it scrolled for and scrolls at most once per selection.
+  **Adopted (Gemini M F-03):** `selectedPresent` guards on a truthy id and a defined
+  `threadId`, so a bundle header cannot match an undefined selection. **Adopted (Grok L L2):**
+  the load-more test also asserts that a scroll leaving the tail far away does *not* page.
+  **Not tested, recorded (Grok L L3):** a selected bundle child cannot be shown to scroll —
+  bundle children sit at the top of the item model, where `align: "auto"` correctly does
+  nothing; dropping the `kind === "thread"` filter is inert there and matters only if bundles
+  ever move down the list. Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb3-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-3 third pass on `7249e32..859ecef` (Gemini 3.8 Flash High): CHANGES
+  REQUESTED (1H 1M 2L)** — and the High was right again, in a fix to a fix. **Adopted — H
+  F-01:** latching "the id I scrolled for" forever meant re-selecting the same thread after
+  scrolling away never scrolled again (the id only changes if you select something else and
+  come back), and a folder switch holding the same selection never scrolled either. The latch
+  is now the *episode* `folder|id`, cleared by an effect keyed on the selection that is
+  declared before the scroll effect: picking a thread scrolls (even the same one again), a
+  folder switch scrolls once in the new folder, and a reload that drops and re-adds the row
+  does not. **Adopted — L F-03:** one `folderKeyOf` helper for both call sites; the render-time
+  key had also been declared *after* the effect that read it, a temporal-dead-zone crash
+  waiting for the first selection — hoisted. **Adopted — L F-04:** a failed load clears the
+  stagger set. **Adopted — M F-02 (partly):** a test now changes folder and pins the exact bug
+  the second pass found — the outgoing rows do not animate on the switch frame, the incoming
+  rows do once their load lands. The negative load-more assertion keeps its short real-timer
+  wait (the suite uses real timers throughout). Raw output in
+  `docs/reviews/2026-09-03-pr92-sb3-delta2-gemini38-raw.md`.
+- **2026-09-03 — PR #92 SB-3 fourth pass on `859ecef..1efb01a`, two legs.** Gemini: CHANGES
+  REQUESTED (1H 3M 1L); Grok: CHANGES REQUESTED (1H 2M 1L). Both found **the same High, and it
+  was the transitional frame again** — the third bug of that exact shape in this commit. On a
+  folder switch with a thread selected, `folderKey` changes while the previous folder's rows
+  are still mounted: the scroll effect fired against the *outgoing* list, scrolled to that
+  index, and latched the *incoming* episode, so the new folder never scrolled to the
+  selection. Fixed the way the stagger was: a `loadedFolder` state, set by `loadThreads`
+  alongside the stagger set, gates both — nothing acts on rows that belong to another folder.
+  **Adopted (Gemini M F-03, Grok M F-02):** a failed load clears the stagger set only if it is
+  still that folder's, so a slow failure cannot wipe a newer folder's successful load.
+  **Adopted (Gemini M F-04, Grok M F-03):** the folder-change tests were passing for the wrong
+  reason — the mock returned identical rows for every folder. Starred now returns the same
+  threads reversed, the stagger test asserts the incoming folder's own first row (`t199`)
+  animates, and a new test pins the scroll: **verified red** by removing the guard (the new
+  folder showed `t65…t41` instead of the selection) and green with it. **Declined — Gemini M
+  F-02** (re-selecting the currently selected thread does not scroll): `selectedThreadId` does
+  not change, so no effect runs at all; that is exactly today's behaviour, and Grok's own walk
+  agrees. The overclaiming comment was corrected. **Declined — Gemini L F-05 / Grok L F-04**
+  (`folderKeyOf` coalesces the account but not the category): `activeCategory` is always a
+  string here (`resolveActiveTab(...)` or `"All"`), and both call sites pass the same value.
+  Raw outputs in `docs/reviews/2026-09-03-pr92-sb3-delta3-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-3 fifth pass on `1efb01a..b55c0af` (Gemini 3.8 Flash High): CHANGES
+  REQUESTED (2H 2M 1N).** **Adopted — H F-01 (a real race):** two `loadThreads` calls overlap
+  whenever the user switches folders quickly, and the older one could land last, writing its
+  folder into `loadedFolder` and suppressing scroll-to-selection until the next load. A
+  sequence number now gates the writes: only the newest load may set the stagger set and
+  `loadedFolder`. (The same race can still put an older folder's *rows* in the store — a
+  pre-existing gap in `loadThreads`, recorded as a follow-up; the new state no longer
+  compounds it.) **Adopted — M F-03:** the failed-load path no longer clears the stagger set
+  at all. The set is folder-tagged, so it can only belong to rows still on screen from an
+  earlier success of the same folder; clearing it stripped a running animation for no gain.
+  **Adopted — M F-04:** the reversed-starred mock now honours `mode.paged`, so a future paging
+  test cannot silently get the whole dataset. **Adopted — N F-05:** the comment claimed
+  `loadedFolder` gates the stagger; it gates the scroll, the stagger has its own tag.
+  **Declined, verified — H F-02** ("split-mode tab changes never re-run `loadThreads`, so
+  `loadedFolder` freezes and blocks scrolling"): `activeCategory` is in the loader's dependency
+  array (`EmailList.tsx:400`), the effect re-runs on its identity change (`:433-435`), and
+  split-mode queries go through `loadTabThreads(activeAccountId, activeCategory, …)` (`:375`)
+  — category filtering has been server-side since Phase 4. Raw output in
+  `docs/reviews/2026-09-03-pr92-sb3-delta4-gemini38-raw.md`.
