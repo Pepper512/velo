@@ -271,11 +271,16 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
 
   // SPEC-SB REQ-2.3: after a 150 ms quiet period, warm the message cache for
   // the next three and previous one threads in visible order; a newer
-  // selection cancels a pending or running warm-up.
+  // selection cancels a pending or running warm-up. Keyed on the neighbour
+  // ids themselves, so a reload that leaves the neighbours unchanged does not
+  // restart the timer or cancel a warm-up in flight (Gemini F-03).
+  const prefetchKey = useMemo(
+    () => prefetchOrder(visibleThreads.map((t) => t.id), selectedThreadId).join("\n"),
+    [visibleThreads, selectedThreadId],
+  );
   useEffect(() => {
-    if (!activeAccountId || !selectedThreadId) return;
-    const order = prefetchOrder(visibleThreads.map((t) => t.id), selectedThreadId);
-    if (order.length === 0) return;
+    if (!activeAccountId || prefetchKey === "") return;
+    const order = prefetchKey.split("\n");
     let job: PrefetchJob | null = null;
     const timer = setTimeout(() => {
       job = threadMessageCache.prefetch(activeAccountId, order);
@@ -284,7 +289,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       clearTimeout(timer);
       job?.cancel();
     };
-  }, [activeAccountId, selectedThreadId, visibleThreads]);
+  }, [activeAccountId, prefetchKey]);
 
   const mapDbThreads = useCallback(async (dbThreads: Awaited<ReturnType<typeof getThreadsForAccount>>): Promise<Thread[]> => {
     return Promise.all(

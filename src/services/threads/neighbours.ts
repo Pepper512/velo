@@ -17,7 +17,7 @@ export function prefetchOrder(visibleIds: readonly string[], selectedId: string 
     const id = visibleIds[at + i];
     if (id !== undefined) order.push(id);
   }
-  for (let i = 1; i <= PREFETCH_BEHIND; i++) {
+  for (let i = 1; i <= PREFETCH_BEHIND && at - i >= 0; i++) {
     const id = visibleIds[at - i];
     if (id !== undefined) order.push(id);
   }

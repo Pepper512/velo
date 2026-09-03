@@ -1,6 +1,28 @@
 import { describe, it, expect, vi } from "vitest";
-import { createMessageCache, sameMessages } from "./messageCache";
+
+// The app instance wraps the SQLite read; stub it so the singleton can be exercised.
+vi.mock("../db/messages", () => ({
+  getMessagesForThread: vi.fn(async (_a: string, t: string) => [{ id: `${t}-1`, thread_id: t, account_id: "a", date: 1 }]),
+}));
+
+import { createMessageCache, sameMessages, threadMessageCache, MESSAGE_CACHE_CAPACITY } from "./messageCache";
 import type { DbMessage } from "../db/messages";
+
+describe("threadMessageCache (the app instance)", () => {
+  it("holds 30 threads and is cleared by velo-sync-done (REQ-2.2)", async () => {
+    expect(MESSAGE_CACHE_CAPACITY).toBe(30);
+    await threadMessageCache.load("acc", "t1");
+    expect(threadMessageCache.peek("acc", "t1")).not.toBeNull();
+    window.dispatchEvent(new Event("velo-sync-done"));
+    expect(threadMessageCache.peek("acc", "t1")).toBeNull();
+    expect(threadMessageCache.size()).toBe(0);
+  });
+
+  it("keeps accounts apart even when ids could concatenate ambiguously", async () => {
+    await threadMessageCache.load("ab", "c");
+    expect(threadMessageCache.peek("a", "bc")).toBeNull();
+  });
+});
 
 /**
  * SPEC-SB SB-2 (REQ-2): a small stale-while-revalidate cache of a thread's
@@ -61,6 +83,16 @@ describe("createMessageCache", () => {
     cache.clear();
     expect(cache.peek("acc", "t1")).toBeNull();
     expect(cache.size()).toBe(0);
+  });
+
+  it("a load that started before a clear does not put its rows back after it (Grok F2)", async () => {
+    const gate = deferred<DbMessage[]>();
+    const cache = createMessageCache(() => gate.promise);
+    const inFlight = cache.load("acc", "t1");
+    cache.clear(); // a sync finished while the SELECT was running
+    gate.resolve([msg("stale")]);
+    expect(await inFlight).toEqual([msg("stale")]); // the caller still gets its answer
+    expect(cache.peek("acc", "t1")).toBeNull();
   });
 
   it("prefetch loads uncached threads one at a time, in order, skipping cached ones (REQ-2.3)", async () => {
@@ -130,5 +162,12 @@ describe("sameMessages", () => {
     expect(sameMessages([msg("a", 1)], [msg("a", 2)])).toBe(false);
     expect(sameMessages([msg("a")], [msg("a"), msg("b")])).toBe(false);
     expect(sameMessages([], [])).toBe(true);
+  });
+
+  it("sees a body edit that keeps id and date — a draft saved locally (Grok F4)", () => {
+    const before = { ...msg("d", 5), body_html: "<p>hi</p>", body_text: "hi" } as DbMessage;
+    const after = { ...msg("d", 5), body_html: "<p>hi there</p>", body_text: "hi there" } as DbMessage;
+    expect(sameMessages([before], [after])).toBe(false);
+    expect(sameMessages([before], [{ ...before }])).toBe(true);
   });
 });

@@ -1962,3 +1962,37 @@
   unlayered after `@import "tailwindcss"` and so beat layered utilities (Grok N F9); the
   default loader of `readPlatform` is untested because it imports the Tauri plugin (Gemini L
   F-07). Raw outputs in `docs/reviews/2026-09-03-pr92-sb1-reduce-effects-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-1 follow-up pass on `b7861ca..9df6584`, two legs.** Gemini: CHANGES
+  REQUESTED (1M 1L 2N); Grok: APPROVE (2L 1N). **Adopted:** the boot path loads the OS plugin
+  only when the stored value is neither "true" nor "false" — a returning user with a saved
+  choice no longer waits on a dynamic import (Gemini M1, Grok L R2-2); a test for a plugin
+  whose `platform()` call rejects (Gemini L1). **Notes:** `backdrop-filter: none` on
+  `.backdrop-animate` is belt and braces (Gemini N1); `persisted` is informational (Gemini N2);
+  the hover rule no longer touches `box-shadow` at all, so whatever shadow the base hover rule
+  declares still applies, un-animated (Grok L R2-1 — and the base rule's hover shadow is the
+  8 px lift shadow, static, cheap). Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb1-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-2 (`4878153`) review, two legs.** Gemini: CHANGES REQUESTED (2H 2M
+  2L); Grok: CHANGES REQUESTED (1H 2M 2L 1N). **The "binary diff" High (Gemini F-01, Grok
+  F2) was real and mine:** the cache's key separator had been written as a literal NUL byte,
+  so git treated `messageCache.ts` as binary and neither leg could read it; replaced by the
+  ASCII escape `\u0000`, and every changed file scanned for NULs before each commit from now
+  on (a scratchpad script). **Adopted — first paint (Gemini H F-02, Grok H F1):** the cached
+  copy was applied in an effect, one paint late, and the render before that effect showed the
+  *previous* thread's messages under the new header (a pre-existing flash the old code had
+  too); messages are now stored with the thread they belong to and read back during render
+  only for the current thread, with the cache peeked in a memo keyed by thread — a cached
+  thread paints on its first render, an uncached one shows the skeleton, and the previous
+  thread never leaks. **Adopted — warm-up thrash (Gemini M F-03, Grok M F3):** the effect is
+  keyed on the neighbour ids themselves, so a reload that leaves them unchanged neither
+  restarts the timer nor cancels a warm-up in flight. **Adopted — singleton coverage (Gemini
+  M F-04, Grok M F2):** tests for the 30-entry default, `velo-sync-done` clearing the app
+  instance, and account/thread key separation. **Adopted — clear-during-load race (Grok M
+  F2):** a generation counter; a load that started before a clear returns its rows but does
+  not store them. **Adopted — fingerprint (Grok L F4):** `sameMessages` also compares body
+  lengths, so a draft saved locally (same id and date) replaces the cached copy. **Adopted
+  (Gemini L F-05):** an explicit lower bound in the neighbour loop. **Declined, verified:**
+  "`getMessagesForThread` is now an unused import in `ThreadView`" (Grok L F5) — it is still
+  the reload after a send (`ThreadView.tsx`, the inline-reply `onSent`). **Notes:** cancel does
+  not abort the SELECT in flight, by design (Grok N F6). Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb2-open-instantly-{gemini38,grok}-raw.md`.

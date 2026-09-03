@@ -88,8 +88,22 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const taskSidebarVisible = useUIStore((s) => s.taskSidebarVisible);
   const [showTaskExtract, setShowTaskExtract] = useState(false);
   const updateThread = useThreadStore((s) => s.updateThread);
-  const [messages, setMessages] = useState<DbMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  // SPEC-SB REQ-2.1: messages are stored with the thread they belong to and
+  // read back only for the current thread, so the render right after a
+  // `j`/`k` never shows the previous thread's messages under the new header,
+  // and a cached thread paints on its very first render — no skeleton.
+  const [messagesState, setMessagesState] = useState<{ threadId: string; list: DbMessage[] } | null>(null);
+  const cachedMessages = useMemo(
+    () => (activeAccountId ? threadMessageCache.peek(activeAccountId, thread.id) : null),
+    [activeAccountId, thread.id],
+  );
+  const messages = messagesState?.threadId === thread.id ? messagesState.list : (cachedMessages ?? []);
+  const setMessages = useCallback(
+    (list: DbMessage[]) => setMessagesState({ threadId: thread.id, list }),
+    [thread.id],
+  );
+  // Loading = nothing to show for this thread yet: no state for it, nothing cached.
+  const loading = messagesState?.threadId !== thread.id && cachedMessages === null;
   const markedReadRef = useRef<string | null>(null);
   // null = not yet loaded; defer iframe rendering until setting is known
   const [blockImages, setBlockImages] = useState<boolean | null>(null);
@@ -100,27 +114,25 @@ export function ThreadView({ thread }: ThreadViewProps) {
     getSetting("block_remote_images").then((val) => setBlockImages(val !== "false"));
   }, []);
 
-  // Load messages. SPEC-SB REQ-2.1: paint the cached copy at once when there
-  // is one (no skeleton), then re-query and replace it only if the thread
+  // Load messages. SPEC-SB REQ-2.1: the cached copy (if any) is already on
+  // screen from the first render; re-query and replace it only if the thread
   // changed. A result that lands after the thread switched again is dropped.
   useEffect(() => {
     if (!activeAccountId) return;
     let cancelled = false;
-    const cached = threadMessageCache.peek(activeAccountId, thread.id);
-    if (cached) {
-      setMessages(cached);
-      setLoading(false);
-    } else {
-      setLoading(true);
-    }
+    const threadId = thread.id;
+    const cached = threadMessageCache.peek(activeAccountId, threadId);
     threadMessageCache
-      .load(activeAccountId, thread.id)
+      .load(activeAccountId, threadId)
       .then((fresh) => {
         if (cancelled) return;
-        setMessages((prev) => (cached && sameMessages(prev, fresh) ? prev : fresh));
+        if (!cached || !sameMessages(cached, fresh)) setMessagesState({ threadId, list: fresh });
       })
-      .catch(console.error)
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .catch((err) => {
+        console.error(err);
+        // A failed read shows an empty thread rather than a skeleton forever, as before.
+        if (!cancelled && !cached) setMessagesState({ threadId, list: [] });
+      });
     return () => { cancelled = true; };
   }, [activeAccountId, thread.id]);
 
