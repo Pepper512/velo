@@ -23,9 +23,8 @@ import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
 import { RawMessageModal } from "./RawMessageModal";
 import { isPopoutWindow } from "@/utils/windowKind";
-import { buildInstantIntro, instantIntroUnavailableReason } from "@/services/composer/instantIntro";
+import { buildInstantIntro, composerOptionsForIntro, instantIntroUnavailableReason } from "@/services/composer/instantIntro";
 import { getAliasesForAccount, mapDbAlias, type SendAsAlias } from "@/services/db/sendAsAliases";
-import { resolveFromAddress } from "@/utils/resolveFromAddress";
 
 interface ThreadViewProps {
   thread: Thread;
@@ -209,20 +208,7 @@ export function ThreadView({ thread }: ThreadViewProps) {
     if (!lastMessage || !instantIntro) return;
     // The key path has no disabled button in front of it.
     if (isNoReplyAddress(lastMessage.reply_to ?? lastMessage.from_address)) return;
-    openComposer({
-      mode: "replyAll",
-      to: instantIntro.to,
-      cc: instantIntro.cc,
-      bcc: instantIntro.bcc,
-      subject: instantIntro.subject,
-      bodyHtml: instantIntro.openerHtml + buildQuote(lastMessage),
-      threadId: lastMessage.thread_id,
-      inReplyToMessageId: lastMessage.id,
-    });
-    // The composer picks the From alias from the reply's To/Cc, and the intro
-    // has removed me from both — resolve it from the original headers instead.
-    const from = resolveFromAddress(aliases ?? [], lastMessage.to_addresses, lastMessage.cc_addresses);
-    if (from) useComposerStore.getState().setFromEmail(from.email);
+    openComposer(composerOptionsForIntro(lastMessage, instantIntro, buildQuote(lastMessage), aliases ?? []));
   }, [lastMessage, instantIntro, aliases, openComposer]);
 
   useEffect(() => {

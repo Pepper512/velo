@@ -60,6 +60,13 @@ describe("composerStore", () => {
     expect(state.inReplyToMessageId).toBe("msg-1");
   });
 
+  it("opens with a From address when the caller resolved one (SPEC-II, Grok II-2)", () => {
+    useComposerStore.getState().openComposer({ mode: "replyAll", to: ["a@b.com"], fromEmail: "alias@me.com" });
+    expect(useComposerStore.getState().fromEmail).toBe("alias@me.com");
+    useComposerStore.getState().openComposer({ mode: "new" });
+    expect(useComposerStore.getState().fromEmail).toBeNull();
+  });
+
   it("opens with cc shows cc/bcc fields", () => {
     useComposerStore.getState().openComposer({
       mode: "replyAll",

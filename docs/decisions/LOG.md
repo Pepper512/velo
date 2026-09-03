@@ -1880,3 +1880,20 @@
   (`"Alice" Smith` → Alice); `Smith, Alice` still yields "Smith" — a surname-first display name
   cannot be told from a first name, recorded. Raw output in
   `docs/reviews/2026-09-03-pr90-instant-intro-gemini38-raw.md`.
+- **2026-09-03 — PR #90 (SPEC-II) review, Grok 4.6 leg:** CHANGES REQUESTED (2M 3L 2N).
+  **Same finding as Gemini, already fixed — M II-1** (aliases race, stale across accounts) and
+  **L II-3** (one reason string). **Adopted — M II-2 / L II-4:** the two-step open (`openComposer`
+  then `setFromEmail`) became one atomic call: `openComposer` accepts `fromEmail`, and the pure
+  `composerOptionsForIntro(message, intro, quoteHtml, aliases)` builds the whole payload —
+  recipients, subject, opener + quote, thread ids, the From alias resolved from the *original*
+  headers — so the React path Grok said was untested is now three module tests plus a store
+  test; `ThreadView` is one line. Grok's clobber theory (the same as Gemini's F-01) stays
+  declined against `Composer.tsx:216`, and Grok marked it unproven. **Adopted — L II-5:** a
+  blank `reply_to` now falls through to `from_address` (Reply All today would address nobody;
+  the intro no longer inherits that). **Notes, no change — N II-6** (the `noReply` rule lives
+  in `ThreadView`/`ActionBar`, as the brief's REQ-1.3 says) and **N II-7** (the tooltip says
+  `(b)` like Forward's `(f)`; a rebind does not update either — pre-existing pattern).
+  **Found while adopting II-2:** `resolveFromAddress` compares whole lower-cased header chips,
+  so a display-name chip (`Alias <alias@acme.com>`) never matches an alias and the
+  default/primary fallback answers instead — the same for Reply All today; recorded, not this
+  PR's. Raw output in `docs/reviews/2026-09-03-pr90-instant-intro-grok-raw.md`.

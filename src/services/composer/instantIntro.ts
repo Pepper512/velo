@@ -9,8 +9,11 @@
  * move onto it in a later, behaviour-preserving pass.
  */
 import type { DbMessage } from "../db/messages";
+import type { SendAsAlias } from "../db/sendAsAliases";
+import type { ComposerState } from "@/stores/composerStore";
 import { bareAddress } from "@/utils/emailUtils";
 import { escapeHtml } from "@/utils/sanitize";
+import { resolveFromAddress } from "@/utils/resolveFromAddress";
 
 /** The message fields the rule reads. */
 export type IntroSource = Pick<
@@ -52,10 +55,11 @@ function dedupe(chips: string[], exclude: Set<string>, seen: Set<string>): strin
   return kept;
 }
 
-/** The address a reply goes to: `reply_to`, else `from_address`. */
+/** The address a reply goes to: `reply_to`, else `from_address`; blanks count as absent. */
 function replyTarget(message: IntroSource): string | null {
-  const target = message.reply_to ?? message.from_address;
-  return target && target.trim().length > 0 ? target.trim() : null;
+  const replyTo = message.reply_to?.trim();
+  const from = message.from_address?.trim();
+  return replyTo || from || null;
 }
 
 /**
@@ -88,6 +92,32 @@ export function introducerFirstName(fromName: string | null, address: string): s
   const bare = bareAddress(address);
   const at = bare.indexOf("@");
   return at > 0 ? bare.slice(0, at) : bare;
+}
+
+/**
+ * Everything one `openComposer` call needs, so the thread view opens the
+ * intro atomically. The composer would pick the From alias from the reply's
+ * To/Cc, but the intro has removed me from both — so the alias is resolved
+ * here from the original headers and handed over with the rest.
+ */
+export function composerOptionsForIntro(
+  message: IntroSource & Pick<DbMessage, "id" | "thread_id">,
+  intro: InstantIntro,
+  quoteHtml: string,
+  aliases: SendAsAlias[],
+): Parameters<ComposerState["openComposer"]>[0] & { mode: "replyAll" } {
+  const from = resolveFromAddress(aliases, message.to_addresses, message.cc_addresses);
+  return {
+    mode: "replyAll",
+    to: intro.to,
+    cc: intro.cc,
+    bcc: intro.bcc,
+    subject: intro.subject,
+    bodyHtml: intro.openerHtml + quoteHtml,
+    threadId: message.thread_id,
+    inReplyToMessageId: message.id,
+    fromEmail: from?.email ?? null,
+  };
 }
 
 /**

@@ -1,11 +1,13 @@
 import { describe, it, expect } from "vitest";
 import {
   buildInstantIntro,
+  composerOptionsForIntro,
   instantIntroUnavailableReason,
   introducerFirstName,
   replyAllRecipients,
   type IntroSource,
 } from "./instantIntro";
+import type { SendAsAlias } from "../db/sendAsAliases";
 
 /**
  * SPEC-II: one action turns an introduction into the right reply — everyone
@@ -53,6 +55,11 @@ describe("replyAllRecipients", () => {
     expect(replyAllRecipients(m, me).to[0]).toBe("alice.replies@intro.io");
   });
 
+  it("treats a blank reply_to as absent (Grok II-5)", () => {
+    expect(replyAllRecipients(msg({ reply_to: "   " }), me).to[0]).toBe("alice@intro.io");
+    expect(buildInstantIntro(msg({ reply_to: "" }), me)!.bcc).toEqual(["alice@intro.io"]);
+  });
+
   it("copes with null headers", () => {
     const m = msg({ from_address: null, to_addresses: null, cc_addresses: null });
     expect(replyAllRecipients(m, me)).toEqual({ to: [], cc: [] });
@@ -81,6 +88,42 @@ describe("introducerFirstName (REQ-2.1)", () => {
 
   it("falls back to the address when the display name is only punctuation", () => {
     expect(introducerFirstName('"" -', "alice@intro.io")).toBe("alice");
+  });
+});
+
+describe("composerOptionsForIntro (Grok II-2, II-4)", () => {
+  // Primary first so a match on the second alias proves the header lookup,
+  // not resolveFromAddress's default/primary/first fallback.
+  const aliases = [
+    { id: "a0", accountId: "acc", email: "me@acme.com", displayName: null, isPrimary: true, isDefault: false },
+    { id: "a1", accountId: "acc", email: "alias@acme.com", displayName: null, isPrimary: false, isDefault: false },
+  ] as unknown as SendAsAlias[];
+  const m = { ...msg({ to_addresses: "alias@acme.com, bob@third.org" }), id: "m1", thread_id: "t1" };
+
+  it("is one reply-all open: recipients, subject, opener above the quote, thread ids, and the From alias the intro was sent to", () => {
+    const intro = buildInstantIntro(m, me)!;
+    expect(composerOptionsForIntro(m, intro, "<blockquote>quoted</blockquote>", aliases)).toEqual({
+      mode: "replyAll",
+      to: ["bob@third.org"],
+      cc: [],
+      bcc: ["alice@intro.io"],
+      subject: "Re: Intro: Jim <> Bob",
+      bodyHtml: "<p>Thanks Alice, moving you to Bcc.</p><blockquote>quoted</blockquote>",
+      threadId: "t1",
+      inReplyToMessageId: "m1",
+      fromEmail: "alias@acme.com",
+    });
+  });
+
+  it("falls back to the primary alias when no header matches, as the composer itself would", () => {
+    const plain = { ...m, to_addresses: "someone-else@acme.com, bob@third.org" };
+    const intro = buildInstantIntro(plain, me)!;
+    expect(composerOptionsForIntro(plain, intro, "", aliases).fromEmail).toBe("me@acme.com");
+  });
+
+  it("leaves From unset when the account has no aliases", () => {
+    const intro = buildInstantIntro(m, me)!;
+    expect(composerOptionsForIntro(m, intro, "", []).fromEmail).toBeNull();
   });
 });
 
