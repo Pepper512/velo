@@ -36,10 +36,13 @@ const rows = vi.hoisted(() =>
 );
 // Switches for the paging and bundle cases; reset before each test.
 const mode = vi.hoisted(() => ({ paged: false, bundled: false }));
+// Starred returns the same threads in a different order, so a test that changes
+// folder cannot pass by accident on identical positions.
 const getThreadsForAccount = vi.hoisted(() =>
-  vi.fn(async (_acc: string, _label: string | undefined, limit: number, offset: number) =>
-    mode.paged ? rows.slice(offset, offset + limit) : rows,
-  ),
+  vi.fn(async (_acc: string, label: string | undefined, limit: number, offset: number) => {
+    if (label === "STARRED") return [...rows].reverse();
+    return mode.paged ? rows.slice(offset, offset + limit) : rows;
+  }),
 );
 vi.mock("@/services/db/threads", () => ({
   getThreadsForAccount,
@@ -213,17 +216,38 @@ describe("EmailList — virtualized (SPEC-SB REQ-3)", () => {
 
   it("staggers the new folder's rows after a folder change, not the outgoing list's (REQ-3.4)", async () => {
     const { rerender } = render(<EmailList />);
-    const row = (id: string) => document.querySelector<HTMLElement>(`[data-thread-id="${id}"]`);
-    await waitFor(() => expect(row("t0")).not.toBeNull());
-    expect(row("t0")!.classList.contains("stagger-in")).toBe(true);
-    // Settle the first folder: its rows keep the class, and a later re-render
-    // must not hand the class to the outgoing list under the new folder's key.
+    const firstRow = () => document.querySelector<HTMLElement>("[data-thread-id]")!;
+    await waitFor(() => expect(renderedRows().length).toBeGreaterThan(0));
+    expect(firstRow().dataset.threadId).toBe("t0");
+    expect(firstRow().classList.contains("stagger-in")).toBe(true);
+    // On the switch frame the outgoing folder's rows are still mounted under
+    // the new folder's key: they must not animate.
     nav.label = "starred";
     act(() => rerender(<EmailList />));
-    // The same rows are still on screen for a frame; they belong to the old folder.
-    expect(row("t0")!.classList.contains("stagger-in")).toBe(false);
-    // Once the new folder's load lands, its rows animate.
-    await waitFor(() => expect(row("t0")!.classList.contains("stagger-in")).toBe(true));
+    expect(firstRow().dataset.threadId).toBe("t0");
+    expect(firstRow().classList.contains("stagger-in")).toBe(false);
+    // Once the new folder's rows land (starred is the reverse order), they do.
+    await waitFor(() => expect(firstRow().dataset.threadId).toBe("t199"));
+    expect(firstRow().classList.contains("stagger-in")).toBe(true);
+  });
+
+  it("scrolls to the selection again in the new folder after a folder change (REQ-3.3, Gemini fourth pass F-01)", async () => {
+    nav.selectedThreadId = "t150";
+    const { rerender } = render(<EmailList />);
+    await waitFor(() => expect(renderedRows()).toContain("t150"));
+    const scroller = document.querySelector<HTMLElement>(".overflow-y-auto")!;
+    // The user scrolls away inside this folder.
+    act(() => scroller.scrollTo({ top: 0 }));
+    expect(renderedRows()).toContain("t0");
+    // Starred lists the same threads reversed, so t150 sits at a different
+    // index: scrolling to the *old* index would not bring it into view.
+    nav.label = "starred";
+    act(() => rerender(<EmailList />));
+    // Wait for the new folder's rows to be the ones in the store, then assert
+    // the selection is in view — scrolling on the stale frame would have
+    // latched the episode and left the selection off screen here.
+    await waitFor(() => expect(useThreadStore.getState().threads[0]?.id).toBe("t199"));
+    await waitFor(() => expect(renderedRows()).toContain("t150"));
   });
 
   it("puts the 'Other emails' divider before the first unpinned thread (REQ-3.2)", async () => {

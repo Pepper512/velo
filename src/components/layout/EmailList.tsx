@@ -126,6 +126,10 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const [hasMore, setHasMore] = useState(true);
   // SPEC-SB REQ-3.4: which folder's freshly loaded rows may animate in.
   const [staggerSet, setStaggerSet] = useState<{ folder: string; ids: Set<string> } | null>(null);
+  // Which folder the rows on screen belong to. On the frame right after a
+  // folder switch the previous folder's rows are still mounted, so neither the
+  // stagger nor the scroll-to-selection may act on them.
+  const [loadedFolder, setLoadedFolder] = useState<string | null>(null);
   // One key for "which list is this": the stagger set and the scroll latch
   // both hang off it.
   const folderKey = folderKeyOf(activeAccountId, activeLabel, activeCategory);
@@ -342,8 +346,10 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     // animate in; captured here so a folder change can never stagger the
     // previous folder's rows, and `loadMore` never re-triggers it.
     const folder = folderKeyOf(activeAccountId, activeLabel, activeCategory);
-    const markStagger = (threadsLoaded: ReadonlyArray<{ id: string }>) =>
+    const markStagger = (threadsLoaded: ReadonlyArray<{ id: string }>) => {
       setStaggerSet({ folder, ids: new Set(threadsLoaded.slice(0, 15).map((t) => t.id)) });
+      setLoadedFolder(folder);
+    };
 
     clearSearch();
     setLoading(true);
@@ -384,8 +390,10 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
       }
     } catch (err) {
       console.error("Failed to load threads:", err);
-      // Nothing new landed, so nothing should animate in (Gemini third pass F-04).
-      setStaggerSet(null);
+      // Nothing new landed for *this* folder, so nothing of its should animate
+      // in — but a newer folder's successful load must not be cleared by an
+      // older failure (Gemini fourth pass F-03).
+      setStaggerSet((prev) => (prev === null || prev.folder === folder ? null : prev));
     } finally {
       setLoading(false);
     }
@@ -597,25 +605,29 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const virtualizerRef = useRef(virtualizer);
   virtualizerRef.current = virtualizer;
   const selectedPresent = !!selectedThreadId && items.some((it) => it.threadId !== undefined && it.threadId === selectedThreadId);
-  // Scrolled once per selection *episode*: when the user picks a thread (even
-  // the same one again), and when a thread selected before the list existed
-  // first appears in it — but never again for the same selection in the same
-  // folder, so a reload that drops and re-adds the row cannot snap a user who
-  // has scrolled away (Gemini/Grok follow-up). The reset effect is declared
-  // first so it runs before the scroll effect in the same commit.
+  // Scrolled once per selection *episode* — a new selection, or a selection
+  // that was already set when this folder's rows arrived. Never twice for the
+  // same selection in the same folder, so a reload that drops and re-adds the
+  // row cannot snap a user who has scrolled away. `loadedFolder === folderKey`
+  // keeps the whole thing off the frame where the previous folder's rows are
+  // still mounted under the new folder's key (Gemini fourth pass F-01).
+  // Re-picking the thread that is already selected changes nothing and scrolls
+  // nothing, as before this commit. The reset effect is declared first so it
+  // runs before the scroll effect in the same commit.
   const lastScrolledRef = useRef<string | null>(null);
   useEffect(() => {
     lastScrolledRef.current = null;
   }, [selectedThreadId]);
   useEffect(() => {
     if (!selectedThreadId || !selectedPresent) return;
+    if (loadedFolder !== folderKey) return;
     const episode = `${folderKey}|${selectedThreadId}`;
     if (lastScrolledRef.current === episode) return;
     const index = itemsRef.current.findIndex((it) => it.threadId === selectedThreadId);
     if (index < 0) return;
     lastScrolledRef.current = episode;
     virtualizerRef.current.scrollToIndex(index, { align: "auto" });
-  }, [selectedThreadId, selectedPresent, folderKey]);
+  }, [selectedThreadId, selectedPresent, folderKey, loadedFolder]);
 
   // REQ-3.3: load more when the last rendered row is within five of the end.
   // `loadMore` guards on `hasMore`/`loadingMore` itself; the guard here just

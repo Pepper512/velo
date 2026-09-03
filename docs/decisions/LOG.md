@@ -2111,3 +2111,24 @@
   rows do once their load lands. The negative load-more assertion keeps its short real-timer
   wait (the suite uses real timers throughout). Raw output in
   `docs/reviews/2026-09-03-pr92-sb3-delta2-gemini38-raw.md`.
+- **2026-09-03 — PR #92 SB-3 fourth pass on `859ecef..1efb01a`, two legs.** Gemini: CHANGES
+  REQUESTED (1H 3M 1L); Grok: CHANGES REQUESTED (1H 2M 1L). Both found **the same High, and it
+  was the transitional frame again** — the third bug of that exact shape in this commit. On a
+  folder switch with a thread selected, `folderKey` changes while the previous folder's rows
+  are still mounted: the scroll effect fired against the *outgoing* list, scrolled to that
+  index, and latched the *incoming* episode, so the new folder never scrolled to the
+  selection. Fixed the way the stagger was: a `loadedFolder` state, set by `loadThreads`
+  alongside the stagger set, gates both — nothing acts on rows that belong to another folder.
+  **Adopted (Gemini M F-03, Grok M F-02):** a failed load clears the stagger set only if it is
+  still that folder's, so a slow failure cannot wipe a newer folder's successful load.
+  **Adopted (Gemini M F-04, Grok M F-03):** the folder-change tests were passing for the wrong
+  reason — the mock returned identical rows for every folder. Starred now returns the same
+  threads reversed, the stagger test asserts the incoming folder's own first row (`t199`)
+  animates, and a new test pins the scroll: **verified red** by removing the guard (the new
+  folder showed `t65…t41` instead of the selection) and green with it. **Declined — Gemini M
+  F-02** (re-selecting the currently selected thread does not scroll): `selectedThreadId` does
+  not change, so no effect runs at all; that is exactly today's behaviour, and Grok's own walk
+  agrees. The overclaiming comment was corrected. **Declined — Gemini L F-05 / Grok L F-04**
+  (`folderKeyOf` coalesces the account but not the category): `activeCategory` is always a
+  string here (`resolveActiveTab(...)` or `"All"`), and both call sites pass the same value.
+  Raw outputs in `docs/reviews/2026-09-03-pr92-sb3-delta3-{gemini38,grok}-raw.md`.
