@@ -22,12 +22,16 @@ import { AiTaskExtractDialog } from "@/components/tasks/AiTaskExtractDialog";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { MessageSkeleton } from "@/components/ui/Skeleton";
 import { RawMessageModal } from "./RawMessageModal";
+import { isPopoutWindow } from "@/utils/windowKind";
 
 interface ThreadViewProps {
   thread: Thread;
 }
 
 async function handlePopOut(thread: Thread) {
+  // The button is hidden inside a pop-out; this guard covers any other caller
+  // (SPEC-P11: the content grant has no webview creation).
+  if (isPopoutWindow()) return;
   try {
     const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
     const windowLabel = `thread-${thread.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
@@ -393,7 +397,9 @@ export function ThreadView({ thread }: ThreadViewProps) {
           onForward={handleForward}
           onPrint={handlePrint}
           onExport={handleExport}
-          onPopOut={() => handlePopOut(thread)}
+          // Inside a pop-out the thread is already in its own window, and the
+          // content grant has no webview creation (SPEC-P11): no button.
+          onPopOut={isPopoutWindow() ? undefined : () => handlePopOut(thread)}
           onToggleContactSidebar={toggleContactSidebar}
           onToggleTaskSidebar={() => useUIStore.getState().toggleTaskSidebar()}
         />

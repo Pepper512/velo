@@ -1374,3 +1374,118 @@
   spelling. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-final-raw.md`. Four passes
   on this PR; the reviewers stopped finding new interleavings at the identity edge cases,
   which is where a fifth pass would look.
+- **2026-09-03 — P11 built (SPEC-P11, PR #75), Tier 2**, on Jim's roadmap instruction. Plan
+  (`docs/briefs/2026-09-01-batch-g-p11-capabilities.md`, rewritten from the 2026-09-01 draft
+  and re-grepped at `2d764a9`, threat pass and rollback) committed and the PR opened **before
+  any code**. **What the re-grep changed:** the draft said only `App.tsx` opens pop-outs;
+  `ThreadView` and `Composer` both call `new WebviewWindow` and both render inside the pop-out
+  roots, so dropping `core:webview:allow-create-webview-window` from content windows needed
+  the two "Open in new window" buttons hidden inside a pop-out (where the thread's is a no-op
+  on itself and the composer's would spawn a copy and close itself). Everything else on the
+  draft's removal list was confirmed main-only by import (window controls in `TitleBar`,
+  badge, notifications, autostart, shortcuts, deep-link, updater, process, `os`,
+  `fs:remove`); the splash page runs no script. **Decisions:** two files — `main.json` byte for
+  byte today's grant, `content.json` for `thread-*`/`compose-*` (`core:default`, `sql` with
+  execute, `opener`, `dialog`, `fs` under `$APPDATA`, `http` with the identical scope); no
+  file for `splashscreen`; one `windowKindFromSearch` rule shared by `main.tsx` and the two
+  button gates. **Kept, with reasons:** `sql:allow-execute` (migrations, draft auto-save) and
+  `http` (unsubscribe POST, Ollama) — the next narrowing is unsubscribe → Rust and Ollama →
+  `ai_fetch`, own brief. **Not done, by design:** routing window creation through a Rust
+  command (would let `main` drop webview creation too — own brief); the iframe sandbox (P9).
+  **Trade named for Jim:** popping the reply composer out of a thread pop-out is no longer
+  offered. **Jim's five-step manual QA is open, not done** — the draft gated the merge on it;
+  the 2026-09-03 roadmap instruction says merge on green and record it as open (the fork
+  ships nothing, EX-007, so the blast radius is a dev build on this machine). TDD:
+  `capabilities.test.ts` rewritten (partition, subset, forbidden by id and plugin prefix,
+  required, identical `http` scope in both files with the SPEC-280 assertions run against
+  both, `main` equal to a literal snapshot) and `windowKind.test.ts`, both red before the
+  files existed; `cargo check --locked` regenerated `gen/schemas/capabilities.json` with the
+  two grants (tauri-build validates identifiers). No dependency, no schema, CSP untouched.
+- **2026-09-03 — PR #75 (P11) review, first leg (Tier 2).** Gemini 3.8 Flash High via `agy`,
+  diff `2d764a9..40153dd`: CHANGES REQUESTED (2H 3M 1L 1N). **Declined, each verified
+  against the tree:** H1 — the `http` scope in content windows (`http://*`, loopback on any
+  port) is the residual the spec records, with the follow-up named (unsubscribe → Rust,
+  Ollama → `ai_fetch`); the any-loopback-port shape is Jim's #280 decision and the reviewer's
+  narrowing to 11434 would break LM Studio users. H2 — "`fs:scope` limited to `$APPDATA`
+  breaks saving attachments to Downloads": the scope is **identical to today's**, and saving
+  works today because the dialog plugin extends the fs scope to the picked path
+  (`tauri-plugin-dialog-2.7.3/src/commands.rs:195`, `allow_file`); no regression by
+  construction. M4 — "`core:window:allow-close` breaks the compose window's close button":
+  `closeComposer` only resets store state; nothing reachable from a pop-out calls
+  `getCurrentWindow().close()` (grepped) — the pre-existing behaviour is unchanged. M5's
+  first half — the identical `http` scope in both files is asserted on purpose until the
+  follow-up lands. **Adopted:** M3 — the pop-out gate keyed on the query string while the
+  grant is keyed on the window label; `isPopoutWindow()` now reads the label from Tauri's
+  metadata first and falls back to the URL rule outside Tauri (dev server, tests); `main.tsx`
+  still routes by URL as before (tests for both). M5's second half — a literal
+  `CONTENT_PERMISSIONS` snapshot, so nothing can be added to content without a test going
+  red. L6 — the two handlers guard themselves as well as hiding their buttons. N7 —
+  `opener:default` carried `reveal-item-in-dir`; content now holds `opener:allow-open-url`
+  and `opener:allow-default-urls` only (the subset test expands main's `opener:default`
+  from the ACL manifest so the narrowing still reads as a subset). Raw output in
+  `docs/reviews/2026-09-03-pr75-gemini38-raw.md`.
+- **2026-09-03 — PR #75 (P11) review, second leg (Tier 2).** Grok 4.6 via the `grok` CLI on
+  the same diff `2d764a9..40153dd` (~25 minutes): CHANGES REQUESTED (2H 3M 2L 3N). **Adopted:**
+  **H1 — the content grant's `$APPDATA/**` read/write reached `velo.key` and the database
+  file**; the grant is now path-level: the key is `exists` + `read-text-file` only (a pop-out
+  decrypts credentials in the page and never creates the key — `crypto.ts` does that on the
+  first-run branch `main` takes), the attachment cache is the only write root, `.eml` export
+  writes to a dialog-picked path through the runtime scope, `fs:default` (recursive read of
+  the app directories) and the blanket `fs:scope` are gone; tests pin the write roots and the
+  two key permissions. H2 — the same label-vs-URL finding as Gemini M3, adopted further: the
+  root in `main.tsx` is picked by the same label-first call as the gate. L7 — `dialog:default`
+  → `allow-save` (only `save` is called from a pop-out); `sql:default` → explicit
+  load/select/execute; `core:default` → `core:path:default` + event listen/unlisten and **no
+  emit** (`main` listens for `single-instance-args` and opens a composer on it — a pop-out
+  must not be able to send it) and no menu/tray/app/image/resources/window/webview sets.
+  M4's wording — the identical `http` scope is asserted as a **residual**, named as such in
+  the test and the file description, not as a requirement. M5 — a source scan pins that
+  `new WebviewWindow` appears in exactly the three known files and that the two
+  pop-out-reachable creators and `main.tsx` use the one rule. N — the composer comment now
+  says which path is given up (reply-composer pop-out from a thread pop-out); the splash
+  window's static URL is stated in the spec. **Declined, each verified:** M3 — "window
+  controls needed / windows bricked": `lib.rs:344` strips decorations from `main` only,
+  pop-outs are created with native decorations, and nothing reachable from a pop-out calls
+  `getCurrentWindow()`; M4's second half — `opener:allow-default-urls` *is* a scheme allow
+  list (`mailto`, `tel`, `http`, `https` — from the manifest), so `file://` and custom
+  schemes are refused; L6's `window.open` — no email markup reaches `window.open`
+  (scripts are sanitised out, anchors are intercepted by F-2's `openEmailLink`); L7's
+  "skip migrations in pop-outs" — idempotent and the same binary, not worth a behaviour
+  change; N `?thread=&account=` — pre-existing, and moot inside Tauri now that the label
+  decides. Raw output in `docs/reviews/2026-09-03-pr75-grok-raw.md`.
+- **2026-09-03 — PR #75 (P11) review, third leg on the follow-up delta (Tier 2).** Gemini 3.8
+  Flash High on `40153dd..46f874d` (the label gate was new logic): CHANGES REQUESTED (1H 2M 1L
+  1N). **Adopted:** H1 — `main.tsx` still routed by URL while the gate keyed on the label;
+  one `currentWindowKind()` now serves both (as Grok H2). M2 — the label is read through the
+  public `getCurrentWindow()` (synchronous; throws outside Tauri, caught), not by reaching
+  into `__TAURI_INTERNALS__`. M3 — the expansion table is checked against the generated ACL
+  manifest whenever a local build has produced it (`it.skipIf` in CI, where `gen/` does not
+  exist), scoped entries are compared by path and URL against main's scope, and the `.length`
+  assertion is replaced by a strict-difference check. N5 — tests for main-inside-Tauri and
+  malformed metadata. **Declined:** L4 — `revealItemInDir` has no caller in the tree
+  (grepped). Raw output in `docs/reviews/2026-09-03-pr75-gemini38-delta-raw.md`.
+- **2026-09-03 — PR #75 (P11) review, fourth pass: the whole diff at `df71117` on Gemini
+  3.8 Flash High.** CHANGES REQUESTED (3H 2M 2L 1N). **Declined, each verified against
+  source:** H1 — "the dialog plugin does not extend the fs scope, so saving to a picked path
+  is denied": it does — `tauri-plugin-dialog-2.7.3/src/commands.rs:194-198` (the `save`
+  command calls `allow_file` on the window's fs scope) and `tauri-plugin-fs/src/commands.rs:1564`
+  ORs that runtime scope with the permission's own; today's `$APPDATA`-only grant saves to
+  Downloads by exactly this path. H2 — "`ContextMenuPortal` creates windows from inside a
+  pop-out": it is rendered by `App.tsx` only (grepped); adopted anyway as a one-line guard so
+  every creator site sits under the same rule, and the source scan now asserts all three.
+  H3 — `sql:allow-execute` in content windows: the recorded residual (draft auto-save and the
+  sent copy write from a pop-out; moving them behind Rust commands is its own brief). L6 —
+  the manifest check skipping in CI: the frontend job has no `cargo`, and the check ran and
+  passed locally at this SHA; committing a copy of the manifest would be a second source of
+  truth. N8 — event snooping through `allow-listen`: main's emits are `tray-check-mail` (no
+  payload), `single-instance-args` (argv, a `mailto:` at most) and the session-invalidation
+  identity (username, host) — no token or secret rides an event; recorded. **Adopted:** M4 —
+  `pathSubsumed` refuses a `.` or `..` segment outright (a literal entry that needs
+  normalising is wrong); M5 — an unscoped write permission in content must be on an explicit
+  list (`fs:allow-write-text-file`, the dialog-picked `.eml` export) and every other write must
+  name its paths; L7 — a label that is neither `main` nor a pop-out glob is `"unknown"`, not
+  `"main"`: the gate fails closed (no button that needs main's grant) and `main.tsx` warns
+  before rendering the main root, which then fails loudly on its first plugin call. Raw output
+  in `docs/reviews/2026-09-03-pr75-gemini38-final-raw.md`. Four passes; no fifth — the last
+  round's real findings were test-tightening, and its HIGHs were re-litigations of verified
+  facts.

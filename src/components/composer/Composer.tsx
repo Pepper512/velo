@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CSSTransition } from "react-transition-group";
+import { isPopoutWindow } from "@/utils/windowKind";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
@@ -407,6 +408,9 @@ export function Composer() {
   }, [activeAccountId, closeComposer]);
 
   const handlePopOutComposer = useCallback(async () => {
+    // The button is hidden inside a pop-out; this guard covers any other
+    // caller (SPEC-P11: the content grant has no webview creation).
+    if (isPopoutWindow()) return;
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const state = useComposerStore.getState();
@@ -505,13 +509,19 @@ export function Composer() {
             >
               {isFullpage ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
             </button>
-            <button
-              onClick={handlePopOutComposer}
-              className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
-              title="Open in new window"
-            >
-              <ExternalLink size={14} />
-            </button>
+            {/* Not inside a pop-out (SPEC-P11): the content grant has no
+                webview creation. In a compose window this composer already is
+                the window; in a thread pop-out's reply composer the pop-out
+                path is the one this deliberately gives up. */}
+            {!isPopoutWindow() && (
+              <button
+                onClick={handlePopOutComposer}
+                className="text-text-tertiary hover:text-text-primary p-1 rounded transition-colors"
+                title="Open in new window"
+              >
+                <ExternalLink size={14} />
+              </button>
+            )}
             <button
               onClick={closeComposer}
               className="text-text-tertiary hover:text-text-primary text-lg leading-none p-1"

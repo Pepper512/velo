@@ -1,0 +1,67 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "content",
+  "description": "Windows that render untrusted email — thread pop-outs and compose windows (SPEC-P11). Only what they demonstrably call, each scoped to the path it uses, so a sanitizer bypass in one of them costs less. core:path: join() in the attachment cache. core:event listen/unlisten: the IMAP session manager's invalidation listener — no emit, because main acts on events (single-instance-args opens a composer). sql load/select/execute: the database, draft auto-save and the sent copy write (migrations run on mount too; idempotent). opener open-url with the default URL set (http, https, mailto, tel): links in email — not reveal-item-in-dir. dialog save: saving an attachment or an .eml; the picked path is added to the fs scope by the dialog plugin at runtime, which is why write-file and write-text-file need no static path for it. fs, by path: velo.key read-only (credentials decrypt in the page), the attachment cache read/write; deny-default keeps the platform's sensitive paths out. http: the unsubscribe POST and the Ollama provider, with the same scope as main — an accepted residual until both move behind Rust commands. Deliberately absent, each shown main-only by import: webview creation (the pop-out buttons are hidden inside a pop-out), any write to velo.key or the database file, fs:remove, notifications, badge, autostart, global shortcuts, deep-link, updater, process restart, os, and the main title bar's window controls (pop-outs keep native decorations; lib.rs strips them from main only).",
+  "windows": [
+    "thread-*",
+    "compose-*"
+  ],
+  "permissions": [
+    "core:path:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "sql:allow-load",
+    "sql:allow-select",
+    "sql:allow-execute",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
+    "dialog:allow-save",
+    "fs:deny-default",
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "$APPDATA/velo.key" },
+        { "path": "$APPDATA/attachment_cache" },
+        { "path": "$APPDATA/attachment_cache/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [
+        { "path": "$APPDATA/velo.key" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [
+        { "path": "$APPDATA/attachment_cache/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "$APPDATA/attachment_cache" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [
+        { "path": "$APPDATA/attachment_cache/**" }
+      ]
+    },
+    "fs:allow-write-text-file",
+    {
+      "identifier": "http:default",
+      "allow": [
+        { "url": "http://*" },
+        { "url": "http://*/*" },
+        { "url": "http://127.0.0.1:*" },
+        { "url": "http://127.0.0.1:*/*" },
+        { "url": "http://localhost:*" },
+        { "url": "http://localhost:*/*" },
+        { "url": "https://*" },
+        { "url": "https://*/*" }
+      ]
+    }
+  ]
+}
