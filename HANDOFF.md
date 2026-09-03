@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `e05f6cd`** (#75, P11 — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline e05f6cd..origin/main` —
+- **Code pin: `a7058cb`** (#80, SPEC-AR — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline a7058cb..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
@@ -39,7 +39,7 @@
     is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
     `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
     reviewer diff; `pool.rs` is clean and safe to Edit.
-- **State on `main` @ `e05f6cd`:** frontend **173** files / **2,299** tests · Rust **173** +
+- **State on `main` @ `a7058cb`:** frontend **174** files / **2,326** tests · Rust **173** +
   3 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
   import cycles. **No dependency added this session.** Still open for Jim: `urlpattern` as a
   dev-dependency (SPEC-280 §Open for Jim).
@@ -49,9 +49,20 @@
 ## 1. Exact next step
 
 **The full ordered plan is `docs/ROADMAP.md`**: the bug-fix queue is done except #278 ("not
-yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), **P11 landed (#75)**. What remains in §3
-and §4 of the roadmap, in order: **PR D / PR E plans** (Tier 2, plans only, Jim approves before
-code) → enhancement wave 1.
+yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), P11 landed (#75), the PR D / PR E plans
+are docs awaiting Jim (#77, #78), and **enhancement wave 1 has started: Auto Reminders landed
+(#80)**. Next in §4 of the roadmap: custom split-inbox tabs, Instant Intro, the speed budget.
+
+**SPEC-AR landed as #80 (`a7058cb`) — auto reminders on external sends.** Brief
+`docs/briefs/2026-09-03-auto-reminders.md` (Tier 1, committed before code). Sending to an
+address outside the sender's domain (own addresses and aliases excluded) sets a follow-up
+reminder N days later at 09:00 local, Saturday/Sunday rolled to Monday; the composer shows
+"Remind me if no reply in N days" (override wins); Settings → Sending has the toggle and the
+delay (1/2/3/7, default 3), persisted as `auto_reminders_enabled` / `auto_reminders_days`.
+`EmailProvider.sendMessage` returns `{ id, threadId? }` so the reminder has a thread. An
+existing reminder is never overwritten; no thread id → warn, no row; a queued offline send
+sets nothing. Pure module `src/services/followup/autoReminders.ts`, tests first. Review
+dispositions in `docs/decisions/LOG.md` (2026-09-03, PR #80) and on the PR.
 
 **P11 landed as #75 (`e05f6cd`) — the Tauri capability grant is split.** Spec
 `docs/briefs/2026-09-01-batch-g-p11-capabilities.md` (rewritten from the 2026-09-01 draft,
@@ -186,6 +197,7 @@ merged #73 under the standing rule.
 
 | PR | Merged | What |
 |---|---|---|
+| #80 `a7058cb` | build seat | **SPEC-AR.** Auto reminders on external sends: rule + weekend-skipping due time in a pure module, composer checkbox, Settings → Sending toggle and delay, providers return the thread id; two review legs, findings verified against source |
 | #75 `e05f6cd` | build seat | **P11.** The capability grant split: `main.json` unchanged, `content.json` scoped by path for `thread-*`/`compose-*`, splash in no file, the three creator sites gated by one label-first rule; four review passes; Jim's five-step QA open |
 | #73 `1116348` | build seat | **E2 part 3.** Pool owns `Option<S>`; LOGOUT on every clean eviction under a 3 s budget; `StaleCredential` + `BadId`; session-id shape; the invalidation event with nonce; frontend invalidation epoch with once-only retry; pending invalidations by identity; `imapIdentityOf` shared by the config builder and the session manager (host lower-cased). Four review passes; Rust 159 → 173, frontend 2,249 → 2,273 |
 
@@ -241,16 +253,22 @@ merge can still be wrong — including ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `e05f6cd`** (#75,
-P11; the only SHA pinned — `git log --oneline e05f6cd..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 173 files / 2,299 tests / Rust 173 + 3 ignored · 28 migrations ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `a7058cb`** (#80,
+SPEC-AR; the only SHA pinned — `git log --oneline a7058cb..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 174 files / 2,326 tests / Rust 173 + 3 ignored · 28 migrations ·
 npm audit 0 · no dependency added.
+
+**Note, unverified here:** a separate read-only session's notes (2026-09-03 evening) report Jim approving
+the PR D and PR E plans, the `urlpattern` dev-dependency, and a reminder on queued offline sends. The
+repo has no record — both Approval lines are blank on `main` — so the next build session **asks Jim
+to confirm** before filling them in or adding any dependency.
 
 **Next action: wait for Jim's approval of the PR D and PR E plans** (landed as docs, #77
 `1ccafbf` and #78 `2e4707b`; both stop before any code). If one is approved, build it exactly
 as its spec says — rebase merge, per-commit gates, the packaged-bundle smoke (D) or the fixture
-suite first and the live-harness attempt (E). If neither is, take **enhancement wave 1** (ROADMAP
-§4), briefs first, Tier 1. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6
+suite first and the live-harness attempt (E). If neither is, continue **enhancement wave 1**
+(ROADMAP §4): Auto Reminders landed (#80); next **custom split-inbox tabs**, then Instant Intro,
+then the speed budget — briefs first, Tier 1, one PR per item. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6
 via the `grok` CLI; diffs from committed SHAs; verify every finding against source before
 adopting — on the two plans, eleven were declined that way. Open for Jim: the two plan
 approvals with their named decisions; **P11's five-step QA** and the reply-composer pop-out

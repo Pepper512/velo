@@ -21,7 +21,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 | Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
 | IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
 | Bug-fix queue (upstream triage) | **Done.** Every queued item landed (#297 … #281 as #69, `66a9355`); only #278 (macOS signing) remains, "not yet" by decision 6 |
-| Enhancement queue (Superhuman parity) | **Nothing started.** 10 items in 3 waves, 33.5 days |
+| Enhancement queue (Superhuman parity) | **Wave 1 started: Auto Reminders landed** (#80, `a7058cb`). 9 items left in 3 waves, 32 days |
 
 ## Next up, in order
 
@@ -75,7 +75,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 ### 4. Enhancement queue — Superhuman parity (after the P0/P1 bugs)
 | Wave | Item | Pri | Tier | Days | Gate |
 |---|---|---|---|---|---|
-| 1 | Auto Reminders default on external sends (skip weekends) | P1 | 1 | 1.5 | — |
+| 1 | ~~Auto Reminders default on external sends (skip weekends)~~ **landed #80 (`a7058cb`)** | P1 | 1 | 1.5 | — |
 | 1 | Custom split-inbox tabs from smart labels + Reminders tab + hide-empty | P1 | 1 | 3.0 | — |
 | 1 | Instant Intro (reply-all, introducer → Bcc) | P2 | 1 | 0.5 | — |
 | 1 | Speed budget: list virtualization, body prefetch, reduce-effects (#232) | P1 | 1 | 6.0 | **dependency approval** |
@@ -117,6 +117,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-The PR D and PR E plans are landed as docs (#77, #78) and stop before any code; I decide each in its Approval section. If I have approved one, build it exactly as its spec says (rebase merge, per-commit gates, the packaged-bundle smoke for D, the fixture suite first and the live-harness attempt for E) — no other dependency, and every escape hatch named in the spec stays unused unless I say so. If I have approved neither, take enhancement wave 1 from docs/ROADMAP.md §4 in order, briefs first (Tier 1: Auto Reminders on external sends; custom split-inbox tabs; Instant Intro; the speed budget with the approved @tanstack/react-virtual), one PR per item. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges.
+The PR D and PR E plans are landed as docs (#77, #78) and stop before any code; I decide each in its Approval section. If I have approved one, build it exactly as its spec says (rebase merge, per-commit gates, the packaged-bundle smoke for D, the fixture suite first and the live-harness attempt for E) — no other dependency, and every escape hatch named in the spec stays unused unless I say so. If I have approved neither, continue enhancement wave 1 from docs/ROADMAP.md §4 in order — Auto Reminders landed (#80); next is custom split-inbox tabs from smart labels + Reminders tab + hide-empty, then Instant Intro, then the speed budget with the approved @tanstack/react-virtual — briefs first, Tier 1, one PR per item. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges.
 Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 live Dovecot tests); they are recorded as open. The urlpattern dev-dependency is my decision — ask me before adding it.
 ```
