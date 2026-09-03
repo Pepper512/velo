@@ -544,6 +544,46 @@ describe("emailActions", () => {
       expect(insertFollowUpReminder).not.toHaveBeenCalled();
     });
 
+    it("survives the queue's JSON round trip: the delay is still a number after stringify/parse (Grok gap)", async () => {
+      vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: false }) as never);
+      await sendEmail("acct-1", raw, undefined, { autoReminderDays: 7 });
+      const stored = vi.mocked(enqueuePendingOperation).mock.calls[0]![3];
+      const replayed = JSON.parse(JSON.stringify(stored)) as Record<string, unknown>;
+      expect(replayed.autoReminderDays).toBe(7);
+
+      vi.mocked(useUIStore.getState).mockReturnValue(createMockUIStoreState({ isOnline: true }) as never);
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 8, 7, 12, 0, 0)); // Monday noon
+      await executeQueuedAction("acct-1", "sendMessage", replayed);
+      // The stored delay is what the reminder uses: 7 days from now, 09:00, Monday 14 Sep.
+      const remindAt = vi.mocked(insertFollowUpReminder).mock.calls[0]![3];
+      const due = new Date(remindAt * 1000);
+      expect([due.getMonth() + 1, due.getDate(), due.getHours()]).toEqual([9, 14, 9]);
+      vi.useRealTimers();
+    });
+
+    it("prefers the provider's thread when both it and the reply's are known (Grok gap)", async () => {
+      mockProvider.sendMessage.mockResolvedValue({ id: "msg-5", threadId: "thr-provider" });
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, threadId: "thr-reply", autoReminderDays: 3 });
+      expect(insertFollowUpReminder).toHaveBeenCalledWith("acct-1", "thr-provider", "msg-5", expect.any(Number));
+    });
+
+    it("warns and sets nothing when neither the provider nor the action knows a thread (Grok gap)", async () => {
+      mockProvider.sendMessage.mockResolvedValue({ id: "msg-6" });
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, autoReminderDays: 3 });
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+      expect(spy).toHaveBeenCalledWith(expect.stringContaining("No thread id"));
+      spy.mockRestore();
+    });
+
+    it("ignores a stray autoReminderDays on a non-send action (Grok gap)", async () => {
+      await executeQueuedAction("acct-1", "archive", { threadId: "t1", messageIds: ["m1"], autoReminderDays: 3 });
+      expect(mockProvider.archive).toHaveBeenCalled();
+      expect(getFollowUpForThread).not.toHaveBeenCalled();
+      expect(insertFollowUpReminder).not.toHaveBeenCalled();
+    });
+
     it("falls back to the reply's thread when the provider reports an empty one (Gemini L2)", async () => {
       mockProvider.sendMessage.mockResolvedValue({ id: "msg-4", threadId: "" });
       await executeQueuedAction("acct-1", "sendMessage", { rawBase64Url: raw, threadId: "thr-old", autoReminderDays: 3 });
