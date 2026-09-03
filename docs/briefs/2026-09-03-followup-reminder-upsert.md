@@ -7,9 +7,13 @@
   manual one from the thread action bar and the automatic ones from #80 and #82 — has been
   failing silently: both callers catch and log.
 - **Tier:** **1** — one query in one service file, no schema change, no migration, no
-  dependency. (A unique index would be the other fix; it is a migration — Tier 2 — and it
-  would also have to reconcile the cancelled/triggered history rows that share a thread. Not
-  needed: the service can keep the invariant itself.)
+  dependency. (The schema-level fix is a **partial unique index**, `CREATE UNIQUE INDEX …
+  ON follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, which SQLite
+  accepts as an `ON CONFLICT … WHERE status = 'pending'` target and which leaves the
+  cancelled/triggered history rows alone. It is a migration — Tier 2 — so it is a recorded
+  follow-up, not this PR; the service keeps the invariant itself meanwhile, inside one
+  transaction. Corrected after Gemini M1 on #88: an ordinary unique index would collide with
+  the history rows, a partial one would not.)
 - **Base:** `main` after #87. Found while verifying Gemini H1 on #87 against real SQLite;
   reproduced with `better-sqlite3` on the migration's exact DDL.
 - **Status:** approved (bug fix under the standing wave-1 instruction, one PR) — branch
@@ -52,15 +56,18 @@ something to show.
 
 ## Not doing
 
-- A unique index (migration; Tier 2; would collide with the history rows).
+- The partial unique index (a migration; Tier 2; recorded as a follow-up).
 - Changing the callers, the checker, or the readers.
 
 ## Design
 
-`UPDATE … WHERE account_id = $3 AND thread_id = $4 AND status = 'pending'`; if
-`rowsAffected = 0`, `INSERT` a pending row. No transaction: the two statements run on the
-plugin's pool, and the worst interleaving (two sets of the same thread at once) yields two
-pending rows, which every reader tolerates (`LIMIT 1`, `COUNT(DISTINCT)` in #87).
+Inside one pinned transaction (`withTransaction`, SPEC-240: `BEGIN IMMEDIATE` on one
+connection): `UPDATE … WHERE account_id = $3 AND thread_id = $4 AND status = 'pending'`; if
+`rowsAffected = 0`, `INSERT` a pending row. The transaction is what makes "one pending per
+thread" hold under two concurrent sets of the same thread — the checker fires *every* due
+pending row (`getPendingFollowUpReminders` has no `LIMIT`), so a duplicate would notify
+twice and the survivor would fire again later (Gemini H1 on #88; the earlier draft of this
+brief wrongly claimed every reader tolerated a duplicate).
 
 ## Done when
 

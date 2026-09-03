@@ -1,4 +1,4 @@
-import { getDb, selectFirstBy } from "./connection";
+import { getDb, selectFirstBy, withTransaction } from "./connection";
 import { getCurrentUnixTimestamp } from "@/utils/timestamp";
 
 export interface DbFollowUpReminder {
@@ -17,26 +17,29 @@ export async function insertFollowUpReminder(
   messageId: string,
   remindAt: number,
 ): Promise<void> {
-  const db = await getDb();
   // SPEC-FUR: one pending reminder per thread, replaced when set again. The
   // original `INSERT … ON CONFLICT(account_id, thread_id)` never worked —
   // SQLite refuses an ON CONFLICT target without a unique index, and migration
   // v6 created a plain one — so an UPDATE of the pending row comes first and
   // the INSERT only when nothing was pending. Cancelled and triggered rows are
-  // history and are left alone.
-  const updated = await db.execute(
-    `UPDATE follow_up_reminders
-     SET message_id = $1, remind_at = $2
-     WHERE account_id = $3 AND thread_id = $4 AND status = 'pending'`,
-    [messageId, remindAt, accountId, threadId],
-  );
-  if (updated.rowsAffected > 0) return;
-  const id = crypto.randomUUID();
-  await db.execute(
-    `INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
-     VALUES ($1, $2, $3, $4, $5, 'pending')`,
-    [id, accountId, threadId, messageId, remindAt],
-  );
+  // history and are left alone. Both statements run in one pinned transaction
+  // (SPEC-240): the checker fires every due pending row, so two concurrent
+  // sets of the same thread must not leave two pending rows (Gemini H1 on #88).
+  await withTransaction(async (tx) => {
+    const updated = await tx.execute(
+      `UPDATE follow_up_reminders
+       SET message_id = $1, remind_at = $2
+       WHERE account_id = $3 AND thread_id = $4 AND status = 'pending'`,
+      [messageId, remindAt, accountId, threadId],
+    );
+    if (updated.rowsAffected > 0) return;
+    const id = crypto.randomUUID();
+    await tx.execute(
+      `INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+       VALUES ($1, $2, $3, $4, $5, 'pending')`,
+      [id, accountId, threadId, messageId, remindAt],
+    );
+  });
 }
 
 export async function getPendingFollowUpReminders(): Promise<DbFollowUpReminder[]> {
