@@ -1401,3 +1401,26 @@
   both, `main` equal to a literal snapshot) and `windowKind.test.ts`, both red before the
   files existed; `cargo check --locked` regenerated `gen/schemas/capabilities.json` with the
   two grants (tauri-build validates identifiers). No dependency, no schema, CSP untouched.
+- **2026-09-03 — PR #75 (P11) review, first leg (Tier 2).** Gemini 3.8 Flash High via `agy`,
+  diff `2d764a9..40153dd`: CHANGES REQUESTED (2H 3M 1L 1N). **Declined, each verified
+  against the tree:** H1 — the `http` scope in content windows (`http://*`, loopback on any
+  port) is the residual the spec records, with the follow-up named (unsubscribe → Rust,
+  Ollama → `ai_fetch`); the any-loopback-port shape is Jim's #280 decision and the reviewer's
+  narrowing to 11434 would break LM Studio users. H2 — "`fs:scope` limited to `$APPDATA`
+  breaks saving attachments to Downloads": the scope is **identical to today's**, and saving
+  works today because the dialog plugin extends the fs scope to the picked path
+  (`tauri-plugin-dialog-2.7.3/src/commands.rs:195`, `allow_file`); no regression by
+  construction. M4 — "`core:window:allow-close` breaks the compose window's close button":
+  `closeComposer` only resets store state; nothing reachable from a pop-out calls
+  `getCurrentWindow().close()` (grepped) — the pre-existing behaviour is unchanged. M5's
+  first half — the identical `http` scope in both files is asserted on purpose until the
+  follow-up lands. **Adopted:** M3 — the pop-out gate keyed on the query string while the
+  grant is keyed on the window label; `isPopoutWindow()` now reads the label from Tauri's
+  metadata first and falls back to the URL rule outside Tauri (dev server, tests); `main.tsx`
+  still routes by URL as before (tests for both). M5's second half — a literal
+  `CONTENT_PERMISSIONS` snapshot, so nothing can be added to content without a test going
+  red. L6 — the two handlers guard themselves as well as hiding their buttons. N7 —
+  `opener:default` carried `reveal-item-in-dir`; content now holds `opener:allow-open-url`
+  and `opener:allow-default-urls` only (the subset test expands main's `opener:default`
+  from the ACL manifest so the narrowing still reads as a subset). Raw output in
+  `docs/reviews/2026-09-03-pr75-gemini38-raw.md`.

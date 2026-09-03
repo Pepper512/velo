@@ -150,8 +150,14 @@ grant makes a future bypass cost less.
 - **`src-tauri/capabilities/default.json`** — deleted. No file for `splashscreen`.
 - **`src/utils/windowKind.ts`** (new, pure): `windowKindFromSearch(search): "main" | "thread" |
   "compose"` with `main.tsx`'s exact rule (`thread` **and** `account` → thread; `compose` →
-  compose; else main), and `isPopoutWindow(): boolean` reading `window.location.search`.
-  `main.tsx` uses it.
+  compose; else main), `windowKindFromLabel(label)` with the grant's globs, and
+  `isPopoutWindow(): boolean` — **by the window label when Tauri's metadata carries one**
+  (the grant is keyed by label, and a page cannot edit its label), by the URL rule otherwise
+  (dev server, tests). `main.tsx` routes by the URL rule as before. *(Amended after review:
+  Gemini 3.8 M3.)*
+- **`opener`** in content is `opener:allow-open-url` + `opener:allow-default-urls`, not
+  `opener:default`, which also carries `reveal-item-in-dir`. *(Amended after review: Gemini
+  3.8 N7.)*
 - **`ThreadView.tsx`**: `onPopOut={isPopoutWindow() ? undefined : () => handlePopOut(thread)}`;
   **`ActionBar.tsx`** renders the button only when `onPopOut` is given.
 - **`Composer.tsx`**: the "Open in new window" button is rendered only when `!isPopoutWindow()`.

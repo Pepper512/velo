@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "content",
-  "description": "Windows that render untrusted email — thread pop-outs and compose windows (SPEC-P11). Only what they demonstrably call, so a sanitizer bypass in one of them costs less. sql with execute: runMigrations on mount and draft auto-save write. opener: links in email. dialog + fs under $APPDATA: attachment save and cache, velo.key. http: the unsubscribe POST and the Ollama provider, with the same scope as main (pinned by src/config/capabilities.test.ts). core:default: events for the IMAP session manager's listener, read-only window queries. Deliberately absent, each shown main-only by import: webview creation (the pop-out buttons are hidden inside a pop-out), fs:remove, notifications, badge, autostart, global shortcuts, deep-link, updater, process restart, os, and the main title bar's window controls.",
+  "description": "Windows that render untrusted email — thread pop-outs and compose windows (SPEC-P11). Only what they demonstrably call, so a sanitizer bypass in one of them costs less. sql with execute: runMigrations on mount and draft auto-save write. opener: open-url with the default URL set (http, https, mailto, tel) for links in email — not reveal-item-in-dir. dialog + fs under $APPDATA: attachment save and cache, velo.key. http: the unsubscribe POST and the Ollama provider, with the same scope as main (pinned by src/config/capabilities.test.ts). core:default: events for the IMAP session manager's listener, read-only window queries. Deliberately absent, each shown main-only by import: webview creation (the pop-out buttons are hidden inside a pop-out), fs:remove, notifications, badge, autostart, global shortcuts, deep-link, updater, process restart, os, and the main title bar's window controls.",
   "windows": [
     "thread-*",
     "compose-*"
@@ -10,7 +10,8 @@
     "core:default",
     "sql:default",
     "sql:allow-execute",
-    "opener:default",
+    "opener:allow-open-url",
+    "opener:allow-default-urls",
     "dialog:default",
     "fs:default",
     "fs:allow-appdata-read-recursive",

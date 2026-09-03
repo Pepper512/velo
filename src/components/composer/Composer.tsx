@@ -408,6 +408,9 @@ export function Composer() {
   }, [activeAccountId, closeComposer]);
 
   const handlePopOutComposer = useCallback(async () => {
+    // The button is hidden inside a pop-out; this guard covers any other
+    // caller (SPEC-P11: the content grant has no webview creation).
+    if (isPopoutWindow()) return;
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const state = useComposerStore.getState();

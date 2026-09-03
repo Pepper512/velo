@@ -136,7 +136,8 @@ const REQUIRED_IN_CONTENT = [
   "core:default", // events (sessionManager's listener), read-only window queries
   "sql:default", // load + select
   "sql:allow-execute", // runMigrations on mount; draft auto-save every 3 s
-  "opener:default", // links in email (openLink)
+  "opener:allow-open-url", // links in email (openLink) …
+  "opener:allow-default-urls", // … with the default URL set (http, https, mailto, tel)
   "dialog:default", // attachment save
   "fs:default",
   "fs:allow-appdata-read-recursive", // attachment cache, velo.key
@@ -148,6 +149,57 @@ const REQUIRED_IN_CONTENT = [
   "fs:scope",
   "http:default", // unsubscribe POST, Ollama
 ];
+
+/**
+ * The content grant, literally (Gemini 3.8 M5 on #75): a permission that is
+ * in main and not on the forbidden list could otherwise be added here without
+ * a test going red. Widening this list is a Tier-2 change with a reason.
+ */
+const CONTENT_PERMISSIONS: Permission[] = [
+  "core:default",
+  "sql:default",
+  "sql:allow-execute",
+  "opener:allow-open-url",
+  "opener:allow-default-urls",
+  "dialog:default",
+  "fs:default",
+  "fs:allow-appdata-read-recursive",
+  "fs:allow-appdata-write-recursive",
+  "fs:allow-read-file",
+  "fs:allow-write-file",
+  "fs:allow-exists",
+  "fs:allow-mkdir",
+  {
+    identifier: "fs:scope",
+    allow: [{ path: "$APPDATA" }, { path: "$APPDATA/**" }],
+  },
+  {
+    identifier: "http:default",
+    allow: [
+      { url: "http://*" },
+      { url: "http://*/*" },
+      { url: "http://127.0.0.1:*" },
+      { url: "http://127.0.0.1:*/*" },
+      { url: "http://localhost:*" },
+      { url: "http://localhost:*/*" },
+      { url: "https://*" },
+      { url: "https://*/*" },
+    ],
+  },
+];
+
+/**
+ * What a `<plugin>:default` set in main expands to, from the generated ACL
+ * manifest, so content may name a member of a set main holds whole. Only the
+ * sets content actually narrows are listed; anything else must match by id.
+ */
+const DEFAULT_SET_MEMBERS: Record<string, string[]> = {
+  "opener:default": [
+    "opener:allow-open-url",
+    "opener:allow-reveal-item-in-dir",
+    "opener:allow-default-urls",
+  ],
+};
 
 describe("capabilities — the split (SPEC-P11)", () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".json")).sort();
@@ -174,12 +226,25 @@ describe("capabilities — the split (SPEC-P11)", () => {
     expect(main.permissions).toEqual(MAIN_PERMISSIONS);
   });
 
+  it("is exactly the content grant, and nothing more", () => {
+    expect(content.permissions).toEqual(CONTENT_PERMISSIONS);
+  });
+
   it("gives content windows a strict subset of main's grant", () => {
     const mainIds = new Set(main.permissions.map(idOf));
+    for (const [set, members] of Object.entries(DEFAULT_SET_MEMBERS)) {
+      if (mainIds.has(set)) for (const m of members) mainIds.add(m);
+    }
     for (const p of content.permissions) {
       expect(mainIds.has(idOf(p)), `${idOf(p)} is in content but not in main`).toBe(true);
     }
     expect(content.permissions.length).toBeLessThan(main.permissions.length);
+  });
+
+  it("does not let a content window reveal files in the file manager", () => {
+    const ids = content.permissions.map(idOf);
+    expect(ids).not.toContain("opener:default");
+    expect(ids).not.toContain("opener:allow-reveal-item-in-dir");
   });
 
   it("withholds from content windows everything shown to be main-only", () => {
