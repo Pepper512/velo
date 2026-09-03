@@ -1332,3 +1332,26 @@
   `docs/reviews/2026-09-03-pr73-grok-raw.md`. **Independent samples, again:** Gemini found
   the listener lock-out and the sequential LOGOUTs; Grok found the dual race, the overwrite
   and the test's missing half; neither found the other's.
+- **2026-09-03 — PR #73 (E2 part 3) review, third leg on the follow-up delta only
+  (Tier 2).** Gemini 3.8 Flash High via `agy` on `6d4b49a..b10d912` — the epoch and nonce
+  logic was new code no reviewer had seen: CHANGES REQUESTED (2H 2M 2L 1N). **All seven
+  adopted.** H1 — the retry reused the `DbAccount` row read before the open, and a
+  password-based account carries its credential *in that row*, so the "rebuilt" config on a
+  retry rebuilt the retired password: each attempt now re-reads the row. H2 — the identity
+  was recorded after `await buildImapConfigWithFreshToken`, which can refresh a token over
+  the network, so an event landing during the build on a window's first open was unmatched
+  and the epoch never moved: the identity is now recorded first and synchronously (from
+  `imapIdentityOf`, which does not depend on the credential), then the epoch snapshot, then
+  the row re-read — an event before the snapshot is in the snapshot and ahead of the read,
+  an event after it is caught by the compare. M3 — two local accounts on one IMAP identity:
+  Rust evicts by identity, so a local invalidation now forgets and bumps every matching
+  local account (`forgetIdentity`, shared with the event handler). M4 — after the 8 s wait
+  gave up, the stalled invalidation's late echo carried this window's own nonce and was
+  skipped, leaving a dead id cached (one `NoSuchSession`, self-healing): on timeout the
+  nonce stops counting as own. L5 — an account without an IMAP host made `imapIdentityOf`
+  throw out of `invalidateAccountCredentials`; guarded (only IMAP accounts call it today).
+  L6 — a rejected invalidate left its nonce in the own-set forever; removed on rejection.
+  N7 — the in-flight test resolved the config build synchronously and so could not have
+  seen H2; a test with the build held open now does. **Jim, mid-review: the Gemini leg is
+  3.8 Flash High from here on**, not 3.7 — recorded in memory; the final full-diff pass on
+  this PR runs on it. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-delta-raw.md`.

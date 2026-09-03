@@ -144,7 +144,7 @@ const accountIdents = new Map<string, { username: string; host: string }>();
  * open could read the generation the bump is about to retire, and Rust would
  * refuse the session it just paid a login for.
  */
-const pendingInvalidations = new Map<string, Promise<void>>();
+const pendingInvalidations = new Map<string, { promise: Promise<void>; nonce: string }>();
 
 /**
  * Invalidation epoch per account: bumped by this window's own invalidation
@@ -181,7 +181,16 @@ async function openSession(accountId: string, kind: SessionKind): Promise<Sessio
   // invalidation's own caller still sees it), and it is bounded.
   const pending = pendingInvalidations.get(accountId);
   if (pending) {
-    await Promise.race([pending.catch(() => undefined), delay(PENDING_INVALIDATION_BUDGET_MS)]);
+    const timedOut = await Promise.race([
+      pending.promise.catch(() => undefined).then(() => false),
+      delay(PENDING_INVALIDATION_BUDGET_MS).then(() => true),
+    ]);
+    if (timedOut) {
+      // Still running in Rust. Its broadcast, when it finally comes, must
+      // count as foreign, so the epoch moves and an open that raced it is
+      // redone rather than cached dead (review, Gemini 3.8 F4).
+      ownInvalidationNonces.delete(pending.nonce);
+    }
   }
 
   const account: DbAccount | null = await getAccount(accountId);
@@ -197,21 +206,29 @@ async function openSession(accountId: string, kind: SessionKind): Promise<Sessio
  * credential: Rust refused it (`StaleCredential`), or an invalidation landed
  * while it was in flight (the epoch moved). Never a loop — a second miss
  * surfaces.
+ *
+ * Order matters here. The identity is recorded first and synchronously — it
+ * is stable across credential changes — so an event that lands during the
+ * config build (which may refresh a token over the network) is matched to
+ * this account and moves the epoch (review, Gemini 3.8 F2). The epoch is
+ * snapshotted next. Only then is the account row re-read: a password lives
+ * in that row, and the reason for a retry is precisely that it changed
+ * (review, Gemini 3.8 F1). An event before the snapshot is therefore in the
+ * snapshot and ahead of the read; an event after it is caught by the compare.
  */
 async function openAgainstCurrentCredential(
   accountId: string,
   account: DbAccount,
   attempt: number,
 ): Promise<SessionId> {
+  accountIdents.set(accountId, imapIdentityOf(account));
   const epoch = epochOf(accountId);
+  const record = (await getAccount(accountId)) ?? account;
 
   // Always through the fresh-token builder (Decision 3): a pooled session may
   // outlive the access token that opened it, but it must never be *opened*
   // with a stale one.
-  const config = await buildImapConfigWithFreshToken(account);
-  // Recorded before the open, so an invalidation event that lands while the
-  // open is in flight can be mapped onto this account (review, Grok 1).
-  accountIdents.set(accountId, { username: config.username, host: config.host });
+  const config = await buildImapConfigWithFreshToken(record);
 
   let id: SessionId;
   try {
@@ -291,8 +308,18 @@ function ensureInvalidationListener(): Promise<void> {
 export function onSessionsInvalidated(payload: unknown): void {
   if (!isSessionsInvalidatedPayload(payload)) return;
   if (ownInvalidationNonces.delete(payload.nonce)) return;
+  forgetIdentity(payload);
+}
+
+/**
+ * Forget, and move the epoch of, every local account on an IMAP identity.
+ * Rust pools and evicts by identity, so two local accounts on the same
+ * username and host lose their sessions together, whichever one asked
+ * (review, Gemini 3.8 F3).
+ */
+function forgetIdentity(target: { username: string; host: string }): void {
   for (const [accountId, ident] of accountIdents) {
-    if (ident.username === payload.username && ident.host === payload.host) {
+    if (ident.username === target.username && ident.host === target.host) {
       forgetAccount(accountId);
       bumpEpoch(accountId);
     }
@@ -413,18 +440,29 @@ export async function invalidateAccountCredentials(accountId: string): Promise<v
   let ident = accountIdents.get(accountId);
   if (!ident) {
     const account = await getAccount(accountId);
-    if (!account) return;
+    // Gone, or not an IMAP account at all: nothing is pooled for it.
+    if (!account?.imap_host) return;
     ident = imapIdentityOf(account);
   }
+  // Every local account on this identity goes with it, as it would on
+  // another window's event — this window skips its own echo.
+  forgetIdentity(ident);
+
   const nonce = newInvalidationNonce();
   ownInvalidationNonces.add(nonce);
-  const pending = imapSessionsInvalidate(ident.username, ident.host, nonce).finally(() => {
-    if (pendingInvalidations.get(accountId) === pending) {
-      pendingInvalidations.delete(accountId);
-    }
-  });
-  pendingInvalidations.set(accountId, pending);
-  await pending;
+  const promise = imapSessionsInvalidate(ident.username, ident.host, nonce)
+    .catch((err: unknown) => {
+      // No broadcast will come for this nonce; do not keep waiting for it.
+      ownInvalidationNonces.delete(nonce);
+      throw err;
+    })
+    .finally(() => {
+      if (pendingInvalidations.get(accountId)?.nonce === nonce) {
+        pendingInvalidations.delete(accountId);
+      }
+    });
+  pendingInvalidations.set(accountId, { promise, nonce });
+  await promise;
 }
 
 /** Close everything. App quit, and the reset point for tests. */

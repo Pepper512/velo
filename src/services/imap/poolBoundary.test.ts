@@ -20,7 +20,7 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) })
 vi.mock("../db/accounts", () => ({ getAccount: vi.fn() }));
 vi.mock("./imapConfigBuilder", () => ({
   buildImapConfigWithFreshToken: vi.fn(),
-  imapIdentityOf: vi.fn(),
+  imapIdentityOf: () => ({ username: "user@example.com", host: "imap.example.com" }),
 }));
 
 import { getAccount } from "../db/accounts";
