@@ -38,6 +38,11 @@ jobs:
           cache: npm
       - name: Install (frozen lockfile)
         run: npm ci
+      # PR D REQ-2.4: registry signatures and the provenance attestations that
+      # exist are verified on every run. Silent on unattested packages — the
+      # inventory of those lives in the PR D brief's threat pass.
+      - name: Registry signatures and attestations
+        run: npm audit signatures
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Unit tests
