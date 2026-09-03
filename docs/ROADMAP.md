@@ -62,7 +62,10 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
   tests — **not run** (Docker down); Done-when 2 stays manual. Per-window session binding stays
   undone (ADR-003) — that is P11.
 - **PR D** (toolchain majors) and **PR E** (Rust parsers) — plans to write, Jim approves.
-- **P11** capability split — brief exists; needs Jim's 5-step manual QA.
+- **P11** — **landed #75 (`e05f6cd`, 2026-09-03)**: `main.json` unchanged, `content.json` scoped by
+  path for `thread-*`/`compose-*`, splash in no file, the three creator sites gated by one
+  label-first rule; four review passes. **Jim's 5-step manual QA is open** (spec §Verification).
+  Next narrowing (own brief): unsubscribe → Rust, Ollama → `ai_fetch`, then `http` leaves content.
 - **P19/F-3** — **landed #71 (`1b18160`)**: `LinkConfirmDialog` and `PhishingBanner` wired on the email link path.
 
 ### 4. Enhancement queue — Superhuman parity (after the P0/P1 bugs)
@@ -110,6 +113,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-E2 part 3 landed as #73 (1116348); the IMAP correctness line is complete for now. Take P11 — the capability split (docs/briefs/2026-09-01-batch-g-p11-capabilities.md): re-read its two blockers, re-grep every citation (the brief is pinned at 1ab7518), then write the plan with threat pass and rollback into the brief and open the PR with the plan before any code. Tier 2 (src-tauri/capabilities/*). TDD where a test can reach it; the second blocker is my 5-step manual QA, which you record as open, not done. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI (diffs from committed SHAs; if a review makes you write new logic, run a pass on the delta); verify every finding before adopting; merge on green — you own commits, pushes, PRs and merges. Then the PR D / PR E plans (toolchain and Rust-parser majors, Tier 2, plans only, for my approval).
-Do not run the manual checks (F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 live Dovecot tests) unless the harness or the app can be driven; they are recorded as open. The urlpattern dev-dependency is my decision — ask me before adding it.
+P11 landed as #75 (e05f6cd); my five-step manual QA on it is open, not done — leave it recorded that way. Take the PR D / PR E plans: PR D is TypeScript 5.9 → 6.0 → 7.0 with the baseUrl fix, then Vite 8; PR E is the Rust parser majors. Source: the vault's 2026-09-01_Velo_Dependency-Audit.md (§93 onward) and docs/audits/2026-09-01-optimize-audit.md Batch D/E rows. Both are dependency changes, so Tier 2: write each as a spec in docs/briefs/ with the exact version path, what breaks, the tests that prove it, the threat pass (supply chain: provenance, lockfile, transitive cost) and the rollback, then open one docs PR per plan and STOP — no code, no dependency change; I approve each plan before anything is added. Review legs on the plans: Gemini 3.8 Flash High via agy and Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges of the plan docs.
+Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 live Dovecot tests); they are recorded as open. The urlpattern dev-dependency is my decision — ask me before adding it.
 ```
