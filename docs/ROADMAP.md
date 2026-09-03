@@ -61,7 +61,11 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
   identity. Four review passes. Done-when 9 and the live half of 10 are `#[ignore]` Dovecot
   tests — **not run** (Docker down); Done-when 2 stays manual. Per-window session binding stays
   undone (ADR-003) — that is P11.
-- **PR D** (toolchain majors) and **PR E** (Rust parsers) — plans to write, Jim approves.
+- **PR D** (toolchain majors) and **PR E** (Rust parsers) — **plans written and landed as docs**
+  (#77 `1ccafbf`, #78 `2e4707b`; `docs/briefs/2026-09-03-pr-d-toolchain-majors.md`,
+  `docs/briefs/2026-09-03-pr-e-rust-parsers.md`), each measured on throwaway copies and reviewed
+  by two legs. **Awaiting Jim's approval; no code until then.** Each Approval section names the
+  decisions the approval makes.
 - **P11** — **landed #75 (`e05f6cd`, 2026-09-03)**: `main.json` unchanged, `content.json` scoped by
   path for `thread-*`/`compose-*`, splash in no file, the three creator sites gated by one
   label-first rule; four review passes. **Jim's 5-step manual QA is open** (spec §Verification).
@@ -113,6 +117,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-P11 landed as #75 (e05f6cd); my five-step manual QA on it is open, not done — leave it recorded that way. Take the PR D / PR E plans: PR D is TypeScript 5.9 → 6.0 → 7.0 with the baseUrl fix, then Vite 8; PR E is the Rust parser majors. Source: the vault's 2026-09-01_Velo_Dependency-Audit.md (§93 onward) and docs/audits/2026-09-01-optimize-audit.md Batch D/E rows. Both are dependency changes, so Tier 2: write each as a spec in docs/briefs/ with the exact version path, what breaks, the tests that prove it, the threat pass (supply chain: provenance, lockfile, transitive cost) and the rollback, then open one docs PR per plan and STOP — no code, no dependency change; I approve each plan before anything is added. Review legs on the plans: Gemini 3.8 Flash High via agy and Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges of the plan docs.
+The PR D and PR E plans are landed as docs (#77, #78) and stop before any code; I decide each in its Approval section. If I have approved one, build it exactly as its spec says (rebase merge, per-commit gates, the packaged-bundle smoke for D, the fixture suite first and the live-harness attempt for E) — no other dependency, and every escape hatch named in the spec stays unused unless I say so. If I have approved neither, take enhancement wave 1 from docs/ROADMAP.md §4 in order, briefs first (Tier 1: Auto Reminders on external sends; custom split-inbox tabs; Instant Intro; the speed budget with the approved @tanstack/react-virtual), one PR per item. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges.
 Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 live Dovecot tests); they are recorded as open. The urlpattern dev-dependency is my decision — ask me before adding it.
 ```

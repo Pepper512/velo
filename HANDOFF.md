@@ -76,11 +76,29 @@ named for Jim: popping the reply composer out of a thread pop-out is no longer o
 **Jim's five-step manual QA is open, not done** — the spec's *Verification* section; the merge
 landed behind it per the roadmap instruction; `git revert` restores the flat grant.
 
-**Next: the PR D / PR E plans.** PR D = TypeScript 5.9 → 6.0 → 7.0 with the `baseUrl` fix,
-then Vite 8; PR E = the Rust parser majors (`2026-09-01_Velo_Dependency-Audit.md:93` in the
-vault, and the audit's Batch D/E rows). Both are dependency changes → Tier 2 → **plans only,
-for Jim's approval before any code**. After that, enhancement wave 1 (ROADMAP §4; the speed
-budget's `@tanstack/react-virtual` is already approved).
+**The PR D / PR E plans are written and landed as docs — #77 (`1ccafbf`) and #78
+(`2e4707b`) — and STOP there: no code, no dependency change until Jim approves each.**
+`docs/briefs/2026-09-03-pr-d-toolchain-majors.md` (TypeScript 5.9 → 6.0.3 → 7.0.2, then Vite
+8.2.2 + plugin-react 6.1.1; four rebase-merged commits with legal revert sets; the browser floor
+pinned to Vite 7's; a packaged-bundle smoke before the Vite commit merges; `npm audit
+signatures` into CI) and `docs/briefs/2026-09-03-pr-e-rust-parsers.md` (`mail-parser` =0.11.8
+fail-closed with `full_encoding`, `async-imap` =0.11.3, `socket2` =0.6.5, `reqwest` =0.13.4 on
+`native-tls-no-alpn` with `.use_native_tls()` explicit; a MIME fixture suite first, invariant
+versus hardening; five rebase-merged commits; `hashify` 0.2.9 the one pre-1.0 transitive
+addition). **Every claim in both was measured without touching the repo** — the compilers from
+the npx cache, a throwaway copy of `src-tauri` and a throwaway copy of the project — and each
+plan took two review legs (Gemini 3.8 Flash High, Grok 4.6) with every finding dispositioned in
+LOG.md. **Corrections to the vault dependency audit are recorded in the specs** (the reqwest
+duplicate stays; `base64` is not collapsible; `mail-parser` 0.11's empty default features;
+0.11.2's quoting change is COPY/LIST; reqwest 0.13's `native-tls` now carries ALPN).
+
+**Decisions each plan asks of Jim, in its Approval section:** PR D — the native-binary trust
+(unattested Microsoft compiler binaries; attested VoidZero bundler binaries), the browser floor,
+the CI signatures step, the rebase merge. PR E — `hashify`, the live-harness merge gate, the
+rebase merge. **Next, once either is approved: build it as its spec says** (D is ~1 day, E ~1
+day). Until then the next unblocked work is **enhancement wave 1** (ROADMAP §4: Auto Reminders
+1.5 d, custom split-inbox tabs 3 d, Instant Intro 0.5 d, the speed budget 6 d with the already-
+approved `@tanstack/react-virtual`) — Tier 1 items, briefs first.
 
 **Open for Jim:** the `urlpattern` dev-dependency; the **rebrand inventory**
 (`docs/audits/2026-09-03-rebrand-inventory.md` — the `com.velomail.app` identifier decision is a
@@ -228,16 +246,16 @@ P11; the only SHA pinned — `git log --oneline e05f6cd..origin/main` shows what
 **no open PRs** · CI green · 173 files / 2,299 tests / Rust 173 + 3 ignored · 28 migrations ·
 npm audit 0 · no dependency added.
 
-**Next action: the PR D / PR E plans** — toolchain majors (TypeScript 5.9→6→7 with the
-`baseUrl` fix, Vite 8) and the Rust parser majors; dependency changes, so Tier 2, **plans only,
-for Jim's approval before any code** (vault `2026-09-01_Velo_Dependency-Audit.md:93`). Then
-enhancement wave 1 (ROADMAP §4). **Review legs:** Gemini **3.8 Flash High** via `agy` **and**
-Grok 4.6 via the `grok` CLI; diffs from committed SHAs; when a review makes you write new
-logic, run a pass on the delta; verify every finding against source before adopting — on #75
-six were declined that way. Open for Jim: **P11's five-step QA** (spec §Verification) and
-whether to keep the reply-composer pop-out path; `urlpattern`; the rebrand `com.velomail.app`
-ADR; the F-3 follow-ups; PR D/E approvals; reporter re-tests. Manual and open: #240 Task 6,
-F-4's live Done-when, E2 Done-when 2, the E2 part 3 live tests (Docker was down).
+**Next action: wait for Jim's approval of the PR D and PR E plans** (landed as docs, #77
+`1ccafbf` and #78 `2e4707b`; both stop before any code). If one is approved, build it exactly
+as its spec says — rebase merge, per-commit gates, the packaged-bundle smoke (D) or the fixture
+suite first and the live-harness attempt (E). If neither is, take **enhancement wave 1** (ROADMAP
+§4), briefs first, Tier 1. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6
+via the `grok` CLI; diffs from committed SHAs; verify every finding against source before
+adopting — on the two plans, eleven were declined that way. Open for Jim: the two plan
+approvals with their named decisions; **P11's five-step QA** and the reply-composer pop-out
+path; `urlpattern`; the rebrand `com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests.
+Manual and open: #240 Task 6, F-4's live Done-when, E2 Done-when 2, the E2 part 3 live tests.
 
 **Seats:** one build seat. Don't merge Tier 2 on one pair of eyes.
 
