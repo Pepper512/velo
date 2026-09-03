@@ -298,7 +298,12 @@ and the unpinned floor with it.
   provenance (the house standard names SLSA v1.2; v1 is the residual, not a block).
   `npm audit signatures` (REQ-2.4, in CI from commit 1) verifies registry signatures and
   the attestations that exist; it is silent on unattested packages, which is why the
-  inventory above is written down rather than delegated to it.
+  inventory above is written down rather than delegated to it. It also talks to the registry
+  and the Sigstore transparency log on every run, so a registry outage or rate limit fails
+  the step for a reason unrelated to a bad signature — a known transient failure mode; re-run
+  the job rather than remove the step. It runs after `npm ci`, so it does not prevent an
+  install script from executing; the two packages with install scripts (`better-sqlite3`,
+  `fsevents`) are pre-existing and listed in §5.
 - **Lockfile:** `npm ci` in CI is the frozen-lockfile gate; every new package enters
   `package-lock.json` in the commit that needs it, and REQ-1.5's list is what a reviewer
   diffs against. No `.npmrc` omits optional dependencies.

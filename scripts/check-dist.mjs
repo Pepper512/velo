@@ -23,10 +23,23 @@ function page(name) {
 const index = page("index.html");
 const splash = page("splashscreen.html");
 
+// Whole <script> blocks, comments stripped first: a block passes only with a
+// non-empty `src` attribute (not `data-src`) and an empty body — a tag with a
+// src that also carries inline code is inline code as far as the CSP goes.
 for (const [name, html] of [["index.html", index], ["splashscreen.html", splash]]) {
-  const scripts = html.match(/<script\b[^>]*>/gi) ?? [];
-  for (const tag of scripts) {
-    if (!/\bsrc\s*=/.test(tag)) failures.push(`${name}: inline <script> found: ${tag}`);
+  const live = html.replace(/<!--[\s\S]*?-->/g, "");
+  const blocks = live.match(/<script\b[\s\S]*?<\/script\s*>/gi) ?? [];
+  const opens = live.match(/<script\b/gi) ?? [];
+  if (opens.length !== blocks.length) {
+    failures.push(`${name}: ${opens.length - blocks.length} unclosed <script> tag(s)`);
+  }
+  for (const block of blocks) {
+    const open = block.match(/<script\b[^>]*>/i)?.[0] ?? "";
+    const body = block.replace(/^<script\b[^>]*>/i, "").replace(/<\/script\s*>$/i, "").trim();
+    const hasSrc = /(?:^|\s)src\s*=\s*(?:"[^"]+"|'[^']+')/i.test(open);
+    if (!hasSrc || body.length > 0) {
+      failures.push(`${name}: inline or src-less <script> found: ${block.slice(0, 160)}`);
+    }
   }
 }
 
