@@ -2073,3 +2073,25 @@
   on density or pane changes is untested — the initial measure goes through `measureElement` on
   ref attach, which the stubs do exercise (Gemini M F-05, Grok M F-04). Raw outputs in
   `docs/reviews/2026-09-03-pr92-sb3-virtualized-list-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #92 SB-3 follow-up pass on `5dfef06..7249e32`, two legs.** Gemini: CHANGES
+  REQUESTED (2H 1M 1L); Grok: CHANGES REQUESTED (1M 3L 1N). Both found the same two holes in
+  the *fix*, and both were right — the third time this session that reviewing the fix paid.
+  **Adopted, both legs — the stagger latch was still wrong** (Gemini H F-02, Grok M M1): the
+  render-time latch fired on the folder-switch frame, when `folderKey` had already changed but
+  the previous folder's rows were still on screen and `isLoading` was still false — so it
+  stored the *old* rows' keys under the *new* folder, animating the outgoing list and never
+  the incoming one. It was also a ref written during render, which React 19 forbids. The set is
+  now captured inside `loadThreads` from the rows that load just returned
+  (`markStagger(mapped)`, both query paths) and held in state: it can never be another
+  folder's, `loadMore` never re-triggers it, and it survives the measure re-renders.
+  **Adopted, both legs — presence as a scroll key** (Gemini H F-01, Grok L L1): a reload that
+  dropped and re-added the selected thread would have re-scrolled a user who had scrolled away;
+  the effect now latches the id it scrolled for and scrolls at most once per selection.
+  **Adopted (Gemini M F-03):** `selectedPresent` guards on a truthy id and a defined
+  `threadId`, so a bundle header cannot match an undefined selection. **Adopted (Grok L L2):**
+  the load-more test also asserts that a scroll leaving the tail far away does *not* page.
+  **Not tested, recorded (Grok L L3):** a selected bundle child cannot be shown to scroll —
+  bundle children sit at the top of the item model, where `align: "auto"` correctly does
+  nothing; dropping the `kind === "thread"` filter is inert there and matters only if bundles
+  ever move down the list. Raw outputs in
+  `docs/reviews/2026-09-03-pr92-sb3-delta-{gemini38,grok}-raw.md`.

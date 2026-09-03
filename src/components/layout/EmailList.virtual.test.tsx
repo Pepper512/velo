@@ -198,8 +198,13 @@ describe("EmailList — virtualized (SPEC-SB REQ-3)", () => {
     render(<EmailList />);
     await waitFor(() => expect(useThreadStore.getState().threads).toHaveLength(50));
     expect(getThreadsForAccount).toHaveBeenCalledTimes(1);
-    // Scroll to the end of the first page: the virtualizer renders the tail.
     const scroller = document.querySelector<HTMLElement>(".overflow-y-auto")!;
+    // A scroll that leaves the tail far away must not page (the guard is the
+    // last rendered index, not the scroll event).
+    act(() => scroller.scrollTo({ top: 10 * ROW }));
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getThreadsForAccount).toHaveBeenCalledTimes(1);
+    // Scroll to the end of the first page: the virtualizer renders the tail.
     act(() => scroller.scrollTo({ top: 50 * ROW }));
     await waitFor(() => expect(useThreadStore.getState().threads).toHaveLength(100));
     expect(getThreadsForAccount).toHaveBeenLastCalledWith("acc1", "INBOX", 50, 50);

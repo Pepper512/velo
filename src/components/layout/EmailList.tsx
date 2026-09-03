@@ -119,6 +119,8 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     : () => {};
 
   const [hasMore, setHasMore] = useState(true);
+  // SPEC-SB REQ-3.4: which folder's freshly loaded rows may animate in.
+  const [staggerSet, setStaggerSet] = useState<{ folder: string; ids: Set<string> } | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [categoryMap, setCategoryMap] = useState<Map<string, string>>(() => new Map());
@@ -324,8 +326,16 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   const loadThreads = useCallback(async () => {
     if (!activeAccountId) {
       setThreads([]);
+      setStaggerSet(null);
       return;
     }
+
+    // SPEC-SB REQ-3.4: the rows this load puts on screen are the ones that
+    // animate in; captured here so a folder change can never stagger the
+    // previous folder's rows, and `loadMore` never re-triggers it.
+    const folder = `${activeAccountId}|${activeLabel}|${activeCategory}`;
+    const markStagger = (threadsLoaded: ReadonlyArray<{ id: string }>) =>
+      setStaggerSet({ folder, ids: new Set(threadsLoaded.slice(0, 15).map((t) => t.id)) });
 
     clearSearch();
     setLoading(true);
@@ -342,6 +352,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
         const rows = await db.select<SmartFolderRow[]>(sql, params);
         const mapped = await mapSmartFolderRows(rows);
         setThreads(mapped);
+        markStagger(mapped);
         setHasMore(false); // Smart folders load all at once
       } else {
         let dbThreads;
@@ -360,6 +371,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
 
         const mapped = await mapDbThreads(dbThreads);
         setThreads(mapped);
+        markStagger(mapped);
         setHasMore(dbThreads.length === PAGE_SIZE);
       }
     } catch (err) {
@@ -574,11 +586,19 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
   // a reload that merely reorders items does not snap the user back.
   const virtualizerRef = useRef(virtualizer);
   virtualizerRef.current = virtualizer;
-  const selectedPresent = selectedThreadId !== null && items.some((it) => it.threadId === selectedThreadId);
+  const selectedPresent = !!selectedThreadId && items.some((it) => it.threadId !== undefined && it.threadId === selectedThreadId);
+  // Scrolled at most once per selection, the first time that thread appears in
+  // the list — so a deep link or a boot with a selection scrolls when the list
+  // arrives, and no later reload can snap a user who has scrolled away back
+  // (Gemini follow-up F-01).
+  const lastScrolledRef = useRef<string | null>(null);
   useEffect(() => {
     if (!selectedThreadId || !selectedPresent) return;
+    if (lastScrolledRef.current === selectedThreadId) return;
     const index = itemsRef.current.findIndex((it) => it.threadId === selectedThreadId);
-    if (index >= 0) virtualizerRef.current.scrollToIndex(index, { align: "auto" });
+    if (index < 0) return;
+    lastScrolledRef.current = selectedThreadId;
+    virtualizerRef.current.scrollToIndex(index, { align: "auto" });
   }, [selectedThreadId, selectedPresent]);
 
   // REQ-3.3: load more when the last rendered row is within five of the end.
@@ -590,19 +610,14 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
     if (lastRenderedIndex >= 0 && lastRenderedIndex >= items.length - 5) loadMore();
   }, [lastRenderedIndex, items.length, hasMore, loadingMore, loadMore]);
 
-  // REQ-3.4: stagger-in plays for the rows of a folder's first loaded paint
-  // only — not for rows that scroll into view later, and not for the old list
-  // still showing while the next folder loads. Those first rows keep the class
-  // (the virtualizer re-renders on measure within a frame, and dropping the
-  // class would cut the animation short); a later row never gets it. The set
-  // is decided once per folder, lazily, during the first render with a loaded
-  // list — idempotent, so safe in render.
+  // REQ-3.4: stagger-in plays for the first rows of a folder's freshly loaded
+  // list — not for rows that scroll into view later, not for the next page,
+  // and not for the old list still on screen while the next folder loads. The
+  // set is captured by `loadThreads` itself from the rows it just loaded, so
+  // it is never the previous folder's, and it survives the virtualizer's
+  // measure re-renders (Gemini follow-up F-02).
   const folderKey = `${activeAccountId ?? ""}|${activeLabel}|${activeCategory}`;
-  const staggerRef = useRef<{ folder: string; keys: Set<string> } | null>(null);
-  if (!isLoading && items.length > 0 && staggerRef.current?.folder !== folderKey) {
-    staggerRef.current = { folder: folderKey, keys: new Set(items.slice(0, 15).map((it) => it.key)) };
-  }
-  const staggerKeys = staggerRef.current?.folder === folderKey ? staggerRef.current.keys : null;
+  const staggerIds = staggerSet?.folder === folderKey ? staggerSet.ids : null;
 
   const renderItem = (item: ListItem, index: number) => {
     switch (item.kind) {
@@ -670,7 +685,7 @@ export function EmailList({ width, listRef }: { width?: number; listRef?: React.
         // layout (Gemini F-06). The store rebuilds threadMap with threads, so
         // this is defensive.
         if (!thread) return <div style={{ height: item.estimate }} />;
-        const stagger = staggerKeys?.has(item.key) ?? false;
+        const stagger = staggerIds?.has(thread.id) ?? false;
         return (
           <div
             data-thread-id={thread.id}
