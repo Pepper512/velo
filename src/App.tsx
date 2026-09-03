@@ -293,9 +293,13 @@ export default function App() {
         // with nothing stored, Linux defaults on for the session — not
         // persisted, so the user's first touch of the toggle is what sticks.
         const savedReduceMotion = await getSetting("reduce_motion");
+        // A stored "true"/"false" decides on its own; only an absent (or
+        // unrecognised) value needs the platform, so the plugin is loaded
+        // only then.
+        const decided = savedReduceMotion === "true" || savedReduceMotion === "false";
         const reduce = resolveReduceEffects({
           stored: savedReduceMotion,
-          platform: await readPlatform(),
+          platform: decided ? "unknown" : await readPlatform(),
         });
         ui.restoreReduceMotion(reduce.value);
 

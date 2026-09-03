@@ -40,5 +40,7 @@ describe("readPlatform", () => {
     expect(await readPlatform(async () => ({ platform: async () => "linux" }))).toBe("linux");
     const failing = vi.fn(async () => { throw new Error("plugin not allowed"); });
     expect(await readPlatform(failing)).toBe("unknown");
+    // A plugin that loads but whose call rejects (Gemini follow-up L1).
+    expect(await readPlatform(async () => ({ platform: async () => { throw new Error("fault"); } }))).toBe("unknown");
   });
 });
