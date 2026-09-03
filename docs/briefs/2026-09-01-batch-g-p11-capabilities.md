@@ -9,8 +9,8 @@
   review legs. No dependency, no schema, CSP untouched.
 - **Base:** `main` @ `2d764a9` (code pin `1116348`, #73). The 2026-09-01 draft was pinned at
   `1ab7518`; every claim below was re-grepped at `2d764a9` and the ones that moved are marked.
-- **Status:** approved (plan) — branch `p11-capabilities`, PR opened with this file before any
-  code. **Manual QA (Jim) is open, not done** — see *Verification*.
+- **Status:** landed `e05f6cd` (#75, 2026-09-03) — four review passes, dispositions in LOG.md.
+  **Manual QA (Jim) is open, not done** — see *Verification*.
 - **Source:** `docs/audits/2026-09-01-optimize-audit.md` §P11; the 2026-09-01 draft of this
   brief (its two blockers, kept below); ROADMAP §3.
 - **Effort:** S · ½ day of agent work, plus Jim's five QA steps.
