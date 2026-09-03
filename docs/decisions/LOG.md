@@ -1919,3 +1919,10 @@
   delta): verified earlier (`Composer.tsx:216`) and in `ActionBar.tsx` (`disabled={noReply ||
   introUnavailableReason !== null}`). Raw outputs in
   `docs/reviews/2026-09-03-pr90-instant-intro-delta-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #90 (SPEC-II) third, narrow pass on `b577f9a..223102b` (Gemini 3.8 Flash
+  High): APPROVE (2N).** N-01: with the no-reply rule inside `instantIntroUnavailableReason`,
+  the button's `noReply ||` is redundant — kept, harmless, the button reads like its neighbours.
+  N-02: the handler's `aliases ?? []` relies on the reason being non-null whenever the aliases
+  are unknown — it is ("Instant Intro is not ready yet" whenever `ownAddresses` is null). Merged
+  as `91e01f6` (squash) on green for `223102b`. Raw output in
+  `docs/reviews/2026-09-03-pr90-instant-intro-delta2-gemini38-raw.md`.

@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `3b63d73`** (#88, SPEC-FUR — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 3b63d73..origin/main` —
+- **Code pin: `91e01f6`** (#90, SPEC-II Instant Intro — the last commit on `main` that changed
+  `src/` or `src-tauri/`). **The only SHA this file pins.** `git log --oneline 91e01f6..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
@@ -39,7 +39,7 @@
     is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
     `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
     reviewer diff; `pool.rs` is clean and safe to Edit.
-- **State on `main` @ `3b63d73`:** frontend **178** files / **2,378** tests · Rust **206** +
+- **State on `main` @ `91e01f6`:** frontend **180** files / **2,414** tests · Rust **206** +
   4 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
   import cycles. **Dependencies changed this session, each on Jim's explicit approval:** the
   PR D and PR E majors (TypeScript 7.0.2, Vite 8.2.2, plugin-react 6.1.1; mail-parser 0.11.8,
@@ -53,11 +53,33 @@
 **The full ordered plan is `docs/ROADMAP.md`**: the bug-fix queue is done except #278 ("not
 yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), P11 landed (#75), **the dependency audit
 is complete — PR D (#83) and PR E (#84) built from their approved plans**, the queued-send
-reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 is two items
-in: Auto Reminders (#80) and **custom split-inbox tabs (#87)**, with the follow-up reminder
-insert repaired on the way (#88 — it had never worked since upstream's migration v6). **Next in
-§4 of the roadmap: Instant Intro** (brief first, Tier 1), then the speed budget, then the Tier 2
-partial-unique-index migration from #88.
+reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 is three
+items in: Auto Reminders (#80), **custom split-inbox tabs (#87)** and **Instant Intro (#90)**,
+with the follow-up reminder insert repaired on the way (#88 — it had never worked since
+upstream's migration v6). **Next in §4 of the roadmap: the speed budget** (list virtualization
+with the already-approved `@tanstack/react-virtual`, body prefetch, reduce-effects; brief first,
+Tier 1), then the Tier 2 partial-unique-index migration from #88.
+
+**SPEC-II landed as #90 (`91e01f6`) — Instant Intro.** Brief
+`docs/briefs/2026-09-03-instant-intro.md` (Tier 1, committed before code). `b` on a thread, or
+the handshake after Forward on the action bar, opens the composer in reply-all on the last
+message with the introducer (`reply_to`, else `from_address`; blanks count as absent) moved to
+Bcc, my own addresses (account email + send-as aliases) removed, and the body opening
+"Thanks {first name}, moving you to Bcc." above the usual quote. Unavailable, with the reason on
+the button, when: no sender address; the sender does not accept replies; the last message is my
+own; nobody is left to be introduced to. Pure module `src/services/composer/instantIntro.ts`
+(`replyAllRecipients` is the first shared copy of the reply-all rule the four hand-written sites
+compute — consolidating them is a recorded follow-up); `openComposer` now accepts `fromEmail`
+so the From alias, resolved from the *original* headers, travels in the one atomic open; the
+alias list in `ThreadView` is keyed by the account it was loaded for. **Three review passes**
+(Gemini 3.8 Flash High ×3, Grok 4.6 ×2): both first-round Highs/Mediums about the composer
+clobbering From were declined against `Composer.tsx:216`; the alias race, the reason strings,
+the blank `reply_to`, the atomic open and the account-switch tear were adopted; the third pass
+approved. Dispositions in LOG.md and on the PR. **Recorded, not fixed:** `resolveFromAddress`
+compares whole header chips (a display-name chip never matches an alias; same for Reply All);
+`Smith, Alice` yields "Smith"; the Settings recorder writes `Shift+X` for a Shift-letter rebind
+but the dispatcher looks single keys up by `e.key`, so no Shift-letter binding can ever fire —
+pre-existing, Jim's call. **Jim's glance is open:** press `b` on an introduction thread.
 
 **SPEC-AR landed as #80 (`a7058cb`) — auto reminders on external sends.** Brief
 `docs/briefs/2026-09-03-auto-reminders.md` (Tier 1, committed before code). Sending to an
@@ -203,6 +225,7 @@ merged #73 under the standing rule.
 
 | PR | Merged | What |
 |---|---|---|
+| #90 `91e01f6` | build seat | **SPEC-II.** Instant Intro: `b` / handshake → reply-all with the introducer in Bcc, own addresses out, "Thanks {name}, moving you to Bcc." above the quote; pure module + 28 tests, `b` dispatch (2), action-bar button (3), store `fromEmail` on open (1); three review passes, two Highs declined against source, five findings adopted |
 | #88 `3b63d73` | build seat | **SPEC-FUR.** Follow-up reminders could never be inserted (upstream's `ON CONFLICT` upsert aimed at a plain index); select-then-update-or-insert in one pinned transaction, on the SQLite harness; sibling audit of all 19 ON CONFLICT statements clean; partial unique index recorded as the Tier 2 follow-up |
 | #87 `48acaf7` | build seat | **SPEC-SIT.** Custom split-inbox tabs: a pure module with a Zod schema at the settings boundary, category/label/Reminders tabs, hide-when-empty, a requested tab never hidden, the strip by visible tab, the list by tab kind, a Settings editor; 25 pure + SQLite cases; two legs, both Highs on cross-account labels declined against the label store |
 | #85 `ea18efc` | build seat | **SPEC-280-U.** The http scope matched by tauri-plugin-http's own matcher: both capability files, the exact allow list, the accepted and refused URL tables, with `urlpattern` 0.3.0 as a dev-dependency (Jim's decision 4; normal tree unchanged) |
@@ -265,9 +288,9 @@ merge can still be wrong — including ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `3b63d73`** (#88,
-SPEC-FUR; the only SHA pinned — `git log --oneline 3b63d73..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 178 files / 2,378 tests / Rust 206 + 4 ignored · 28 migrations ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `91e01f6`** (#90,
+SPEC-II; the only SHA pinned — `git log --oneline 91e01f6..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 180 files / 2,414 tests / Rust 206 + 4 ignored · 28 migrations ·
 npm audit 0 · no dependency added.
 
 **Jim confirmed those approvals in-session on 2026-09-03 and the build seat ran his prompt to the
@@ -276,29 +299,35 @@ commits)** and **SPEC-280-U (#85, the `urlpattern` dev-dependency test)** are on
 Approval lines are filled in. Toolchain now: TypeScript 7.0.2 (native), Vite 8.2.2, mail-parser
 0.11.8, async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4 with native-tls pinned.
 
-**Next action: enhancement wave 1 item 3 — Instant Intro** (reply-all, introducer → Bcc; ROADMAP
-§4), brief first, Tier 1, one PR per item; then the speed budget with the approved
-`@tanstack/react-virtual`; then the Tier 2 follow-up from #88 (a partial unique index on
-`follow_up_reminders`, a migration). Landed since the last pin: **#87 custom split-inbox tabs**
-(`48acaf7`: any label, a Reminders tab, hide-when-empty, a Settings editor) and **#88** (`3b63d73`) —
-the follow-up reminder insert had **never worked** (upstream's migration v6 gave its `ON CONFLICT`
-target a plain index; SQLite refuses it at prepare time), so every manual and automatic reminder
-since February failed silently; fixed as select-then-update-or-insert in one pinned
-transaction. Jim's whole 2026-09-03 queue is on `main`: #82, #83 (PR D), #84 (PR E), #85. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6 via the `grok` CLI;
-diffs from committed SHAs; verify every finding against source before adopting — today both
-legs' Highs on #80 were wrong, Gemini's Vite-7-default claim was wrong, and Grok's LIST-quoting
-claim was the opposite of the measured bytes. Open for Jim: **P11's five-step QA**; PR E's IMAP
-dev smoke; the rebrand `com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests; the
-findings PR E recorded (`List-Unsubscribe` never persisted on IMAP, a folded
-`Authentication-Results` shape truncated, `__dirname` in `vite.config.ts`). Manual and open:
-#240 Task 6, F-4's live Done-when, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests
-(Docker's engine on this Mac answers EOF; the app lives in a quarantine folder).
+**Next action: enhancement wave 1 item 4 — the speed budget** (ROADMAP §4: list virtualization
+with the already-approved `@tanstack/react-virtual`, body prefetch, reduce-effects; #232), brief
+first, Tier 1, one PR; then the Tier 2 follow-up from #88 (a partial unique index on
+`follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, a migration — plan, threat
+pass and rollback before code). Landed since the last pin: **#90 Instant Intro** (`91e01f6`: `b`
+or the handshake → reply-all with the introducer in Bcc and "Thanks {name}, moving you to Bcc.";
+`openComposer` takes `fromEmail`; `services/composer/instantIntro.ts` is the pure rule). Before
+that, same day: #87 split-inbox tabs, #88 the reminder-insert repair, #82, #83 (PR D), #84
+(PR E), #85. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6 via the
+`grok` CLI; diffs from committed SHAs; verify every finding against source — on #90 both legs'
+"the composer clobbers From" findings were wrong (`Composer.tsx:216` guards on `!fromEmail`),
+their alias-race and reason-string findings were right, and **the follow-up pass on the fix
+delta found two more real holes** (an account-switch render tear; the key path's own `??`
+no-reply guard) — review the new logic every time. Open for Jim: **P11's five-step QA**; PR E's
+IMAP dev smoke; a glance at the split tabs and at `b` on an introduction thread; the rebrand
+`com.velomail.app` ADR; the F-3 follow-ups; reporter re-tests; the findings PR E recorded
+(`List-Unsubscribe` never persisted on IMAP, a folded `Authentication-Results` shape truncated,
+`__dirname` in `vite.config.ts`); **#90's recorded gaps** (Shift-letter rebinds can never fire —
+recorder vs dispatcher; `resolveFromAddress` ignores display-name chips; four hand-written
+reply-all copies to consolidate onto `replyAllRecipients`). Manual and open: #240 Task 6, F-4's
+live Done-when, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests (Docker's engine on
+this Mac answers EOF; the app lives in a quarantine folder).
 
 **Seats:** one build seat. Don't merge Tier 2 on one pair of eyes.
 
-**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **four** worktrees
+**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **five** worktrees
 (`f1-decisions` locked — unlock first; `f2-email-links-open`; `f5-move-hygiene`;
-`e2-part3-pool-carry`, which also carried P11) · glance at the vault edits to `SPEC-F-4`.
+`e2-part3-pool-carry`, locked, which also carried P11; `instant-intro`, this session's, everything
+in it landed via #90 and this docs PR) · glance at the vault edits to `SPEC-F-4`.
 
 **Verify first:** `git worktree list` · `gh pr list` · `ListAgents` · `gh run list --branch main --limit 2`.
 

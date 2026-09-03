@@ -77,7 +77,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 |---|---|---|---|---|---|
 | 1 | ~~Auto Reminders default on external sends (skip weekends)~~ **landed #80 (`a7058cb`)** | P1 | 1 | 1.5 | — |
 | 1 | ~~Custom split-inbox tabs from smart labels + Reminders tab + hide-empty~~ **landed #87 (`48acaf7`)**; the reminder insert it depends on repaired in #88 | P1 | 1 | 3.0 | — |
-| 1 | Instant Intro (reply-all, introducer → Bcc) | P2 | 1 | 0.5 | — |
+| 1 | ~~Instant Intro (reply-all, introducer → Bcc)~~ **landed #90 (`91e01f6`)** | P2 | 1 | 0.5 | — |
 | 1 | Speed budget: list virtualization, body prefetch, reduce-effects (#232) | P1 | 1 | 6.0 | **dependency approval** |
 | 2 | Share Availability in the composer | P1 | 1 | 4.0 | — |
 | 2 | Instant Event — `.ics` first, AI second | P2 | 2 | 3.0 | LLM→calendar boundary |
@@ -117,6 +117,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1) after `git pull --ff-only`. Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-Wave 1 items 1 and 2 are on main (#80/#82 auto reminders, #87 custom split-inbox tabs) and the follow-up reminder insert is repaired (#88). Continue enhancement wave 1 from docs/ROADMAP.md §4 in order — next is Instant Intro (reply-all, introducer → Bcc), then the speed budget with the approved @tanstack/react-virtual — briefs first, Tier 1, one PR per item. Then the Tier 2 follow-up from #88: a partial unique index on follow_up_reminders(account_id, thread_id) WHERE status = 'pending' (a migration — plan, threat pass and rollback before code). Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges. No dependency beyond the ones already approved; ask before any other.
-Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests, PR E's IMAP dev smoke, the split-inbox tabs glance); they are recorded as open for me.
+Wave 1 items 1–3 are on main (#80/#82 auto reminders, #87 custom split-inbox tabs, #90 Instant Intro) and the follow-up reminder insert is repaired (#88). Continue enhancement wave 1 from docs/ROADMAP.md §4 in order — next is the speed budget (list virtualization with the already-approved @tanstack/react-virtual, body prefetch, reduce-effects; #232) — brief first, Tier 1, one PR per item; the dependency is approved, add nothing else. Then the Tier 2 follow-up from #88: a partial unique index on follow_up_reminders(account_id, thread_id) WHERE status = 'pending' (a migration — plan, threat pass and rollback before code). Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting; when a review makes you write new logic, review the new logic. You own commits, pushes, PRs and merges. No dependency beyond the ones already approved; ask before any other.
+Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests, PR E's IMAP dev smoke, the split-inbox tabs glance, the Instant Intro glance); they are recorded as open for me.
 ```
