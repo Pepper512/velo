@@ -11,13 +11,20 @@ import { join } from "node:path";
 const dist = join(process.cwd(), "dist");
 const failures = [];
 
+// Missing and empty are both failures (an empty page would otherwise pass every
+// check below by having nothing in it — Grok L1 on #83).
 function page(name) {
   const p = join(dist, name);
   if (!existsSync(p)) {
     failures.push(`${name} is missing`);
-    return "";
+    return null;
   }
-  return readFileSync(p, "utf8");
+  const html = readFileSync(p, "utf8");
+  if (html.trim() === "") {
+    failures.push(`${name} is empty`);
+    return null;
+  }
+  return html;
 }
 
 const index = page("index.html");
@@ -27,6 +34,7 @@ const splash = page("splashscreen.html");
 // non-empty `src` attribute (not `data-src`) and an empty body — a tag with a
 // src that also carries inline code is inline code as far as the CSP goes.
 for (const [name, html] of [["index.html", index], ["splashscreen.html", splash]]) {
+  if (html === null) continue;
   const live = html.replace(/<!--[\s\S]*?-->/g, "");
   const blocks = live.match(/<script\b[\s\S]*?<\/script\s*>/gi) ?? [];
   const opens = live.match(/<script\b/gi) ?? [];
@@ -43,10 +51,10 @@ for (const [name, html] of [["index.html", index], ["splashscreen.html", splash]
   }
 }
 
-if (index && !/\/assets\/[^"']+-[A-Za-z0-9_-]{6,}\.js\b/.test(index)) {
+if (index !== null && !/\/assets\/[^"']+-[A-Za-z0-9_-]{6,}\.js\b/.test(index)) {
   failures.push("index.html references no hashed /assets/*.js");
 }
-if (index && !/\/assets\/[^"']+-[A-Za-z0-9_-]{6,}\.css\b/.test(index)) {
+if (index !== null && !/\/assets\/[^"']+-[A-Za-z0-9_-]{6,}\.css\b/.test(index)) {
   failures.push("index.html references no hashed /assets/*.css");
 }
 

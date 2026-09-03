@@ -1651,3 +1651,47 @@
   agrees with the brief: the scheduler's pending guard covers a re-executed row; a reminder
   failure after a successful queued send is logged, not retried (Not doing). Raw outputs in
   `docs/reviews/2026-09-03-pr82-queued-send-reminder-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR D built, PR #83, Tier 2, four commits for rebase merge.** Plan
+  `docs/briefs/2026-09-03-pr-d-toolchain-majors.md`, approved by Jim 2026-09-03 (decision 2
+  of the next-session prompt; Approval line filled in commit 1). Commit 1 `970d2ea`: `baseUrl`
+  gone, `"@/*": ["./src/*"]`, `npm audit signatures` in CI's frontend job. Commit 2 `cb2ca45`:
+  TypeScript 6.0.3 (lockfile: the one entry). Commit 3 `3260522`: TypeScript 7.0.2, the native
+  compiler (lockfile: +20 `@typescript/typescript-*` optional platform packages, nothing else;
+  `tsc --noEmit` 3.19 s → 0.40 s). Commit 4 `9c82667`: Vite 8.2.2 + plugin-react 6.1.1,
+  `rolldownOptions`, browser floor pinned to Vite 7's (`target`/`cssTarget`),
+  `scripts/check-dist.mjs` in the build script (lockfile 375 → 316: esbuild, Rollup and
+  Babel out; rolldown, 15 `@rolldown/binding-*`, `@oxc-project/types`, a second `lightningcss`
+  in; `esbuild`, `@typescript/typescript6`, `@types/node` absent). Every REQ-2.1 gate green on
+  every commit locally and in CI on the exact SHA; suite 174 / 2,341 unchanged; `npm audit`
+  0 / 0; signatures 242 verified, 118 attested, none invalid; dist 26 files / 2.21 MB → 51 /
+  2.19 MB, `check-dist` green. **One notice recorded as a follow-up, not changed (REQ-1.4):**
+  Vite 8 flags `__dirname` in `vite.config.ts` as unsupported by the future
+  `configLoader: 'native'` (`import.meta.dirname`). **REQ-2.3:** `npm run tauri build --
+  --debug` produced `Velo.app`; the DMG step failed in `bundle_dmg.sh` (not needed for the
+  smoke; the release profile is already known not to build here). The smoke on the packaged
+  app is recorded in the PR.
+- **2026-09-03 — PR #83 (PR D) review, two legs, plus the REQ-2.3 smoke.** Gemini 3.8 Flash
+  High: CHANGES REQUESTED (1H 2M 2L 1N); Grok 4.6: APPROVE (1L 2N). **Adopted:** `check-dist`
+  inspects whole `<script>` blocks after stripping comments — a block passes only with a
+  non-empty `src` (not `data-src`) and an empty body, an unclosed tag fails (Gemini M1, Grok
+  N1); a missing or empty page is a failure and every check runs whenever the file exists
+  (Grok L1); the brief's threat pass records `npm audit signatures` as network-dependent
+  (outage → re-run, never remove) and as running after `npm ci`, so not an install-script
+  gate (Gemini L2, Grok N2). **Declined, each verified against source:** Gemini M2 "Vite 7's
+  default is `'modules'`" — Vite 7.3.6's shipped code defines
+  `ESBUILD_BASELINE_WIDELY_AVAILABLE_TARGET = ["chrome107","edge107","firefox104","safari16"]`
+  and uses it as the `build.target` default and the Lightning CSS targets (`'modules'` was Vite
+  5/6), so the pin keeps the floor where it was; Gemini L1 relative `base` — the default `/`
+  is this repo's fixed config; Gemini N1 `__dirname` — REQ-1.4 says commit 4 changes nothing
+  else, recorded as a follow-up (Grok agrees); Gemini H1 — a process gate, met: CI green on
+  every commit including 4, and the smoke below. **REQ-2.3 done by the agent:** the debug
+  bundle (`Velo.app`; the DMG step failed in `bundle_dmg.sh`, not needed) launched on the
+  real profile and driven through the accessibility tree — Inbox (23 conversations), a
+  thread rendered, Settings/Attachments/Calendar rendered, the composer with the SPEC-AR
+  control, and a `compose-*` pop-out window rendering the full composer with its own
+  pop-out button correctly absent (P11); discarded empty, quit. Mouse clicks through the
+  bridge were unreliable (one landed on a sidebar item); indexed accessibility actions were
+  used; nothing archived, deleted or sent. Raw outputs in
+  `docs/reviews/2026-09-03-pr83-pr-d-{gemini38,grok}-raw.md`. **Landing:** rebase merge
+  (REQ-1.6), six commits — the four planned plus two review-fix commits on `check-dist`
+  and the brief.
