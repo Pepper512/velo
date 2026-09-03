@@ -25,6 +25,16 @@ export function normaliseAutoReminderDays(value: string | number | null | undefi
     : DEFAULT_AUTO_REMINDER_DAYS;
 }
 
+/**
+ * The bare, lower-cased address inside a recipient string. Reply-all
+ * prefills recipients straight from the To/Cc headers, so a chip can read
+ * `"Alice Smith" <alice@acme.com>`; the rule must see `alice@acme.com`.
+ */
+function bareAddress(raw: string): string {
+  const angle = raw.match(/<([^>]*)>/);
+  return (angle ? angle[1]! : raw).trim().toLowerCase();
+}
+
 function domainOf(address: string): string | null {
   const at = address.lastIndexOf("@");
   if (at < 0 || at === address.length - 1) return null;
@@ -34,18 +44,18 @@ function domainOf(address: string): string | null {
 /**
  * REQ-1.2: a send is external when at least one recipient is on another
  * domain than the sending address and is not one of the account's own
- * addresses. Domains and addresses compare case-insensitively; a recipient
- * without a domain is ignored.
+ * addresses. Domains and addresses compare case-insensitively, display
+ * names are ignored; a recipient without a domain is ignored.
  */
 export function isExternalSend(input: {
   from: string;
   recipients: string[];
   ownAddresses: string[];
 }): boolean {
-  const fromDomain = domainOf(input.from);
-  const own = new Set(input.ownAddresses.map((a) => a.trim().toLowerCase()));
+  const fromDomain = domainOf(bareAddress(input.from));
+  const own = new Set(input.ownAddresses.map(bareAddress));
   return input.recipients.some((r) => {
-    const addr = r.trim().toLowerCase();
+    const addr = bareAddress(r);
     if (own.has(addr)) return false;
     const domain = domainOf(addr);
     if (domain === null) return false;
@@ -61,10 +71,12 @@ export function isExternalSend(input: {
 export function autoReminderDueAt(sentAt: Date, days: number): number {
   const due = new Date(sentAt.getTime());
   due.setDate(due.getDate() + normaliseAutoReminderDays(days));
-  due.setHours(DUE_HOUR, 0, 0, 0);
   const day = due.getDay(); // 0 = Sunday, 6 = Saturday
   if (day === 6) due.setDate(due.getDate() + 2);
   else if (day === 0) due.setDate(due.getDate() + 1);
+  // Hours last, after every date move, so the morning is 09:00 on the final
+  // day whatever the clock did in between.
+  due.setHours(DUE_HOUR, 0, 0, 0);
   return Math.floor(due.getTime() / 1000);
 }
 

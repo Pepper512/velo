@@ -296,7 +296,9 @@ export function Composer() {
     const html = getFullHtml();
     const senderEmail = state.fromEmail ?? activeAccount.email;
     // SPEC-AR: decide the automatic follow-up reminder now, from what the
-    // user saw when they pressed Send; the send itself decides nothing.
+    // user saw when they pressed Send — including the delay, so a settings
+    // change during the undo window cannot alter it. The send decides nothing.
+    const autoReminderDaysAtSend = useUIStore.getState().autoRemindersDays;
     const autoReminderWanted = effectiveAutoReminder({
       enabled: useUIStore.getState().autoRemindersEnabled,
       override: state.autoReminderOverride,
@@ -350,7 +352,7 @@ export function Composer() {
                   threadId: sent.threadId ?? state.threadId,
                   messageId: sent.id,
                   sentAt: new Date(),
-                  days: useUIStore.getState().autoRemindersDays,
+                  days: autoReminderDaysAtSend,
                 },
               );
             } catch (err) {

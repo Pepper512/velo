@@ -22,6 +22,17 @@ describe("isExternalSend (REQ-1.2)", () => {
     expect(isExternalSend({ from: "me@acme.com", recipients: ["x@example.com"], ownAddresses: own })).toBe(true);
   });
 
+  it("sees through display names and angle brackets — reply-all prefills chips from the raw headers (Gemini H1)", () => {
+    // Internal colleague with a display name: not external.
+    expect(isExternalSend({ from: "me@acme.com", recipients: ['"Alice Smith" <alice@acme.com>'], ownAddresses: own })).toBe(false);
+    // My own alias with a display name: never external.
+    expect(isExternalSend({ from: "me@acme.com", recipients: ["Me Too <Alias@Acme.com>"], ownAddresses: own })).toBe(false);
+    // A named sender and a named external recipient: external.
+    expect(isExternalSend({ from: "Me <me@acme.com>", recipients: ["Bob <bob@example.com>"], ownAddresses: own })).toBe(true);
+    // Bare angle form with no display name.
+    expect(isExternalSend({ from: "me@acme.com", recipients: ["<carol@acme.com>"], ownAddresses: own })).toBe(false);
+  });
+
   it("is internal when every recipient shares the sender's domain", () => {
     expect(isExternalSend({ from: "me@acme.com", recipients: ["boss@acme.com", "peer@acme.com"], ownAddresses: own })).toBe(false);
   });
@@ -92,6 +103,24 @@ describe("autoReminderDueAt (REQ-2)", () => {
     const sent = local(2026, 9, 7, 23);
     const due = autoReminderDueAt(sent, 1);
     expect(due).toBeGreaterThan(Math.floor(sent.getTime() / 1000));
+  });
+
+  it("the everyday case: a Friday send with the default 3 days is due Monday 09:00", () => {
+    // Friday 2026-09-11 15:00 + 3 -> Monday 2026-09-14 09:00.
+    const due = at(autoReminderDueAt(local(2026, 9, 11, 15), 3));
+    expect([due.getMonth() + 1, due.getDate(), due.getDay(), due.getHours()]).toEqual([9, 14, 1, 9]);
+  });
+
+  it("crosses a year end: Thursday 31 Dec + 3 is Sunday 3 Jan, rolled to Monday 4 Jan", () => {
+    const due = at(autoReminderDueAt(local(2026, 12, 31), 3));
+    expect([due.getFullYear(), due.getMonth() + 1, due.getDate(), due.getHours()]).toEqual([2027, 1, 4, 9]);
+  });
+
+  it("keeps 09:00 on the clock across a DST change inside the window (Gemini M2)", () => {
+    // US clocks fall back on Sunday 2026-11-01. Friday 30 Oct + 3 -> Monday 2 Nov 09:00,
+    // whatever the zone (a no-op in UTC, a real transition in America/Chicago).
+    const due = at(autoReminderDueAt(local(2026, 10, 30), 3));
+    expect([due.getMonth() + 1, due.getDate(), due.getHours(), due.getMinutes()]).toEqual([11, 2, 9, 0]);
   });
 });
 

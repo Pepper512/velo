@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { setSetting } from "@/services/db/settings";
+import { normaliseAutoReminderDays } from "@/services/followup/autoReminders";
 import type { ColorThemeId } from "@/constants/themes";
 
 type Theme = "light" | "dark" | "system";
@@ -185,7 +186,9 @@ export const useUIStore = create<UIState>((set) => ({
     setSetting("auto_reminders_enabled", String(autoRemindersEnabled)).catch(() => {});
     set({ autoRemindersEnabled });
   },
-  setAutoRemindersDays: (autoRemindersDays) => {
+  setAutoRemindersDays: (days) => {
+    // Only the offered choices reach state or disk (SPEC-AR REQ-4).
+    const autoRemindersDays = normaliseAutoReminderDays(days);
     setSetting("auto_reminders_days", String(autoRemindersDays)).catch(() => {});
     set({ autoRemindersDays });
   },
