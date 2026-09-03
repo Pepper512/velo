@@ -58,7 +58,9 @@ tokio-native-tls = "0.3"
 # state — `getrandom` is the thin shim over the platform call and nothing more.
 getrandom = "0.3"
 native-tls = "0.2"
-mail-parser = "0.9"
+# PR E REQ-1.1: exact pin; `default-features = false` so no future default can
+# add rkyv or serde; `full_encoding` is the charset table the fixture suite guards.
+mail-parser = { version = "=0.11.8", default-features = false, features = ["full_encoding"] }
 lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-native-tls", "builder"] }
 base64 = "0.22"
 utf7-imap = "0.3"

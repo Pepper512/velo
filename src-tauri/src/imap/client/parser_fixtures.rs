@@ -333,6 +333,24 @@ Content-Type: text/plain; charset=windows-1252\r\n\
     }
 
     #[test]
+    fn a_shift_jis_body_decodes_only_with_the_full_encoding_feature() {
+        // The real full_encoding guard: mail-parser's single-byte tables are
+        // built in (the two cases above pass without the feature — the plan's
+        // premise was wrong there, a REQ-3 correction); the multi-byte
+        // decoders (Shift_JIS, GBK, Big5, EUC-KR, …) are what `full_encoding`
+        // adds. `\x93\xfa\x96\x7b` is 日本 in Shift_JIS. Dropping the feature
+        // makes this fixture fail — measured, not assumed.
+        let sjis: &[u8] = b"From: a@example.com\r\n\
+Content-Type: text/plain; charset=shift_jis\r\n\
+\r\n\
+\x93\xfa\x96\x7b\r\n";
+        assert_eq!(
+            parse(sjis).body_text.as_deref(),
+            Some("\u{65e5}\u{672c}\r\n")
+        );
+    }
+
+    #[test]
     fn quoted_printable_and_base64_text_bodies_decode() {
         let qp: &[u8] = b"From: a@example.com\r\n\
 Content-Type: text/plain; charset=utf-8\r\n\
@@ -471,12 +489,12 @@ mod hardening {
     }
 
     #[test]
-    fn an_obsolete_zone_name_is_read_as_utc_today() {
-        // RFC 5322 §4.3: EST is -0500, so 05:45 EST is 10:45Z. 0.9.4 ignores the
-        // name and reads the time as UTC; 0.10.0's changelog says obsolete zones
-        // are parsed, so commit 2 is expected to move this to SEPT_1_1045_UTC.
+    fn an_obsolete_zone_name_is_parsed_since_0_10() {
+        // RFC 5322 §4.3: EST is -0500, so 05:45 EST is 10:45Z. 0.9.4 ignored the
+        // name and read the time as UTC (SEPT_1_1045_UTC - 5 * 3600); 0.10.0
+        // parses obsolete zones. Moved in PR E commit 2.
         let raw = b"From: a@example.com\r\nDate: Tue, 01 Sep 2026 05:45:00 EST\r\n\r\nx\r\n";
-        assert_eq!(parse(raw).date, SEPT_1_1045_UTC - 5 * 3600);
+        assert_eq!(parse(raw).date, SEPT_1_1045_UTC);
     }
 
     #[test]
@@ -491,18 +509,21 @@ x\r\n";
     }
 
     #[test]
-    fn list_unsubscribe_is_never_persisted_today_and_a_folded_auth_results_is_truncated() {
-        // Finding, not fixture: 0.9.4 parses List-Unsubscribe as an *address
-        // list*, so the text extractor sees nothing and the IMAP path never
-        // stores the header the one-click unsubscribe feature needs. And a
-        // folded Authentication-Results keeps its first line only.
+    fn list_unsubscribe_is_never_persisted_and_this_folded_auth_results_is_truncated() {
+        // Finding, not fixture: both 0.9.4 and 0.11.8 parse List-Unsubscribe as
+        // an *address list*, so the text extractor sees nothing and the IMAP
+        // path never stores the header the one-click unsubscribe feature needs
+        // (a follow-up, not this PR). And this folded Authentication-Results
+        // keeps its first line only — on both versions, as observed for this
+        // shape (a shorter fold, `spf=pass;\r\n dkim=pass`, survives whole on
+        // 0.11). Unchanged by PR E commit 2; a follow-up too.
         let raw: &[u8] = b"From: news@example.com\r\n\
 List-Unsubscribe: <https://example.com/u?x=1>, <mailto:unsub@example.com>\r\n\
 Authentication-Results: mx.example.net; spf=pass smtp.mailfrom=example.com;\r\n\
  dkim=pass header.d=example.com; dmarc=pass\r\n\
 \r\n\
 x\r\n";
-        let m = try_parse(raw).expect("0.9.4 does not panic");
+        let m = try_parse(raw).expect("does not panic");
         assert_eq!(m.list_unsubscribe, None);
         assert_eq!(
             m.auth_results.as_deref(),
@@ -560,25 +581,19 @@ unterminated\r\n";
     }
 
     #[test]
-    fn quoted_printable_with_a_stray_equals_loses_the_body_today() {
-        // `=` followed by something that is not two hex digits. 0.9.4 gives up
-        // on the text: no body, and the part is listed as a nameless text
-        // attachment at section 1. 0.11.4's changelog says such bodies are
-        // decoded leniently, so commit 2 is expected to change this.
+    fn quoted_printable_with_a_stray_equals_is_decoded_leniently_since_0_11_4() {
+        // `=` followed by something that is not two hex digits. 0.9.4 gave up on
+        // the text (no body; a nameless text attachment at section 1). 0.11.4
+        // decodes leniently: the stray escapes are kept as typed. Moved in PR E
+        // commit 2.
         let raw: &[u8] = b"From: a@example.com\r\n\
 Content-Type: text/plain; charset=utf-8\r\n\
 Content-Transfer-Encoding: quoted-printable\r\n\
 \r\n\
 a=b 100=% done=\r\n";
-        let m = try_parse(raw).expect("0.9.4 does not panic");
-        assert_eq!(m.body_text, None);
-        assert_eq!(m.body_html, None);
-        assert_eq!(m.snippet, None);
-        assert_eq!(m.attachments.len(), 1);
-        assert_eq!(m.attachments[0].part_id, "1");
-        assert_eq!(m.attachments[0].filename, "attachment");
-        assert_eq!(m.attachments[0].mime_type, "text/plain");
-        assert_eq!(m.attachments[0].size, 17);
+        let m = try_parse(raw).expect("does not panic");
+        assert_eq!(m.body_text.as_deref(), Some("a=b 100=% done"));
+        assert!(m.attachments.is_empty());
     }
 
     #[test]
