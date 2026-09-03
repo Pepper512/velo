@@ -31,8 +31,9 @@ export function normaliseAutoReminderDays(value: string | number | null | undefi
  * `"Alice Smith" <alice@acme.com>`; the rule must see `alice@acme.com`.
  */
 function bareAddress(raw: string): string {
-  const angle = raw.match(/<([^>]*)>/);
-  return (angle ? angle[1]! : raw).trim().toLowerCase();
+  const angle = raw.match(/<([^<>]+)>/);
+  // No bracketed address: take the chip as typed, minus any stray bracket.
+  return (angle ? angle[1]! : raw.replace(/[<>]/g, "")).trim().toLowerCase();
 }
 
 function domainOf(address: string): string | null {

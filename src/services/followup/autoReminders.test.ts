@@ -25,8 +25,10 @@ describe("isExternalSend (REQ-1.2)", () => {
   it("sees through display names and angle brackets — reply-all prefills chips from the raw headers (Gemini H1)", () => {
     // Internal colleague with a display name: not external.
     expect(isExternalSend({ from: "me@acme.com", recipients: ['"Alice Smith" <alice@acme.com>'], ownAddresses: own })).toBe(false);
-    // My own alias with a display name: never external.
-    expect(isExternalSend({ from: "me@acme.com", recipients: ["Me Too <Alias@Acme.com>"], ownAddresses: own })).toBe(false);
+    // My own alias on another domain, with a display name: never external.
+    expect(isExternalSend({ from: "me@acme.com", recipients: ["Me Too <Me@Other.org>"], ownAddresses: [...own, "me@other.org"] })).toBe(false);
+    // A stray bracket in a typed chip is dropped, not read as part of the domain.
+    expect(isExternalSend({ from: "me@acme.com", recipients: ["dave@acme.com>"], ownAddresses: own })).toBe(false);
     // A named sender and a named external recipient: external.
     expect(isExternalSend({ from: "Me <me@acme.com>", recipients: ["Bob <bob@example.com>"], ownAddresses: own })).toBe(true);
     // Bare angle form with no display name.
@@ -119,9 +121,10 @@ describe("autoReminderDueAt (REQ-2)", () => {
   });
 
   it("keeps 09:00 on the clock across a DST change inside the window (Gemini M2)", () => {
-    // US clocks fall back on Sunday 2026-11-01. Friday 30 Oct + 3 -> Monday 2 Nov 09:00,
-    // whatever the zone (a no-op in UTC, a real transition in America/Chicago).
-    const due = at(autoReminderDueAt(local(2026, 10, 30), 3));
+    // US clocks fall back on Sunday 2026-11-01. Thursday 29 Oct + 3 -> Sunday 1 Nov, the
+    // transition day itself, rolled to Monday 2 Nov 09:00 — whatever the zone (a no-op in
+    // UTC, a real transition in America/Chicago).
+    const due = at(autoReminderDueAt(local(2026, 10, 29), 3));
     expect([due.getMonth() + 1, due.getDate(), due.getHours(), due.getMinutes()]).toEqual([11, 2, 9, 0]);
   });
 });

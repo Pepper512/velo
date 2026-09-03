@@ -1608,3 +1608,18 @@
   call (same hook as the scheduled-send non-goal). Raw outputs in
   `docs/reviews/2026-09-03-pr80-auto-reminders-{gemini38,grok}-raw.md`. Fix commits `ab0ec19`
   and the Grok fix on the same branch; suite 174 files / 2,326 tests.
+- **2026-09-03 — PR #80 fix-delta pass (Gemini 3.8 Flash High on `865d732..00759c7`).**
+  CHANGES REQUESTED (2H 2M 1L 1N). **Adopted:** a stray `<`/`>` in a typed chip is dropped
+  rather than read into the domain (H2's real part); the DST case moved onto the transition
+  Sunday so the weekend roll runs across it (N1); the alias case now uses an own address on
+  another domain, proving the exemption rather than same-domain (its "wrong thing" note).
+  **Declined, each verified:** H1 "undefined thread id reaches the query" —
+  `scheduleAutoReminder` warns and returns `no-thread` before any lookup
+  (`autoReminders.ts:113-115`); H2's multi-address chip — `AddressInput` adds one string per
+  chip and reply-all splits on commas first; M1 "`mockReset` breaks later tests" — the original
+  is a bare `vi.fn()` (`imapSmtpProvider.test.ts:72`), which `mockReset` restores exactly, and
+  the suite is green; M2 / L1 — a sender without a domain counting as external, and the warn on
+  a failed send, are deliberate and tested. Raw output in
+  `docs/reviews/2026-09-03-pr80-auto-reminders-gemini38-delta-raw.md`. Lesson, again: a
+  follow-up pass on a fix delta finds real polish (three adopted) but its Highs were both
+  wrong this time — verify before adopting.
