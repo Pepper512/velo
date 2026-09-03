@@ -1464,3 +1464,28 @@
   assertion is replaced by a strict-difference check. N5 — tests for main-inside-Tauri and
   malformed metadata. **Declined:** L4 — `revealItemInDir` has no caller in the tree
   (grepped). Raw output in `docs/reviews/2026-09-03-pr75-gemini38-delta-raw.md`.
+- **2026-09-03 — PR #75 (P11) review, fourth pass: the whole diff at `df71117` on Gemini
+  3.8 Flash High.** CHANGES REQUESTED (3H 2M 2L 1N). **Declined, each verified against
+  source:** H1 — "the dialog plugin does not extend the fs scope, so saving to a picked path
+  is denied": it does — `tauri-plugin-dialog-2.7.3/src/commands.rs:194-198` (the `save`
+  command calls `allow_file` on the window's fs scope) and `tauri-plugin-fs/src/commands.rs:1564`
+  ORs that runtime scope with the permission's own; today's `$APPDATA`-only grant saves to
+  Downloads by exactly this path. H2 — "`ContextMenuPortal` creates windows from inside a
+  pop-out": it is rendered by `App.tsx` only (grepped); adopted anyway as a one-line guard so
+  every creator site sits under the same rule, and the source scan now asserts all three.
+  H3 — `sql:allow-execute` in content windows: the recorded residual (draft auto-save and the
+  sent copy write from a pop-out; moving them behind Rust commands is its own brief). L6 —
+  the manifest check skipping in CI: the frontend job has no `cargo`, and the check ran and
+  passed locally at this SHA; committing a copy of the manifest would be a second source of
+  truth. N8 — event snooping through `allow-listen`: main's emits are `tray-check-mail` (no
+  payload), `single-instance-args` (argv, a `mailto:` at most) and the session-invalidation
+  identity (username, host) — no token or secret rides an event; recorded. **Adopted:** M4 —
+  `pathSubsumed` refuses a `.` or `..` segment outright (a literal entry that needs
+  normalising is wrong); M5 — an unscoped write permission in content must be on an explicit
+  list (`fs:allow-write-text-file`, the dialog-picked `.eml` export) and every other write must
+  name its paths; L7 — a label that is neither `main` nor a pop-out glob is `"unknown"`, not
+  `"main"`: the gate fails closed (no button that needs main's grant) and `main.tsx` warns
+  before rendering the main root, which then fails loudly on its first plugin call. Raw output
+  in `docs/reviews/2026-09-03-pr75-gemini38-final-raw.md`. Four passes; no fifth — the last
+  round's real findings were test-tightening, and its HIGHs were re-litigations of verified
+  facts.

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { useContextMenuStore } from "@/stores/contextMenuStore";
+import { isPopoutWindow } from "@/utils/windowKind";
 import { useThreadStore } from "@/stores/threadStore";
 import { useAccountStore } from "@/stores/accountStore";
 import { getActiveLabel } from "@/router/navigate";
@@ -377,6 +378,9 @@ function ThreadMenu({
   };
 
   const handlePopOut = async () => {
+    // This portal renders only in the main window today; the guard keeps
+    // every webview-creation site under the same rule (SPEC-P11).
+    if (isPopoutWindow()) return;
     try {
       const { WebviewWindow } = await import("@tauri-apps/api/webviewWindow");
       const windowLabel = `thread-${thread.id.replace(/[^a-zA-Z0-9_-]/g, "_")}`;

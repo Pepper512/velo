@@ -11,6 +11,12 @@ import { currentWindowKind } from "./utils/windowKind";
 // is what the capability grant is keyed by — shared with the components that
 // hide "Open in new window" inside a pop-out (SPEC-P11).
 const windowKind = currentWindowKind();
+if (windowKind === "unknown") {
+  // A label this code does not route. It gets the main root so the page is
+  // not blank, but it holds no capability grant (SPEC-P11), so it will fail
+  // loudly on its first plugin call — which is the right failure.
+  console.warn("[main] Unknown window label; rendering the main root without a grant");
+}
 
 function Root() {
   if (windowKind === "thread") return <ThreadWindow />;

@@ -300,14 +300,29 @@ function expand(ids: Iterable<string>): Set<string> {
   return out;
 }
 
-/** `$APPDATA/attachment_cache/**` is under `$APPDATA/**`; `$APPDATA/velo.key` too. */
+/**
+ * `$APPDATA/attachment_cache/**` is under `$APPDATA/**`; `$APPDATA/velo.key`
+ * too. A segment of `.` or `..` anywhere is refused outright rather than
+ * normalised: the entries are literal strings in committed JSON, and one that
+ * needs normalising is wrong (final review M4 on #75).
+ */
 function pathSubsumed(entry: string, roots: string[]): boolean {
+  if (entry.split("/").some((seg) => seg === "." || seg === "..")) return false;
   return roots.some((root) => {
     if (root === entry) return true;
     const base = root.endsWith("/**") ? root.slice(0, -3) : root;
     return entry === base || entry.startsWith(`${base}/`);
   });
 }
+
+/**
+ * Write permissions a content window may hold **without** a static path: the
+ * path comes from the runtime scope the dialog plugin extends to the file the
+ * user picked. Any other unscoped write permission is a test failure (final
+ * review M5 on #75).
+ */
+const UNSCOPED_WRITE_PERMISSIONS_IN_CONTENT = ["fs:allow-write-text-file"];
+const WRITE_PERMISSION = /^fs:allow-(write|mkdir|create|copy|rename|remove|truncate)/;
 
 describe("capabilities — the split (SPEC-P11)", () => {
   const files = readdirSync(DIR).filter((f) => f.endsWith(".json")).sort();
@@ -373,13 +388,18 @@ describe("capabilities — the split (SPEC-P11)", () => {
     // email reads the key (credentials decrypt in the page) and never writes
     // beside it. Dialog-picked save paths arrive through the runtime scope.
     for (const p of content.permissions) {
-      if (typeof p === "string") continue;
-      const writes = /^fs:allow-(write|mkdir|create|copy|rename|remove|truncate)/.test(p.identifier);
-      if (!writes) continue;
+      const id = idOf(p);
+      if (!WRITE_PERMISSION.test(id)) continue;
+      if (typeof p === "string") {
+        expect(UNSCOPED_WRITE_PERMISSIONS_IN_CONTENT, `${id} is an unscoped write`).toContain(id);
+        continue;
+      }
+      expect(scopeOf(p).length, `${id} must name its paths`).toBeGreaterThan(0);
       for (const entry of scopeOf(p)) {
-        expect(pathSubsumed(entry, CONTENT_WRITE_ROOTS), `${p.identifier} ${entry}`).toBe(true);
+        expect(pathSubsumed(entry, CONTENT_WRITE_ROOTS), `${id} ${entry}`).toBe(true);
       }
     }
+    expect(pathSubsumed("$APPDATA/attachment_cache/../velo.key", CONTENT_WRITE_ROOTS)).toBe(false);
     const readsKey = content.permissions.filter((p) =>
       scopeOf(p).some((e) => e.endsWith("/velo.key")),
     );
@@ -462,9 +482,15 @@ describe("capabilities — the create path in the source", () => {
     ]);
   });
 
-  it("gates both pop-out-reachable creators, and routes the root, by the one rule", () => {
+  it("guards every creator site, and routes the root, by the one rule", () => {
+    // ContextMenuPortal renders only in App (main), but it guards too, so the
+    // invariant is "every site", not "the sites reachable today".
     expect(contains("isPopoutWindow()")).toEqual(
-      expect.arrayContaining(["src/components/composer/Composer.tsx", "src/components/email/ThreadView.tsx"]),
+      expect.arrayContaining([
+        "src/components/composer/Composer.tsx",
+        "src/components/email/ThreadView.tsx",
+        "src/components/ui/ContextMenuPortal.tsx",
+      ]),
     );
     expect(contains("currentWindowKind()")).toContain("src/main.tsx");
     expect(contains("new URLSearchParams(window.location.search)")).not.toContain("src/main.tsx");

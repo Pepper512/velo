@@ -12,7 +12,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
  * URL rule is the fallback outside Tauri (Vite dev server, jsdom tests), where
  * there is no label.
  */
-export type WindowKind = "main" | "thread" | "compose";
+export type WindowKind = "main" | "thread" | "compose" | "unknown";
 
 /** The URL rule a pop-out is opened with: a thread window needs both `thread` and `account`. */
 export function windowKindFromSearch(search: string): WindowKind {
@@ -22,11 +22,17 @@ export function windowKindFromSearch(search: string): WindowKind {
   return "main";
 }
 
-/** The label rule the capability grant is keyed by (`content.json`'s `windows`). */
+/**
+ * The label rule the capability grant is keyed by (`main.json` and
+ * `content.json`'s `windows`). A label that is none of them is `"unknown"`,
+ * never `"main"`: a future window must not inherit main's root or main's
+ * buttons by default (final review L7 on #75).
+ */
 export function windowKindFromLabel(label: string): WindowKind {
+  if (label === "main") return "main";
   if (label.startsWith("thread-")) return "thread";
   if (label.startsWith("compose-")) return "compose";
-  return "main";
+  return "unknown";
 }
 
 /**
@@ -50,7 +56,10 @@ export function currentWindowKind(): WindowKind {
   return windowKindFromSearch(window.location.search);
 }
 
-/** True inside a thread or compose pop-out window. */
+/**
+ * True unless this is the main window — a pop-out, or a window this code does
+ * not know, which fails closed: no button that needs main's grant.
+ */
 export function isPopoutWindow(): boolean {
   return currentWindowKind() !== "main";
 }

@@ -52,11 +52,22 @@ describe("windowKindFromSearch", () => {
 });
 
 describe("windowKindFromLabel", () => {
-  it("matches the globs the content grant is keyed by", () => {
+  it("matches the globs the grants are keyed by, and nothing else is main", () => {
     expect(windowKindFromLabel("main")).toBe("main");
-    expect(windowKindFromLabel("splashscreen")).toBe("main");
     expect(windowKindFromLabel("thread-abc_123")).toBe("thread");
     expect(windowKindFromLabel("compose-1725000000000")).toBe("compose");
+    // A label neither grant names must not inherit main's root or buttons
+    // (final review L7 on #75).
+    expect(windowKindFromLabel("splashscreen")).toBe("unknown");
+    expect(windowKindFromLabel("settings")).toBe("unknown");
+    expect(windowKindFromLabel("thread")).toBe("unknown");
+  });
+
+  it("fails closed for an unknown label: treated as not-main by the gate", () => {
+    setTauriLabel("settings");
+    expect(currentWindowKind()).toBe("unknown");
+    expect(isPopoutWindow()).toBe(true);
+    setTauriLabel(null);
   });
 });
 
