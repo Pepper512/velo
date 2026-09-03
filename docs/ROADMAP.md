@@ -18,7 +18,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 |---|---|
 | Methodology, CI gates, exceptions | Landed (#1–#12). EX-003/005/006/007 open by design |
 | Optimization audit (20 items, P1–P20) | Landed except **P11** (capability split — needs Jim's manual QA). **P19/F-3 landed** (#71, `1b18160`): the phishing interstitial and banner are wired |
-| Dependency audit | A, B, C landed. **PR D** (TypeScript 6→7, Vite 8) and **PR E** (Rust parsers: `mail-parser` 0.11, `async-imap` 0.11, `reqwest` 0.13) not started; both Tier 2, plans needed |
+| Dependency audit | **All landed: A, B, C, D (#83), E (#84 `300f4e7`).** Open from E: `List-Unsubscribe` never persisted on IMAP (both parser versions treat it as an address list); a folded `Authentication-Results` shape truncated; async-imap 0.11.3 sends a LIST pattern bare (Velo only passes `*`); the live Dovecot harness unrun (Docker engine dead); Jim's IMAP dev smoke |
 | IMAP correctness | Move/expunge (#25/#26), session pooling E2 parts 1–2 (#37/#39), **F-5** (#43/#45), **F-4** (#44/#47/#50) landed. E2 part 3 carry list remains; F-4's live Dovecot Done-when has never been run |
 | Bug-fix queue (upstream triage) | **Done.** Every queued item landed (#297 … #281 as #69, `66a9355`); only #278 (macOS signing) remains, "not yet" by decision 6 |
 | Enhancement queue (Superhuman parity) | **Wave 1 started: Auto Reminders landed** (#80, `a7058cb`). 9 items left in 3 waves, 32 days |
@@ -41,7 +41,7 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 |---|---|---|---|
 | 1 | **#297** | **Landed #52 (`64de404`, 2026-09-02).** Rust strips `Bcc`/`Resent-Bcc` after the envelope, fail-closed guard, Sent/Drafts keep it | 1.0 ✓ |
 | 2 | **#240** | **Landed #54 (`b95468e`, 2026-09-02).** One Rust-held connection per transaction, `BEGIN IMMEDIATE`, idle watchdog; `sqlx =0.8.6` direct (approved). Closes #264; #204 unrelated (ledger corrected); #205 re-test. **Also Opus 5's HIGH 2 on #43 — closed.** Task 6 (manual sync check) open | 7.0 ✓ |
-| 3 | #280 | **Landed #56 (`848ccaa`).** Four loopback scope entries (no `*:*`), URLPattern test with an exact allow-list snapshot, connection-test reason shown with credentials redacted, Ollama fetch refuses redirects. Open for Jim: `urlpattern` dev-dep for a plugin-matcher test | 0.5 ✓ |
+| 3 | #280 | **Landed #56 (`848ccaa`).** Four loopback scope entries (no `*:*`), URLPattern test with an exact allow-list snapshot, connection-test reason shown with credentials redacted, Ollama fetch refuses redirects. **Plugin-matcher test landed #85 (`ea18efc`)** with `urlpattern` as a dev-dependency (Jim, 2026-09-03) | 0.5 ✓ |
 | 4 | #241 | **Landed #57 (`51689ef`).** `FETCH_*` constants, three sites parenthesised, source-scanning guard (`imap/fetch_guard.rs`). Reporter's Stalwart re-test open | 0.5 ✓ |
 | 5 | #252/#253 | **Landed #59 (`b3725e7`, 2026-09-03).** Migration 28 (`smtp_username`, encrypted `smtp_password`), one resolver for the form's SMTP test and save, per-field fallback to the IMAP credentials | 2.0 ✓ |
 | 6 | #197 | **Landed #60 (`2d6d52a`, 2026-09-03).** `img-src 'self' data: https:` behind the sanitizer's opt-in; review found and closed the SVG `href` gap in the blocker. Rust proxy stays queued as a privacy enhancement | 0.25 ✓ |
@@ -116,7 +116,7 @@ include both P0 security fixes.
 ## The prompt for the next session
 
 ```
-Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-The PR D and PR E plans are landed as docs (#77, #78) and stop before any code; I decide each in its Approval section. If I have approved one, build it exactly as its spec says (rebase merge, per-commit gates, the packaged-bundle smoke for D, the fixture suite first and the live-harness attempt for E) — no other dependency, and every escape hatch named in the spec stays unused unless I say so. If I have approved neither, continue enhancement wave 1 from docs/ROADMAP.md §4 in order — Auto Reminders landed (#80); next is custom split-inbox tabs from smart labels + Reminders tab + hide-empty, then Instant Intro, then the speed budget with the approved @tanstack/react-virtual — briefs first, Tier 1, one PR per item. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges.
-Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 live Dovecot tests); they are recorded as open. The urlpattern dev-dependency is my decision — ask me before adding it.
+Read HANDOFF.md (tail -30 first, then §1) after `git pull --ff-only`. Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
+Jim's 2026-09-03 decisions are all landed: the queued-send reminder (#82), PR D (#83, six rebase-merged commits), PR E (#84, seven rebase-merged commits) and the urlpattern dev-dependency test (#85). Continue enhancement wave 1 from docs/ROADMAP.md §4 in order — next is custom split-inbox tabs from smart labels + Reminders tab + hide-empty, then Instant Intro, then the speed budget with the approved @tanstack/react-virtual — briefs first, Tier 1, one PR per item. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI, diffs from committed SHAs; verify every finding against source before adopting. You own commits, pushes, PRs and merges. No dependency beyond the ones already approved; ask before any other.
+Do not run the manual checks (P11 QA, F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 and PR E live Dovecot tests, PR E's IMAP dev smoke); they are recorded as open for me.
 ```
