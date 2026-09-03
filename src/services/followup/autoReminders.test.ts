@@ -31,6 +31,8 @@ describe("isExternalSend (REQ-1.2)", () => {
     expect(isExternalSend({ from: "Me <me@acme.com>", recipients: ["Bob <bob@example.com>"], ownAddresses: own })).toBe(true);
     // Bare angle form with no display name.
     expect(isExternalSend({ from: "me@acme.com", recipients: ["<carol@acme.com>"], ownAddresses: own })).toBe(false);
+    // An @ followed by only whitespace is no domain at all: ignored (Grok M1).
+    expect(isExternalSend({ from: "me@acme.com", recipients: ["foo@  "], ownAddresses: own })).toBe(false);
   });
 
   it("is internal when every recipient shares the sender's domain", () => {

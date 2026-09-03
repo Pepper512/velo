@@ -1584,3 +1584,27 @@
   domain allow-lists, checker changes. Gates run here: `tsc` clean, vitest 174 files /
   2321 tests green, `graph:check` and `docs:check` green (test-file counts bumped 173 → 174,
   services 95 → 96). CI is the source of the pass bit. No dependency added.
+- **2026-09-03 — PR #80 (SPEC-AR) review, two legs.** Gemini 3.8 Flash High: CHANGES
+  REQUESTED (2H 3M 2L 2N); Grok 4.6: CHANGES REQUESTED (1H 2M 3L 3N). **Adopted, each verified
+  against source:** the domain rule now compares the **bare address** — reply-all prefills the
+  recipient chips straight from the raw To/Cc headers (`ThreadView.tsx` splits
+  `to_addresses` on commas), so a chip can read `"Alice" <alice@acme.com>` and the old
+  `lastIndexOf("@")` slice returned `acme.com>` (Gemini H1, Grok M1; four new cases plus the
+  empty-domain `foo@  `); the **delay is frozen at Send**, not read when the undo timer fires
+  (Gemini M1); hours are set after every date move in `autoReminderDueAt`, with a DST case
+  asserted (Gemini M2); `setAutoRemindersDays` normalises before state or disk (Gemini L2, Grok
+  L3); a **warn** when the user wanted a reminder but the send failed or was queued offline
+  with no message id (Grok M2, the REQ-1.4 half); the help tip names the setting instead of
+  "3 days" (Grok L1); an IMAP test for the local save throwing — a reply still reports the
+  input thread, a new message none (Grok's missing test). **Declined, each verified:** Gemini
+  H2 / Grok H1 "the existing-reminder guard skips on cancelled or triggered rows" —
+  `getFollowUpForThread` is `… AND status = 'pending' LIMIT 1` (`followUpReminders.ts:45`), so
+  only a pending row is ever returned; Gemini M3 plus-addressing of own aliases — outside the
+  brief's address rule, noted for a later pass; Gemini L1 boot write-back — the same pattern as
+  the `send_and_archive` restore (`App.tsx:256-259`), one write at boot; Grok L2 "dead catch" —
+  the lookup can throw, only the insert is caught inside the scheduler. **Follow-up recorded,
+  not built:** Grok M2's other half — a queued offline send goes out later from the queue
+  processor with no reminder; the brief scoped reminders to immediate sends, so this is Jim's
+  call (same hook as the scheduled-send non-goal). Raw outputs in
+  `docs/reviews/2026-09-03-pr80-auto-reminders-{gemini38,grok}-raw.md`. Fix commits `ab0ec19`
+  and the Grok fix on the same branch; suite 174 files / 2,326 tests.

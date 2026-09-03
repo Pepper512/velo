@@ -746,6 +746,22 @@ describe("ImapSmtpProvider", () => {
       expect(upsertMessage).toHaveBeenCalled();
       spy.mockRestore();
     });
+
+    it("reports the thread only when it knows it if the local save fails: the reply's, none for a new message (SPEC-AR)", async () => {
+      vi.mocked(smtpSendEmail).mockResolvedValue({ success: true, message: "OK" });
+      vi.mocked(upsertMessage).mockRejectedValue(new Error("DB error"));
+      const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+      const reply = await provider.sendMessage(rawBase64Url, "existing-thread-1");
+      expect(reply.threadId).toBe("existing-thread-1");
+
+      const fresh = await provider.sendMessage(rawBase64Url);
+      expect(fresh.id).toMatch(/^imap-sent-/);
+      expect(fresh.threadId).toBeUndefined();
+      // clearAllMocks keeps implementations; drop the rejection for the tests after this one.
+      vi.mocked(upsertMessage).mockReset();
+      spy.mockRestore();
+    });
   });
 
   describe("createDraft", () => {

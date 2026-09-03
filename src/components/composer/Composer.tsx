@@ -339,11 +339,18 @@ export function Composer() {
         const sendResult = await sendEmail(activeAccountId, raw, state.threadId ?? undefined);
 
         // SPEC-AR: automatic follow-up reminder on an external send. It never
-        // touches the send outcome. A queued (offline) send has no message id
-        // yet, so there is nothing to hang a reminder on.
-        if (sendResult.success && autoReminderWanted) {
-          const sent = sendResult.data as { id?: string; threadId?: string } | undefined;
-          if (sent?.id) {
+        // touches the send outcome. A failed send, or a queued (offline) one
+        // with no message id yet, has nothing to hang a reminder on: say so
+        // (REQ-1.4) and set nothing.
+        if (autoReminderWanted) {
+          const sent = sendResult.success
+            ? (sendResult.data as { id?: string; threadId?: string } | undefined)
+            : undefined;
+          if (!sent?.id) {
+            console.warn(
+              "[autoReminders] No sent message id (send failed or was queued); no reminder set",
+            );
+          } else {
             try {
               await scheduleAutoReminder(
                 { getFollowUpForThread, insertFollowUpReminder },
