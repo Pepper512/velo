@@ -3,8 +3,7 @@
 - **Task:** Make the inbox feel instant and idle quietly. Three parts, one brief, one PR,
   three rebase-merged commits each reviewed on its own diff (the PR D/E pattern):
   **SB-1** "Reduce effects" — the existing "Reduce motion" toggle grows to cover the backdrop
-  blurs, hover/press transitions and list stagger, defaults **on** for Linux, and the
-  follow-up checker stops reloading the list every minute for nothing; **SB-2** a thread opens
+  blurs, hover/press transitions and list stagger, and defaults **on** for Linux; **SB-2** a thread opens
   with its messages already in hand — a small stale-while-revalidate cache of
   `getMessagesForThread` results, warmed for the neighbours of the selected thread; **SB-3**
   the thread list renders only the rows in view with `@tanstack/react-virtual`.
@@ -85,11 +84,13 @@ tabs or the reading-pane layouts changes for the user.
 8. **Timers (#232's "audit intervals").** Six one-minute checkers from one factory that runs
    the check immediately then every 60 s (`backgroundCheckers.ts:26-30`): sync
    (`syncManager.ts:307`), snooze, scheduled send, follow-up, bundles; queue every 30 s;
-   attachments every 15 min; updater every 4 h. **Two dispatch `velo-sync-done`:** snooze only
-   when it un-snoozed something (`snoozeManager.ts:59-86`, inside the `if`); **follow-up
-   whenever any reminder is pending, changed or not** (`followupManager.ts:15-16` returns only
-   on *no* reminders; `:50` dispatches unconditionally after the loop). A user with one pending
-   reminder gets a full list reload every minute from that alone.
+   attachments every 15 min; updater every 4 h. **Three dispatch `velo-sync-done`:** sync
+   after every run; snooze only when it un-snoozed something (`snoozeManager.ts:59-86`, inside
+   the `if`); follow-up only after its loop, and its query is **due-only**
+   (`followUpReminders.ts:55-62`, `remind_at <= now`), so every reminder it touches is
+   cancelled or triggered — a warranted reload. (A first draft of this brief read the follow-up
+   dispatch as unconditional; the query says otherwise — §6 of the handoff, again.) The
+   per-minute reload that remains is sync's own, by design; see *Not doing*.
 9. **Tests.** `EmailList` has none; `threadStore.test.ts`, `ThreadCard.test.tsx` (mocks
    `useDraggable`, the stores and the router hook), `CategoryTabs.test.tsx:6-15` (the
    jsdom stubs for `ResizeObserver` and `scrollIntoView`), `DndProvider.test.ts` (pure).
@@ -116,8 +117,6 @@ tabs or the reading-pane layouts changes for the user.
     THE SYSTEM SHALL apply the toggle **on** for the session without persisting it (the user's
     first touch of the toggle persists). Any other platform, or a failed platform read (the
     pop-out windows have no `os` grant), defaults **off** as today.
-  - REQ-1.4 The follow-up checker SHALL dispatch `velo-sync-done` only when it cancelled or
-    triggered at least one reminder.
 - **REQ-2 (SB-2) Open instantly.**
   - REQ-2.1 WHEN a thread's messages are cached THE SYSTEM SHALL render them on the first
     paint of `ThreadView` with no skeleton, then re-query the database and replace them if the
@@ -151,7 +150,8 @@ tabs or the reading-pane layouts changes for the user.
 ## Not doing
 
 - **Consolidating the six one-minute timers** — the audit (*What exists* 8) found the cost is
-  not the timers but the reloads they trigger; REQ-1.4 removes the needless one. Recorded.
+  not the timers but the reload sync's own `velo-sync-done` triggers every minute; the
+  checkers' dispatches are all conditional already. Recorded.
 - **The `getThreadLabelIds` N+1 on every page load** (`EmailList.tsx:270-292`) — a real cost,
   its own small PR (one `IN (…)` query). Recorded.
 - **"Select all" selecting the store while the count shows the filtered list**
@@ -177,7 +177,6 @@ tabs or the reading-pane layouts changes for the user.
   })` → `{ value, persisted }` per REQ-1.3; `readPlatform()` wraps the dynamic import in a
   try/catch → `"linux" | "macos" | "windows" | "unknown"`. `App.tsx:291-295` calls it.
 - `SettingsPage.tsx:550-555`: label and description.
-- `followupManager.ts`: count changes; dispatch only if `> 0`.
 - Help: the Appearance entry that mentions "Reduce motion" (`document-feature` skill).
 
 **SB-2.**
@@ -231,7 +230,7 @@ tabs or the reading-pane layouts changes for the user.
 
 ## Tasks (in commit order; each commit independently revertible)
 - [ ] **SB-1:** `reduceEffects.test.ts` → `reduceEffects.ts`; CSS; Settings copy; App restore;
-  `followupManager.test.ts` (dispatch only on change) → the fix; Help. — REQ-1
+  Help. — REQ-1
 - [ ] **SB-2:** `messageCache.test.ts` (LRU, SWR loader, clear-on-sync, sequential prefetch
   with cancel) → `messageCache.ts`; `neighbours.test.ts` → `neighbours.ts`; `ThreadView` +
   `EmailList` wiring. — REQ-2
