@@ -54,10 +54,13 @@ macOS signing, waits on a decision); the Superhuman-parity enhancements have not
 | 13 | #281 | **Landed #69 (`66a9355`, 2026-09-03).** Paste a screenshot into the composer: type allow-list + magic-byte sniff, 5 MiB cap, shipped as the existing CID part | 0.5 ✓ |
 
 ### 3. Carried hardening items
-- **E2 part 3** (#39's carry list): redundant `Arc` + `logout_arc`'s `try_unwrap` skipping LOGOUT,
-  evictions without LOGOUT, `bump_credential_version` by ident regardless of version, the
-  cross-window invalidation race, the unvalidated session-id wrapper, Done-when 9 and the live
-  halves of 2/10 (Dovecot harness). Per-window session binding stays undone (ADR-003).
+- **E2 part 3** — **landed #73 (`1116348`, 2026-09-03)**: the pool owns its sessions (no `Arc`,
+  no conditional unwrap), LOGOUT on every clean eviction under a 3 s budget, `StaleCredential`
+  and `BadId` refusals at `insert`, session-id shape, the `velo-imap-sessions-invalidated` event
+  with nonce, a frontend invalidation epoch with a once-only retry, pending invalidations by
+  identity. Four review passes. Done-when 9 and the live half of 10 are `#[ignore]` Dovecot
+  tests — **not run** (Docker down); Done-when 2 stays manual. Per-window session binding stays
+  undone (ADR-003) — that is P11.
 - **PR D** (toolchain majors) and **PR E** (Rust parsers) — plans to write, Jim approves.
 - **P11** capability split — brief exists; needs Jim's 5-step manual QA.
 - **P19/F-3** — **landed #71 (`1b18160`)**: `LinkConfirmDialog` and `PhishingBanner` wired on the email link path.
@@ -107,6 +110,6 @@ include both P0 security fixes.
 
 ```
 Read HANDOFF.md (tail -30 first, then §1). Verify: git worktree list, gh pr list, gh run list --branch main --limit 2, ListAgents.
-The bug-fix queue is done (only #278 stays "not yet") and F-3/P19 landed as #71. Take E2 part 3 — the IMAP session-pool carry list from PR #39 (a draft spec is started at docs/briefs/2026-09-03-e2-part3-pool-carry.md): the redundant Arc<Mutex> removed together with logout_arc's try_unwrap that silently skips LOGOUT (commands.rs:112), evictions that drop a connection without LOGOUT, bump_credential_version evicting by ident regardless of version (pool.rs:173), the cross-window invalidation race (finding 3 on #39), the unvalidated session-id wrapper (sessionManager.ts); Done-when 9 (folder isolation) and the live halves of 2/10 need the Dovecot harness and stay manual. Tier 2 (Rust IMAP pool): finish the spec from the vault template, plan with threat pass and rollback before code, TDD on the pool's generic session type (no network), Gemini 3.7 via agy AND a second leg (Grok 4.6 via the grok CLI when its ~12 minutes are affordable, otherwise gemini-3.8-flash-high) — diffs from committed SHAs, fake credentials never in literal form, rebase before expecting CI (a conflicting PR gets no run), verify every finding before adopting, merge on green — you own commits, pushes, PRs and merges. Then P11 (capability split, needs my 5-step manual QA) and the PR D / PR E plans.
-Do not run the manual checks (F-4 live Done-when, #240 Task 6) unless the app can be driven; they are recorded as open. The urlpattern dev-dependency for SPEC-280's test oracle is my decision — ask me before adding it.
+E2 part 3 landed as #73 (1116348); the IMAP correctness line is complete for now. Take P11 — the capability split (docs/briefs/2026-09-01-batch-g-p11-capabilities.md): re-read its two blockers, re-grep every citation (the brief is pinned at 1ab7518), then write the plan with threat pass and rollback into the brief and open the PR with the plan before any code. Tier 2 (src-tauri/capabilities/*). TDD where a test can reach it; the second blocker is my 5-step manual QA, which you record as open, not done. Review legs: Gemini 3.8 Flash High via agy AND Grok 4.6 via the grok CLI (diffs from committed SHAs; if a review makes you write new logic, run a pass on the delta); verify every finding before adopting; merge on green — you own commits, pushes, PRs and merges. Then the PR D / PR E plans (toolchain and Rust-parser majors, Tier 2, plans only, for my approval).
+Do not run the manual checks (F-4 live Done-when, #240 Task 6, E2 Done-when 2, the E2 part 3 live Dovecot tests) unless the harness or the app can be driven; they are recorded as open. The urlpattern dev-dependency is my decision — ask me before adding it.
 ```
