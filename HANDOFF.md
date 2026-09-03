@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `ea18efc`** (#85, SPEC-280-U — the last commit on `main` that changed `src/` or
-  `src-tauri/`). **The only SHA this file pins.** `git log --oneline ea18efc..origin/main` —
+- **Code pin: `3b63d73`** (#88, SPEC-FUR — the last commit on `main` that changed `src/` or
+  `src-tauri/`). **The only SHA this file pins.** `git log --oneline 3b63d73..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
@@ -39,7 +39,7 @@
     is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
     `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
     reviewer diff; `pool.rs` is clean and safe to Edit.
-- **State on `main` @ `ea18efc`:** frontend **174** files / **2,341** tests · Rust **206** +
+- **State on `main` @ `3b63d73`:** frontend **178** files / **2,378** tests · Rust **206** +
   4 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
   import cycles. **Dependencies changed this session, each on Jim's explicit approval:** the
   PR D and PR E majors (TypeScript 7.0.2, Vite 8.2.2, plugin-react 6.1.1; mail-parser 0.11.8,
@@ -53,9 +53,11 @@
 **The full ordered plan is `docs/ROADMAP.md`**: the bug-fix queue is done except #278 ("not
 yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), P11 landed (#75), **the dependency audit
 is complete — PR D (#83) and PR E (#84) built from their approved plans**, the queued-send
-reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 has started
-with Auto Reminders (#80). **Next in §4 of the roadmap: custom split-inbox tabs** (brief first,
-Tier 1), then Instant Intro, then the speed budget.
+reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 is two items
+in: Auto Reminders (#80) and **custom split-inbox tabs (#87)**, with the follow-up reminder
+insert repaired on the way (#88 — it had never worked since upstream's migration v6). **Next in
+§4 of the roadmap: Instant Intro** (brief first, Tier 1), then the speed budget, then the Tier 2
+partial-unique-index migration from #88.
 
 **SPEC-AR landed as #80 (`a7058cb`) — auto reminders on external sends.** Brief
 `docs/briefs/2026-09-03-auto-reminders.md` (Tier 1, committed before code). Sending to an
@@ -201,6 +203,8 @@ merged #73 under the standing rule.
 
 | PR | Merged | What |
 |---|---|---|
+| #88 `3b63d73` | build seat | **SPEC-FUR.** Follow-up reminders could never be inserted (upstream's `ON CONFLICT` upsert aimed at a plain index); select-then-update-or-insert in one pinned transaction, on the SQLite harness; sibling audit of all 19 ON CONFLICT statements clean; partial unique index recorded as the Tier 2 follow-up |
+| #87 `48acaf7` | build seat | **SPEC-SIT.** Custom split-inbox tabs: a pure module with a Zod schema at the settings boundary, category/label/Reminders tabs, hide-when-empty, a requested tab never hidden, the strip by visible tab, the list by tab kind, a Settings editor; 25 pure + SQLite cases; two legs, both Highs on cross-account labels declined against the label store |
 | #85 `ea18efc` | build seat | **SPEC-280-U.** The http scope matched by tauri-plugin-http's own matcher: both capability files, the exact allow list, the accepted and refused URL tables, with `urlpattern` 0.3.0 as a dev-dependency (Jim's decision 4; normal tree unchanged) |
 | #84 `300f4e7` | build seat | **PR E.** mail-parser 0.11.8 (fixture suite first; two header lookups fixed — a named REQ-1.1 deviation; the `full_encoding` premise corrected to Shift_JIS), async-imap 0.11.3 (duplex wire test: names quoted once, LIST pattern sent bare), socket2 0.6.5, reqwest 0.13.4 with native-tls pinned on three builders and a form-body mock test; per-commit CI re-run where the concurrency group had cancelled it; Docker engine dead so the live harness stays open |
 | #83 `675cc27` | build seat | **PR D.** TypeScript 6.0.3 → 7.0.2 (native, `tsc` 3.2 s → 0.4 s), Vite 8.2.2 + plugin-react 6.1.1, browser floor pinned to Vite 7's, `check-dist` in the build; packaged debug bundle smoke done by the agent through the accessibility tree; Gemini's "Vite 7 default is modules" declined against vite@7.3.6's shipped constant |
@@ -261,9 +265,9 @@ merge can still be wrong — including ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `ea18efc`** (#85,
-SPEC-280-U; the only SHA pinned — `git log --oneline ea18efc..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 174 files / 2,341 tests / Rust 206 + 4 ignored · 28 migrations ·
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `3b63d73`** (#88,
+SPEC-FUR; the only SHA pinned — `git log --oneline 3b63d73..origin/main` shows what is above it) ·
+**no open PRs** · CI green · 178 files / 2,378 tests / Rust 206 + 4 ignored · 28 migrations ·
 npm audit 0 · no dependency added.
 
 **Jim confirmed those approvals in-session on 2026-09-03 and the build seat ran his prompt to the
@@ -272,11 +276,15 @@ commits)** and **SPEC-280-U (#85, the `urlpattern` dev-dependency test)** are on
 Approval lines are filled in. Toolchain now: TypeScript 7.0.2 (native), Vite 8.2.2, mail-parser
 0.11.8, async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4 with native-tls pinned.
 
-**Next action: enhancement wave 1 item 2 — custom split-inbox tabs from smart labels + a
-Reminders tab + hide-empty** (ROADMAP §4), brief first, Tier 1, one PR per item; then Instant
-Intro, then the speed budget with the approved `@tanstack/react-virtual`. Jim's whole 2026-09-03
-queue is on `main`: #82 (queued-send reminders), #83 (PR D), #84 (PR E), #85 (`urlpattern` scope
-test). **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6 via the `grok` CLI;
+**Next action: enhancement wave 1 item 3 — Instant Intro** (reply-all, introducer → Bcc; ROADMAP
+§4), brief first, Tier 1, one PR per item; then the speed budget with the approved
+`@tanstack/react-virtual`; then the Tier 2 follow-up from #88 (a partial unique index on
+`follow_up_reminders`, a migration). Landed since the last pin: **#87 custom split-inbox tabs**
+(`48acaf7`: any label, a Reminders tab, hide-when-empty, a Settings editor) and **#88** (`3b63d73`) —
+the follow-up reminder insert had **never worked** (upstream's migration v6 gave its `ON CONFLICT`
+target a plain index; SQLite refuses it at prepare time), so every manual and automatic reminder
+since February failed silently; fixed as select-then-update-or-insert in one pinned
+transaction. Jim's whole 2026-09-03 queue is on `main`: #82, #83 (PR D), #84 (PR E), #85. **Review legs:** Gemini **3.8 Flash High** via `agy` **and** Grok 4.6 via the `grok` CLI;
 diffs from committed SHAs; verify every finding against source before adopting — today both
 legs' Highs on #80 were wrong, Gemini's Vite-7-default claim was wrong, and Grok's LIST-quoting
 claim was the opposite of the measured bytes. Open for Jim: **P11's five-step QA**; PR E's IMAP
