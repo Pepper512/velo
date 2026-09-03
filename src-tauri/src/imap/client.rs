@@ -1934,14 +1934,17 @@ fn parse_message(
 
     // List-Unsubscribe headers
     let list_unsubscribe = extract_header_text(message.header(mail_parser::HeaderName::ListUnsubscribe));
-    let list_unsubscribe_post = extract_header_text(
-        message.header(mail_parser::HeaderName::Other("List-Unsubscribe-Post".into())),
-    );
+    // mail-parser 0.11 knows both names (`ListUnsubscribePost`,
+    // `AuthenticationResults`) and its `HeaderName` equality never matches an
+    // `Other(..)` against a known variant, so the pre-0.11 `Other("…")` lookups
+    // returned nothing — the REQ-0 suite caught it. PR E, named deviation from
+    // REQ-1.1 ("no other source change"): two lookups, no logic change.
+    let list_unsubscribe_post =
+        extract_header_text(message.header(mail_parser::HeaderName::ListUnsubscribePost));
 
     // Authentication-Results header
-    let auth_results = extract_header_text(
-        message.header(mail_parser::HeaderName::Other("Authentication-Results".into())),
-    );
+    let auth_results =
+        extract_header_text(message.header(mail_parser::HeaderName::AuthenticationResults));
 
     // Build a map from mail-parser part index → IMAP MIME section path.
     // IMAP numbers children of multipart containers starting at 1 (e.g. "1", "2", "1.2.3").
@@ -1961,6 +1964,10 @@ fn parse_message(
         .attachments
         .iter()
         .filter_map(|&part_idx| {
+            // mail-parser 0.11 hands out `u32` part ids; the section map and
+            // `parts` are indexed by `usize`. An index the parser produced can
+            // always be widened, so a failure here is impossible, not an error.
+            let part_idx = usize::try_from(part_idx).ok()?;
             let att = message.parts.get(part_idx)?;
             let section = match section_map.get(&part_idx) {
                 Some(s) => s.clone(),
@@ -2048,7 +2055,10 @@ fn build_imap_section_map(message: &mail_parser::Message) -> std::collections::H
                     } else {
                         format!("{}.{}", prefix, i + 1)
                     };
-                    walk(parts, child_idx, &section, map);
+                    // `u32` child id → `usize` index (mail-parser 0.11); see above.
+                    if let Ok(child_idx) = usize::try_from(child_idx) {
+                        walk(parts, child_idx, &section, map);
+                    }
                 }
             } else {
                 // Leaf part — use the section path as-is
