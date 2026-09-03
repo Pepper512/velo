@@ -135,7 +135,8 @@ const MAX_INVALIDATION_NONCE_LEN: usize = 64;
 ///
 /// Called on password change (`clearConfigCache`) and on OAuth refresh failure,
 /// so a rotated credential is never served from the pool. Emits
-/// [`SESSIONS_INVALIDATED_EVENT`] to every window once the LOGOUTs are done.
+/// [`SESSIONS_INVALIDATED_EVENT`] to every window as soon as the map is clear,
+/// *before* the evicted sessions are logged out.
 #[tauri::command]
 pub async fn imap_sessions_invalidate(
     app: tauri::AppHandle,

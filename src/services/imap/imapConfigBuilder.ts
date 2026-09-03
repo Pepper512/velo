@@ -36,7 +36,9 @@ export function imapIdentityOf(account: DbAccount): { username: string; host: st
   if (!account.imap_host) {
     throw new Error(`Account ${account.id} has no IMAP host configured`);
   }
-  return { username: account.imap_username || account.email, host: account.imap_host };
+  // Hostnames are case-insensitive (RFC 4343); the pool keys on the string,
+  // so one spelling everywhere (review, Gemini 3.8 final N5).
+  return { username: account.imap_username || account.email, host: account.imap_host.toLowerCase() };
 }
 
 /**

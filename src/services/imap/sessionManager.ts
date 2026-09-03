@@ -138,9 +138,10 @@ const sessions = new Map<CacheKey, SessionId>();
 const accountIdents = new Map<string, { username: string; host: string }>();
 
 /**
- * Invalidations this window has fired and not yet heard back on, by account.
+ * Invalidations this window has fired and not yet heard back on, keyed by
+ * IMAP identity (`username::host`), which is what Rust evicts by.
  *
- * An open for the same account waits on this first (REQ-2.4): otherwise the
+ * An open on the same identity waits on this first (REQ-2.4): otherwise the
  * open could read the generation the bump is about to retire, and Rust would
  * refuse the session it just paid a login for.
  */
@@ -179,26 +180,36 @@ async function openSession(accountId: string, kind: SessionKind): Promise<Sessio
   // A failed invalidation must not block the open — it only costs a stale
   // session the reaper will take — so the wait swallows the rejection (the
   // invalidation's own caller still sees it), and it is bounded.
-  const pending = pendingInvalidations.get(accountId);
+  const account: DbAccount | null = await getAccount(accountId);
+  if (!account) throw new Error(`Account ${accountId} not found`);
+
+  // Pending invalidations are keyed by IMAP identity, because that is what
+  // Rust evicts by: a sibling account on the same username and host waits
+  // too (review, Gemini 3.8 final M3).
+  const pending = pendingInvalidations.get(identityKey(imapIdentityOf(account)));
   if (pending) {
     const timedOut = await Promise.race([
       pending.promise.catch(() => undefined).then(() => false),
       delay(PENDING_INVALIDATION_BUDGET_MS).then(() => true),
     ]);
     if (timedOut) {
-      // Still running in Rust. Its broadcast, when it finally comes, must
-      // count as foreign, so the epoch moves and an open that raced it is
-      // redone rather than cached dead (review, Gemini 3.8 F4).
+      // Rust broadcasts right after the bump, before the LOGOUTs, so a wait
+      // this long normally means the LOGOUTs are slow and the echo has
+      // already been consumed — harmless. If the command has not even run
+      // yet (IPC stalled), its echo is still to come and must then count as
+      // foreign, so the epoch moves and an open that raced it is redone
+      // rather than cached dead (review, Gemini 3.8 F4 and final L4).
       ownInvalidationNonces.delete(pending.nonce);
     }
   }
 
-  const account: DbAccount | null = await getAccount(accountId);
-  if (!account) throw new Error(`Account ${accountId} not found`);
-
   const id = await openAgainstCurrentCredential(accountId, account, 0);
   sessions.set(cacheKey(accountId, kind), id);
   return id;
+}
+
+function identityKey(ident: { username: string; host: string }): string {
+  return `${ident.username}::${ident.host}`;
 }
 
 /**
@@ -224,6 +235,9 @@ async function openAgainstCurrentCredential(
   accountIdents.set(accountId, imapIdentityOf(account));
   const epoch = epochOf(accountId);
   const record = (await getAccount(accountId)) ?? account;
+  // The row is the truth for the identity too, and the retry carries it
+  // forward rather than the snapshot (review, Gemini 3.8 final M2).
+  accountIdents.set(accountId, imapIdentityOf(record));
 
   // Always through the fresh-token builder (Decision 3): a pooled session may
   // outlive the access token that opened it, but it must never be *opened*
@@ -235,7 +249,7 @@ async function openAgainstCurrentCredential(
     id = await imapSessionOpen(config);
   } catch (err) {
     if (!isPoolError(err, STALE_CREDENTIAL) || attempt > 0) throw err;
-    return openAgainstCurrentCredential(accountId, account, attempt + 1);
+    return openAgainstCurrentCredential(accountId, record, attempt + 1);
   }
 
   if (epochOf(accountId) !== epoch) {
@@ -244,7 +258,7 @@ async function openAgainstCurrentCredential(
     // (Rust logs it out) rather than cache it.
     void imapSessionClose(id).catch(() => undefined);
     if (attempt > 0) throw new Error(STALE_CREDENTIAL);
-    return openAgainstCurrentCredential(accountId, account, attempt + 1);
+    return openAgainstCurrentCredential(accountId, record, attempt + 1);
   }
 
   return id;
@@ -450,6 +464,7 @@ export async function invalidateAccountCredentials(accountId: string): Promise<v
 
   const nonce = newInvalidationNonce();
   ownInvalidationNonces.add(nonce);
+  const key = identityKey(ident);
   const promise = imapSessionsInvalidate(ident.username, ident.host, nonce)
     .catch((err: unknown) => {
       // No broadcast will come for this nonce; do not keep waiting for it.
@@ -457,11 +472,11 @@ export async function invalidateAccountCredentials(accountId: string): Promise<v
       throw err;
     })
     .finally(() => {
-      if (pendingInvalidations.get(accountId)?.nonce === nonce) {
-        pendingInvalidations.delete(accountId);
+      if (pendingInvalidations.get(key)?.nonce === nonce) {
+        pendingInvalidations.delete(key);
       }
     });
-  pendingInvalidations.set(accountId, { promise, nonce });
+  pendingInvalidations.set(key, { promise, nonce });
   await promise;
 }
 

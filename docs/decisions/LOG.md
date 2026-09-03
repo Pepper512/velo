@@ -1355,3 +1355,22 @@
   seen H2; a test with the build held open now does. **Jim, mid-review: the Gemini leg is
   3.8 Flash High from here on**, not 3.7 — recorded in memory; the final full-diff pass on
   this PR runs on it. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-delta-raw.md`.
+- **2026-09-03 — PR #73 (E2 part 3) review, fourth pass: the whole diff at `3dda5d6`
+  on Gemini 3.8 Flash High.** CHANGES REQUESTED (1H 2M 1L 1N). **Declined, with the
+  reason verified:** H1 claimed `Instant::duration_since` in `reap` panics when a worker
+  stamps `last_used` between the `Instant::now()` and the lock — it has been saturating,
+  not panicking, since Rust 1.60 (the crate's MSRV is 1.89, CI-checked), and the line is
+  #37's, untouched by this PR. **Adopted:** M2 — the retry carried the account snapshot,
+  not the re-read row, and re-stamped the identity from the snapshot: the row is now the
+  truth for the identity and is what the retry carries. M3 — pending invalidations were
+  keyed by account id while Rust evicts by identity, so a sibling account on the same
+  username and host did not wait and could cache an id the bump had just evicted (dead,
+  not stale — one `NoSuchSession`): keyed by identity now, and the open looks up by the
+  account's identity (test). L4 — the Rust doc comment still said the event fires "once the
+  LOGOUTs are done" (stale since Grok L4); corrected, and the frontend's timeout comment now
+  says plainly that a late echo can only come from a command that has not run yet. N5 —
+  hostnames are case-insensitive (RFC 4343) and the pool keys on the string:
+  `imapIdentityOf` lower-cases the host, which flows into the config too, so Rust sees one
+  spelling. Raw output in `docs/reviews/2026-09-03-pr73-gemini38-final-raw.md`. Four passes
+  on this PR; the reviewers stopped finding new interleavings at the identity edge cases,
+  which is where a fifth pass would look.

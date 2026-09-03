@@ -468,6 +468,27 @@ describe("an open waits for this window's pending invalidation (SPEC-E2-3 REQ-2.
     );
   });
 
+  it("makes a sibling account on the same identity wait too (Gemini 3.8 final M3)", async () => {
+    // Rust evicts by identity, so acc-2's open must not slip in ahead of
+    // acc-1's bump and get evicted by it.
+    await withSession("acc-1", "sync", {}, async (id) => id);
+
+    let settleInvalidate!: () => void;
+    mockInvalidate.mockImplementation(
+      () => new Promise<void>((resolve) => (settleInvalidate = resolve)),
+    );
+    void invalidateAccountCredentials("acc-1");
+
+    const opened = withSession("acc-2", "sync", {}, async (id) => id);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockOpen).toHaveBeenCalledTimes(1);
+
+    settleInvalidate();
+    expect(await opened).toBe("session-2");
+  });
+
   it("stops waiting after its budget when the invalidation never answers (Grok 9)", async () => {
     vi.useFakeTimers();
     try {
