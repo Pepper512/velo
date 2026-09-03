@@ -1897,3 +1897,25 @@
   so a display-name chip (`Alias <alias@acme.com>`) never matches an alias and the
   default/primary fallback answers instead — the same for Reply All today; recorded, not this
   PR's. Raw output in `docs/reviews/2026-09-03-pr90-instant-intro-grok-raw.md`.
+- **2026-09-03 — PR #90 (SPEC-II) follow-up pass on the fix delta (`be1fb84..b577f9a`), two
+  legs.** Gemini 3.8 Flash High: CHANGES REQUESTED (2M 1L 1N); Grok 4.6: CHANGES REQUESTED
+  (2M 1L 2N). *Review the fix, not just the change* held again: both legs found the same two
+  holes in the first round's fixes. **Adopted, both legs — the account-switch tear** (Gemini
+  F-02, Grok F-01): resetting the alias list inside the effect left one render with the new
+  account's email beside the old account's aliases; the list is now stored *with the account
+  id it was loaded for* and read as unknown whenever that id differs from the active one — a
+  reset in render, not after paint. **Adopted, both legs — the key path's own guard** (Gemini
+  F-01/F-03, Grok F-02/F-03): the handler still used `reply_to ?? from_address` for the no-reply
+  test (blank `reply_to` slipped through) and did not gate on the reason the button shows; the
+  no-reply rule moved into `instantIntroUnavailableReason` (judged on the reply target after
+  the blank fall-through, tested), and the handler refuses whenever that reason is non-null —
+  one rule for the key and the button. Grok's remark that the delta "does not show
+  `buildInstantIntro` rejecting own-from" is answered outside the delta (it does, at
+  `own.has(introducer)`); the gate makes the agreement explicit anyway. **Declined — Gemini
+  N F-04** (the primary address may be missing from the alias table, so From could resolve to
+  a secondary alias): `composerOptionsForIntro` resolves exactly as the composer's own
+  reply-all path does (`Composer.tsx:216-223`, the mapped aliases only); parity, recorded.
+  **Notes — Grok N F-04/F-05** (the composer's effect and the button's disable are outside the
+  delta): verified earlier (`Composer.tsx:216`) and in `ActionBar.tsx` (`disabled={noReply ||
+  introUnavailableReason !== null}`). Raw outputs in
+  `docs/reviews/2026-09-03-pr90-instant-intro-delta-{gemini38,grok}-raw.md`.

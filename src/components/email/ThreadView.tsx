@@ -68,18 +68,20 @@ export function ThreadView({ thread }: ThreadViewProps) {
   const accounts = useAccountStore((s) => s.accounts);
   const activeAccount = accounts.find((a) => a.id === activeAccountId);
   // SPEC-II: the account's own addresses (email + send-as aliases) decide who
-  // stays on an intro; loaded once per account. `null` = not loaded yet, so
-  // the intro never runs on a half-known address list (Gemini F-02).
-  const [aliases, setAliases] = useState<SendAsAlias[] | null>(null);
+  // stays on an intro; loaded once per account. The list is keyed by the
+  // account it was loaded for, so `aliases` is `null` (not known) on first
+  // render and on the render right after an account switch — the intro never
+  // runs on a half-known or another account's address list (Gemini F-02).
+  const [aliasState, setAliasState] = useState<{ accountId: string; list: SendAsAlias[] } | null>(null);
   useEffect(() => {
-    setAliases(null);
     if (!activeAccountId) return;
     let cancelled = false;
     getAliasesForAccount(activeAccountId)
-      .then((rows) => { if (!cancelled) setAliases(rows.map(mapDbAlias)); })
-      .catch(() => { if (!cancelled) setAliases([]); });
+      .then((rows) => { if (!cancelled) setAliasState({ accountId: activeAccountId, list: rows.map(mapDbAlias) }); })
+      .catch(() => { if (!cancelled) setAliasState({ accountId: activeAccountId, list: [] }); });
     return () => { cancelled = true; };
   }, [activeAccountId]);
+  const aliases = aliasState && aliasState.accountId === activeAccountId ? aliasState.list : null;
   const contactSidebarVisible = useUIStore((s) => s.contactSidebarVisible);
   const toggleContactSidebar = useUIStore((s) => s.toggleContactSidebar);
   const taskSidebarVisible = useUIStore((s) => s.taskSidebarVisible);
@@ -205,11 +207,10 @@ export function ThreadView({ thread }: ThreadViewProps) {
     [lastMessage, ownAddresses],
   );
   const handleInstantIntro = useCallback(() => {
-    if (!lastMessage || !instantIntro) return;
-    // The key path has no disabled button in front of it.
-    if (isNoReplyAddress(lastMessage.reply_to ?? lastMessage.from_address)) return;
+    // The key path has no disabled button in front of it: same rule as the button.
+    if (!lastMessage || !instantIntro || introUnavailableReason !== null) return;
     openComposer(composerOptionsForIntro(lastMessage, instantIntro, buildQuote(lastMessage), aliases ?? []));
-  }, [lastMessage, instantIntro, aliases, openComposer]);
+  }, [lastMessage, instantIntro, introUnavailableReason, aliases, openComposer]);
 
   useEffect(() => {
     window.addEventListener("velo-instant-intro", handleInstantIntro);

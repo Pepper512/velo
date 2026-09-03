@@ -144,6 +144,12 @@ describe("instantIntroUnavailableReason (REQ-1.3, Gemini L F-03)", () => {
   it("names the empty introduction", () => {
     expect(instantIntroUnavailableReason(msg({ to_addresses: "me@acme.com" }), me)).toBe("Nobody to introduce you to");
   });
+
+  it("names a sender that does not accept replies, judged on the reply target after blank fall-through (Gemini follow-up F-01/F-03)", () => {
+    expect(instantIntroUnavailableReason(msg({ from_address: "no-reply@intro.io" }), me)).toBe("This sender does not accept replies");
+    expect(instantIntroUnavailableReason(msg({ from_address: "no-reply@intro.io", reply_to: "  " }), me)).toBe("This sender does not accept replies");
+    expect(instantIntroUnavailableReason(msg({ from_address: "no-reply@intro.io", reply_to: "alice@intro.io" }), me)).toBeNull();
+  });
 });
 
 describe("buildInstantIntro (REQ-1, REQ-2)", () => {

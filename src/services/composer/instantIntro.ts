@@ -14,6 +14,7 @@ import type { ComposerState } from "@/stores/composerStore";
 import { bareAddress } from "@/utils/emailUtils";
 import { escapeHtml } from "@/utils/sanitize";
 import { resolveFromAddress } from "@/utils/resolveFromAddress";
+import { isNoReplyAddress } from "@/utils/noReply";
 
 /** The message fields the rule reads. */
 export type IntroSource = Pick<
@@ -127,6 +128,7 @@ export function composerOptionsForIntro(
 export function instantIntroUnavailableReason(message: IntroSource, ownAddresses: string[]): string | null {
   const target = replyTarget(message);
   if (!target) return "No sender address to move to Bcc";
+  if (isNoReplyAddress(target)) return "This sender does not accept replies";
   const own = new Set(ownAddresses.map(bareAddress));
   if (own.has(bareAddress(target))) return "The last message is your own";
   return buildInstantIntro(message, ownAddresses) ? null : "Nobody to introduce you to";
