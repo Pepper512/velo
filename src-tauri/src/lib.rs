@@ -8,6 +8,9 @@ use tauri_plugin_autostart::MacosLauncher;
 
 mod ai_fetch;
 mod commands;
+/// SPEC-280-U: the http scope matched by the plugin's own matcher — test-only.
+#[cfg(test)]
+mod http_scope_matcher;
 mod connection_tests;
 mod db;
 mod imap;

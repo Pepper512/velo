@@ -6722,6 +6722,7 @@ dependencies = [
  "tokio",
  "tokio-native-tls",
  "tray-item",
+ "urlpattern",
  "utf7-imap",
  "windows 0.58.0",
 ]
