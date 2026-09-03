@@ -36,7 +36,9 @@ mod tests {
             while let Ok(Some(line)) = lines.next_line().await {
                 seen_task.lock().unwrap().push(line.clone());
                 let tag = line.split(' ').next().unwrap_or("*").to_string();
-                let is_logout = line.contains(" LOGOUT");
+                // The command token, not a substring: a mailbox named
+                // "Test LOGOUT" must not end the script (Gemini L1 on #84).
+                let is_logout = line.split_whitespace().nth(1) == Some("LOGOUT");
                 if is_logout {
                     write_half.write_all(b"* BYE\r\n").await.unwrap();
                 }
