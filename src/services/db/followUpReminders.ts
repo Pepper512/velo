@@ -18,12 +18,23 @@ export async function insertFollowUpReminder(
   remindAt: number,
 ): Promise<void> {
   const db = await getDb();
+  // SPEC-FUR: one pending reminder per thread, replaced when set again. The
+  // original `INSERT … ON CONFLICT(account_id, thread_id)` never worked —
+  // SQLite refuses an ON CONFLICT target without a unique index, and migration
+  // v6 created a plain one — so an UPDATE of the pending row comes first and
+  // the INSERT only when nothing was pending. Cancelled and triggered rows are
+  // history and are left alone.
+  const updated = await db.execute(
+    `UPDATE follow_up_reminders
+     SET message_id = $1, remind_at = $2
+     WHERE account_id = $3 AND thread_id = $4 AND status = 'pending'`,
+    [messageId, remindAt, accountId, threadId],
+  );
+  if (updated.rowsAffected > 0) return;
   const id = crypto.randomUUID();
   await db.execute(
     `INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
-     VALUES ($1, $2, $3, $4, $5, 'pending')
-     ON CONFLICT(account_id, thread_id) DO UPDATE SET
-       message_id = $4, remind_at = $5, status = 'pending'`,
+     VALUES ($1, $2, $3, $4, $5, 'pending')`,
     [id, accountId, threadId, messageId, remindAt],
   );
 }

@@ -1813,3 +1813,17 @@
   (2026-02-12) created a plain one. Follow-up reminders, manual and automatic (#80, #82), cannot
   be inserted today; the error is swallowed by the callers' catches. Raw outputs in
   `docs/reviews/2026-09-03-pr87-split-tabs-{gemini38,grok}-raw.md`.
+- **2026-09-03 — SPEC-FUR: follow-up reminders could never be inserted (live upstream defect),
+  PR #88, Tier 1.** Found while verifying Gemini H1 on #87 against real SQLite:
+  `insertFollowUpReminder`'s `INSERT … ON CONFLICT(account_id, thread_id) DO UPDATE` fails with
+  *"ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"* — SQLite requires a
+  unique index as the conflict target, and upstream's migration v6 (2026-02-12) created a plain
+  one. Reproduced with `better-sqlite3` on the migration's exact DDL. Consequence: the manual
+  reminder from the action bar and the automatic ones from #80 and #82 have all been failing,
+  the errors swallowed by the callers' catches; the Reminders tab from #87 would always have been
+  empty. Fix, no migration: UPDATE the pending row if there is one, else INSERT; cancelled and
+  triggered rows are history and are left beside a new pending one. Brief
+  `docs/briefs/2026-09-03-followup-reminder-upsert.md`, test
+  `followUpReminders.upsert.test.ts` on the SQLite harness (red on the old statement, green on
+  the new). **Lesson:** a mocked database cannot catch a statement SQLite rejects at prepare
+  time; anything with ON CONFLICT, a trigger, or a constraint belongs on the harness.
