@@ -2151,3 +2151,26 @@
   split-mode queries go through `loadTabThreads(activeAccountId, activeCategory, …)` (`:375`)
   — category filtering has been server-side since Phase 4. Raw output in
   `docs/reviews/2026-09-03-pr92-sb3-delta4-gemini38-raw.md`.
+- **2026-09-03 — SPEC-FUI (the pending-reminder index), Tier 2, PR #94.** Plan
+  `docs/briefs/2026-09-03-followup-pending-unique-index.md` committed and **approved by Jim
+  before any code** ("Build it as planned"), as Tier 2 requires. Migration 29: demote any older
+  duplicate pending row to `'cancelled'` (nothing is deleted — `'cancelled'` is the status the
+  code already uses for history), then `CREATE UNIQUE INDEX idx_followup_pending_unique ON
+  follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`. **It fixes no live
+  bug** and the brief says so: #88 already holds the invariant in one pinned transaction, and
+  the index is the backstop for a future caller that skips it. **Every SQL claim was measured
+  on real SQLite 3.53.4 before the plan was written**, not asserted — the index refuses
+  duplicates, the demotion keeps the newest pending row, history stays unconstrained, #88's
+  select path is unaffected, and the pre-#88 `ON CONFLICT` remains invalid even with a partial
+  index (its target must repeat the `WHERE`), which is what makes rolling back past #88 no
+  worse than today. **Why the demotion exists at all:** the only pre-#88 writer errored at
+  prepare time and never inserted, so no real database should hold a duplicate — but
+  `runMigrations` is step 1 of `App.tsx`'s init and its catch surfaces only credential errors,
+  so a migration that can throw would leave a quietly un-migrated database and block every
+  later migration for that user. The demotion makes 29 total without deleting anything.
+  **The one test it breaks, as the plan predicted:** `threads.splitTabs.test.ts` seeded two
+  pending rows for one thread to prove the readers de-duplicate; the index makes that state
+  impossible. Per Jim's choice (option 1) it is re-framed — one pending row beside cancelled
+  and triggered history, which is what the readers can legitimately meet — with a comment
+  pointing at the new migration test that covers the forbidden state. Tests: the demotion, the
+  UNIQUE refusal (the repo's first constraint-violation assertion), and the empty-database case.

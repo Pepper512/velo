@@ -195,6 +195,114 @@ describe("runMigrations against real SQLite", () => {
   });
 });
 
+// SPEC-FUI: migration 29 makes "one pending follow-up reminder per thread" the
+// database's rule. #88 already holds it in one pinned transaction; the index is
+// the backstop for a future caller that writes the table without it.
+describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => {
+  let harness: ReturnType<typeof createSqliteHarness>;
+
+  beforeEach(() => {
+    harness = createSqliteHarness();
+    harnessRef.current = harness;
+  });
+
+  afterEach(() => {
+    harness.close();
+    harnessRef.current = null;
+  });
+
+  /** Bring the database to the state just before 29, with rows already in place. */
+  function seedBefore29(): void {
+    harness.raw.exec("DELETE FROM _migrations WHERE version = 29");
+    harness.raw.exec("DROP INDEX IF EXISTS idx_followup_pending_unique");
+    harness.raw.exec(`
+      INSERT INTO accounts (id, email, provider) VALUES ('acct-1', 'a@example.com', 'imap');
+      INSERT INTO threads (id, account_id) VALUES ('t1', 'acct-1');
+      INSERT INTO threads (id, account_id) VALUES ('t2', 'acct-1');
+    `);
+  }
+
+  it("demotes an older duplicate pending row and leaves the newest pending", async () => {
+    await runMigrations();
+    seedBefore29();
+
+    // The state the index forbids: two pending rows for one thread, plus a
+    // cancelled row that is history and must survive untouched.
+    harness.raw.exec(`
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status, created_at)
+        VALUES ('r-old',  'acct-1', 't1', 'm1', 100, 'pending',   10),
+               ('r-new',  'acct-1', 't1', 'm2', 200, 'pending',   20),
+               ('r-hist', 'acct-1', 't1', 'm0',  50, 'cancelled',  5),
+               ('r-other','acct-1', 't2', 'm3', 300, 'pending',   30);
+    `);
+
+    await runMigrations();
+
+    const rows = harness.raw
+      .prepare<{ id: string; status: string }>(
+        "SELECT id, status FROM follow_up_reminders ORDER BY id",
+      )
+      .all();
+    expect(rows).toEqual([
+      { id: "r-hist", status: "cancelled" },
+      { id: "r-new", status: "pending" },
+      { id: "r-old", status: "cancelled" },
+      { id: "r-other", status: "pending" },
+    ]);
+
+    const index = harness.raw
+      .prepare<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_followup_pending_unique'",
+      )
+      .get();
+    expect(index).toBeDefined();
+  });
+
+  it("refuses a second pending row for a thread, but not a second cancelled one", async () => {
+    await runMigrations();
+    harness.raw.exec(`
+      INSERT INTO accounts (id, email, provider) VALUES ('acct-2', 'b@example.com', 'imap');
+      INSERT INTO threads (id, account_id) VALUES ('t9', 'acct-2');
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+        VALUES ('p1', 'acct-2', 't9', 'm1', 100, 'pending');
+    `);
+
+    expect(() =>
+      harness.raw.exec(`
+        INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+          VALUES ('p2', 'acct-2', 't9', 'm2', 200, 'pending');
+      `),
+    ).toThrow(/UNIQUE constraint failed/);
+
+    // History is not constrained: any number of cancelled/triggered rows may sit
+    // beside the one pending row.
+    harness.raw.exec(`
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+        VALUES ('c1', 'acct-2', 't9', 'm3', 300, 'cancelled'),
+               ('c2', 'acct-2', 't9', 'm4', 400, 'cancelled'),
+               ('g1', 'acct-2', 't9', 'm5', 500, 'triggered');
+    `);
+    const n = harness.raw
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders WHERE thread_id = 't9'")
+      .get()!.n;
+    expect(n).toBe(4);
+  });
+
+  it("applies to a database with no reminders at all (the expected case)", async () => {
+    await runMigrations();
+    expect(
+      harness.raw
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM _migrations WHERE version = 29")
+        .get()!.n,
+    ).toBe(1);
+    expect(
+      harness.raw
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders")
+        .get()!.n,
+    ).toBe(0);
+  });
+});
+
 describe("the IMAP attachment repair (audit P6)", () => {
   let harness: ReturnType<typeof createSqliteHarness>;
 

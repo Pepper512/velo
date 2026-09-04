@@ -262,4 +262,6 @@ previous round's fix). Tier 2 also wants **your** review of the full diff, not j
 
 ## Approval
 
-- Plan approved by: __________ date: ______  ← **Tier 2: no code until this is filled in.**
+- Plan approved by: **Jim** date: **2026-09-03** — "Build it as planned", with the
+  `threads.splitTabs.test.ts` resolution being **option 1** (re-frame the test; the duplicate
+  seed goes, a comment points at the new migration test).
