@@ -2197,3 +2197,21 @@
   failure (Grok F6); the keep rule is newest `created_at`, not soonest `remind_at`, so a real
   duplicate would lose the earlier time — disclosed in the plan, expected to touch zero rows
   (Grok F5). Raw outputs in `docs/reviews/2026-09-03-pr94-followup-index-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #94 follow-up pass on `7c61348..910325b` (Gemini 3.8 Flash High): CHANGES
+  REQUESTED (2M 1L 1N)** — and the pattern held for the fifth time this week: the pass on a fix
+  found a real defect in that fix. **Adopted — M SEC-FUI-04, the NULL-id test proved nothing:**
+  it put the NULL on a row that gets *demoted*, but the failure mode it claims to cover only
+  bites when the **survivor** carries the NULL — that is when the subquery yields NULL, `NOT IN`
+  goes UNKNOWN for every row, nobody is demoted and the index throws. The NULL is now on the
+  surviving row, and the test is **verified red** against the old `id`-keyed demotion (the
+  migration throws `UNIQUE constraint failed`) and green against the shipped `rowid` one.
+  **Adopted — M SEC-FUI-03:** the new "prove uniqueness by its effect" assertion in the demotion
+  test was unqualified, so an index missing `account_id` or missing the `WHERE` would still have
+  satisfied it; it now names the qualified constraint like its sibling. **Declined, verified —
+  L SEC-FUI-05** ("`threads` may have a single-column primary key, so seeding the same thread id
+  under two accounts would fail"): `threads` is `PRIMARY KEY (account_id, id)`
+  (`migrations.ts:52`), which is why the seed works and why the index needs both columns.
+  **Declined, verified — N SEC-FUI-06** ("the `runMigrations()` before `seedBefore29()` is dead
+  code, or the tests share state"): `beforeEach` builds a fresh in-memory harness per test
+  (`migrations.test.ts:199-207`), so each starts empty and the call is what creates the schema.
+  Raw output in `docs/reviews/2026-09-03-pr94-followup-index-delta-gemini38-raw.md`.

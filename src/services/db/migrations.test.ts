@@ -267,7 +267,7 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
         INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
           VALUES ('r-again', 'acct-1', 't1', 'm9', 900, 'pending');
       `),
-    ).toThrow(/UNIQUE constraint failed/);
+    ).toThrow(/UNIQUE constraint failed: follow_up_reminders\.account_id, follow_up_reminders\.thread_id/);
   });
 
   it("breaks a created_at tie by insertion order, and survives a NULL id (Gemini SEC-FUI-01/02)", async () => {
@@ -275,13 +275,16 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
     seedBefore29();
 
     // Same created_at on every row: only `rowid DESC` can decide, so the last
-    // one inserted is the survivor. One row carries a NULL id — SQLite allows
-    // it through a TEXT PRIMARY KEY, and it must not poison the predicate.
+    // one inserted is the survivor — and it is deliberately the row whose `id`
+    // is NULL. That is the shape SEC-FUI-01 is about: keyed on `id`, the
+    // survivor's NULL would enter the `NOT IN` list, make the predicate UNKNOWN
+    // for every row, demote nobody, and leave `CREATE UNIQUE INDEX` to throw.
+    // Keyed on `rowid` it simply works.
     harness.raw.exec(`
       INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status, created_at)
-        VALUES (NULL,   'acct-1', 't1', 'm1', 100, 'pending', 77),
-               ('mid',  'acct-1', 't1', 'm2', 200, 'pending', 77),
-               ('last', 'acct-1', 't1', 'm3', 300, 'pending', 77);
+        VALUES ('first', 'acct-1', 't1', 'm1', 100, 'pending', 77),
+               ('mid',   'acct-1', 't1', 'm2', 200, 'pending', 77),
+               (NULL,    'acct-1', 't1', 'm3', 300, 'pending', 77);
     `);
 
     await runMigrations();
@@ -291,7 +294,7 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
         "SELECT id FROM follow_up_reminders WHERE status = 'pending' ORDER BY rowid",
       )
       .all();
-    expect(pending).toEqual([{ id: "last" }]);
+    expect(pending).toEqual([{ id: null }]);
     expect(
       harness.raw
         .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders WHERE status = 'cancelled'")
