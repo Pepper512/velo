@@ -2174,3 +2174,26 @@
   and triggered history, which is what the readers can legitimately meet — with a comment
   pointing at the new migration test that covers the forbidden state. Tests: the demotion, the
   UNIQUE refusal (the repo's first constraint-violation assertion), and the empty-database case.
+- **2026-09-03 — PR #94 (SPEC-FUI) review, two legs: both APPROVE.** Gemini 3.8 Flash High
+  (2L 2N) and Grok 4.6 (3L 3N); no High or Medium from either. **Adopted — the NULL-id trap**
+  (Gemini SEC-FUI-01): `id TEXT PRIMARY KEY` does not imply NOT NULL in SQLite, and one NULL
+  inside `id NOT IN (…)` makes the predicate UNKNOWN for every row — the UPDATE would touch
+  nothing and `CREATE UNIQUE INDEX` would then throw, which for this migration means a silently
+  un-migrated database. The demotion is now keyed on `rowid`, which is always present and
+  unique. **Adopted — the tests could not tell a regression from a fix** (Gemini SEC-FUI-02,
+  Grok F1/F2): the seeds had `created_at` order matching insertion order, only ever one
+  account, no NULL status, and asserted the index by *name*, so an index that dropped
+  `account_id`, or a same-named non-unique leftover, would have passed. The demotion test now
+  seeds a second account holding the *same* thread id, a NULL-status row, and proves uniqueness
+  by its effect in the same sequence; a separate test pins a `created_at` tie (broken by
+  `rowid DESC`) with a NULL id in the mix. **Verified red:** weakening the index to
+  `(thread_id)` alone fails these tests; restored, they pass. **Adopted (Gemini SEC-FUI-04):**
+  the UNIQUE assertion names the qualified constraint rather than matching any unique failure.
+  **Noted, accepted (Gemini SEC-FUI-03, Grok F3):** the re-framed `threads.splitTabs.test.ts`
+  no longer exercises the readers' `COUNT(DISTINCT …)`/`GROUP BY` de-duplication, because the
+  state that exercised it is now unreachable. That is the cost of Jim's option 1 and it is
+  recorded rather than papered over. **Notes, no change:** `IF NOT EXISTS` on the index is
+  redundant under the transactional runner but is the right belt given App init swallows a
+  failure (Grok F6); the keep rule is newest `created_at`, not soonest `remind_at`, so a real
+  duplicate would lose the earlier time — disclosed in the plan, expected to touch zero rows
+  (Grok F5). Raw outputs in `docs/reviews/2026-09-03-pr94-followup-index-{gemini38,grok}-raw.md`.

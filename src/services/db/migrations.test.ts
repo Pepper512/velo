@@ -217,8 +217,10 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
     harness.raw.exec("DROP INDEX IF EXISTS idx_followup_pending_unique");
     harness.raw.exec(`
       INSERT INTO accounts (id, email, provider) VALUES ('acct-1', 'a@example.com', 'imap');
+      INSERT INTO accounts (id, email, provider) VALUES ('acct-b', 'b@example.com', 'imap');
       INSERT INTO threads (id, account_id) VALUES ('t1', 'acct-1');
       INSERT INTO threads (id, account_id) VALUES ('t2', 'acct-1');
+      INSERT INTO threads (id, account_id) VALUES ('t1', 'acct-b');
     `);
   }
 
@@ -227,13 +229,18 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
     seedBefore29();
 
     // The state the index forbids: two pending rows for one thread, plus a
-    // cancelled row that is history and must survive untouched.
+    // cancelled row that is history and must survive untouched. `r-cross` is
+    // another account's row for the *same* thread id — it must be left alone,
+    // which an index that forgot `account_id` would not do. `r-null` has no
+    // status: outside the index and outside the demotion.
     harness.raw.exec(`
       INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status, created_at)
         VALUES ('r-old',  'acct-1', 't1', 'm1', 100, 'pending',   10),
                ('r-new',  'acct-1', 't1', 'm2', 200, 'pending',   20),
                ('r-hist', 'acct-1', 't1', 'm0',  50, 'cancelled',  5),
-               ('r-other','acct-1', 't2', 'm3', 300, 'pending',   30);
+               ('r-other','acct-1', 't2', 'm3', 300, 'pending',   30),
+               ('r-cross','acct-b', 't1', 'm4', 400, 'pending',   40),
+               ('r-null', 'acct-1', 't2', 'm5', 500, NULL,        50);
     `);
 
     await runMigrations();
@@ -244,18 +251,52 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
       )
       .all();
     expect(rows).toEqual([
+      { id: "r-cross", status: "pending" },
       { id: "r-hist", status: "cancelled" },
       { id: "r-new", status: "pending" },
+      { id: "r-null", status: null },
       { id: "r-old", status: "cancelled" },
       { id: "r-other", status: "pending" },
     ]);
 
-    const index = harness.raw
-      .prepare<{ name: string }>(
-        "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_followup_pending_unique'",
+    // The index exists *and* is unique — a same-named non-unique leftover would
+    // satisfy a name lookup alone (Grok F2), so prove it by its effect, in the
+    // same sequence that just demoted.
+    expect(() =>
+      harness.raw.exec(`
+        INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+          VALUES ('r-again', 'acct-1', 't1', 'm9', 900, 'pending');
+      `),
+    ).toThrow(/UNIQUE constraint failed/);
+  });
+
+  it("breaks a created_at tie by insertion order, and survives a NULL id (Gemini SEC-FUI-01/02)", async () => {
+    await runMigrations();
+    seedBefore29();
+
+    // Same created_at on every row: only `rowid DESC` can decide, so the last
+    // one inserted is the survivor. One row carries a NULL id — SQLite allows
+    // it through a TEXT PRIMARY KEY, and it must not poison the predicate.
+    harness.raw.exec(`
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status, created_at)
+        VALUES (NULL,   'acct-1', 't1', 'm1', 100, 'pending', 77),
+               ('mid',  'acct-1', 't1', 'm2', 200, 'pending', 77),
+               ('last', 'acct-1', 't1', 'm3', 300, 'pending', 77);
+    `);
+
+    await runMigrations();
+
+    const pending = harness.raw
+      .prepare<{ id: string | null }>(
+        "SELECT id FROM follow_up_reminders WHERE status = 'pending' ORDER BY rowid",
       )
-      .get();
-    expect(index).toBeDefined();
+      .all();
+    expect(pending).toEqual([{ id: "last" }]);
+    expect(
+      harness.raw
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders WHERE status = 'cancelled'")
+        .get()!.n,
+    ).toBe(2);
   });
 
   it("refuses a second pending row for a thread, but not a second cancelled one", async () => {
@@ -272,7 +313,7 @@ describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => 
         INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
           VALUES ('p2', 'acct-2', 't9', 'm2', 200, 'pending');
       `),
-    ).toThrow(/UNIQUE constraint failed/);
+    ).toThrow(/UNIQUE constraint failed: follow_up_reminders\.account_id, follow_up_reminders\.thread_id/);
 
     // History is not constrained: any number of cancelled/triggered rows may sit
     // beside the one pending row.

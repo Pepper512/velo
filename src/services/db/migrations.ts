@@ -919,13 +919,18 @@ const MIGRATIONS = [
     // idx_followup_pending_unique;`. Reverting the app does not remove the
     // index, and does not need to: post-#88 code never writes a second pending
     // row for a thread, so the N-1 app runs green against this schema.
+    // Keyed on `rowid`, not `id`: SQLite's `TEXT PRIMARY KEY` does not imply
+    // NOT NULL, and a single NULL inside a `NOT IN` list makes the whole
+    // predicate UNKNOWN — the UPDATE would silently touch nothing and the
+    // index would then throw (Gemini SEC-FUI-01). `rowid` is always present
+    // and unique.
     sql: `
       UPDATE follow_up_reminders
          SET status = 'cancelled'
        WHERE status = 'pending'
-         AND id NOT IN (
-           SELECT id FROM (
-             SELECT id,
+         AND rowid NOT IN (
+           SELECT rowid FROM (
+             SELECT rowid,
                     ROW_NUMBER() OVER (
                       PARTITION BY account_id, thread_id
                       ORDER BY created_at DESC, rowid DESC
