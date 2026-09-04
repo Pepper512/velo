@@ -8,7 +8,10 @@
   `src/` or `src-tauri/`). **The only SHA this file pins.** `git log --oneline 2c235a5..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
-- **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
+- **Open PRs at writing: two.** **#95** (`share-availability`) — the **approved** Share
+  Availability brief, no code yet; this is where the next build happens. **#96**
+  (`docs-post-fui`) — this docs pin, **green except `npm audit`, which is failing on an npm
+  registry outage, not a finding** (see §2). Never trust this line — run
   `gh pr list --repo Pepper512/velo`.
 - **Branches:** `main` plus the branches pinned by the dead worktrees below, plus **about twenty
   merged feature branches** (`f297-bcc-strip`, `f240-pinned-tx`, `docs-post-*`, …) that nobody
@@ -51,6 +54,34 @@
 ---
 
 ## 1. Exact next step
+
+> **Build Share Availability from the approved brief on branch `share-availability` (PR #95).**
+> The scope decision is already made — **Google-backed calendars only; the button is present
+> but disabled for a CalDAV calendar** — so the brief's task list can be worked straight
+> through, tests first.
+>
+> ```bash
+> cd /Users/jpepper/Developer/Claude/Velo-Build/velo
+> git worktree list                      # share-availability is the live worktree
+> cd .claude/worktrees/share-availability
+> git pull --ff-only && npm ci
+> npx vitest run --reporter=dot --exclude '**/.claude/**' --exclude '**/node_modules/**'
+> ```
+>
+> **Re-verify before acting — these are the assumptions most likely to have gone stale:**
+> - `git log --oneline 2c235a5..origin/main` — anything there that is not `docs:` means the pin
+>   is stale and **every line number cited in the brief must be re-grepped**. The brief cites
+>   `Composer.tsx:640-662`, `TemplatePicker.tsx:25-45`, `calendarEvents.ts:76-92`,
+>   `icalHelper.ts:56-122`, `providerFactory.ts:47-55`.
+> - `gh pr list --repo Pepper512/velo` — #95 and #96 were open at writing; #96 may have merged.
+> - **The branch is behind if #96 landed** — rebase `share-availability` on `origin/main`
+>   before building, or the docs counts will conflict.
+> - `gh run list --branch main --limit 2` — main green.
+> - **`ListAgents`** before assuming a peer seat is live.
+> - The CalDAV recurrence gap the scope depends on: confirm `parseVEvent` still handles no
+>   `RRULE`/`EXDATE`/`RECURRENCE-ID` (`grep -n "RRULE\|EXDATE\|RECURRENCE-ID" src/services/calendar/icalHelper.ts`
+>   should find nothing). If someone has since added recurrence expansion, the "disable for
+>   CalDAV" decision is obsolete and should be re-put to Jim.
 
 **The full ordered plan is `docs/ROADMAP.md`**: the bug-fix queue is done except #278 ("not
 yet"), F-3/P19 landed (#71), E2 part 3 landed (#73), P11 landed (#75), **the dependency audit
@@ -224,13 +255,24 @@ Expected on `main`: **173 test files, 2,299 tests; Rust 173 passed, 3 ignored.**
 ## 2. Immediate / time-sensitive
 
 **No credentials to rotate.** None were created, read or logged; the Dovecot harness was not
-started (Docker down).
+started (Docker down). Credentials live where they always have — `velo.key` for the encrypted
+account fields, the OAuth tokens in the local database; nothing in this session touched either.
+
+**One blocked merge, and it is not a code problem.** **PR #96** (this docs pin) is green on
+every check except `npm audit (prod deps)`, which failed **twice** with
+`503 Service Unavailable — POST https://registry.npmjs.org/-/npm/v1/security/advisories/bulk`.
+The same command run locally on the same tree reports **`found 0 vulnerabilities`**, and the PR
+changes no dependency. It was **not merged**: the standing rule is never to merge a red gate to
+clear a queue. **To finish it:** re-check that the failure is still the 503 and not a real
+advisory (`gh run view <id> --repo Pepper512/velo --log-failed`), then
+`gh run rerun <id> --repo Pepper512/velo --failed`, and merge when it goes green. The same
+flake hit #92 earlier in the session and cleared on its own.
 
 **Jim only:**
 1. **Make `rust MSRV` a required check** — unchanged since 2026-09-01:
    `gh api -X POST repos/Pepper512/velo/branches/main/protection/required_status_checks/contexts -f "contexts[]=rust MSRV"`.
-2. **Remove the four worktrees** (`f1-decisions` is locked, unlock first; `f2-email-links-open`;
-   `f5-move-hygiene`; and this session's `e2-part3-pool-carry`). Everything in all four landed.
+2. **Remove the dead worktrees** — see the list in §7; `share-availability` is the live one and
+   must stay.
 3. **Glance at the vault edits** to `SPEC-F-4` (approval line, Task 13, coupling note) — unchanged
    from the previous handoff. The vault queue line for E2 part 3 was **not** written this session
    (the vault was not opened); the repo-side spec carries the landed status.
@@ -300,7 +342,20 @@ module cache makes listener-registration tests order-dependent; `vi.resetModules
 
 ## 5. Decisions
 
-**Made by Jim directly this session:** "go" on E2 part 3 under the roadmap prompt · the
+**Made by Jim, 2026-09-03 (the two that gate current work):**
+1. **Migration 29: build it as planned** — including the `threads.splitTabs.test.ts`
+   resolution **option 1** (re-frame the test rather than preserve its now-impossible
+   duplicate seed). Landed as #94.
+2. **Share Availability ships for Google-backed calendars only; the button is disabled for a
+   CalDAV calendar**, because CalDAV recurrence is never expanded and a weekly meeting would
+   compute as free. **CalDAV recurrence expansion (`RRULE`/`EXDATE`/`RECURRENCE-ID`/`UNTIL`/
+   `COUNT`, timezone-aware `BYDAY`) is its own next calendar brief** — bigger than Share
+   Availability itself, explicitly not folded into it.
+
+**Pending approval: nothing.** Both open questions were answered; #95's brief is approved and
+its Approval section says so.
+
+**Made by Jim earlier this session:** "go" on E2 part 3 under the roadmap prompt · the
 Gemini review leg is **3.8 Flash High** (supersedes "3.7 first, 3.8 if Grok is slow").
 
 **Made by the build seat, all in LOG.md with reasons:** the ownership design (owned `Option<S>`
@@ -308,9 +363,16 @@ Gemini review leg is **3.8 Flash High** (supersedes "3.7 first, 3.8 if Grok is s
 re-tag · Rust-side emit · frontend epoch + nonce for the dual race · pending invalidations by
 identity · every review disposition (adopted / residual / declined).
 
-**Deliberately deferred + reason:** per-window session binding (ADR-003; P11 next) · LOGOUT on
-the error path (protocol state unknown; a destructor cannot await) · a join set for spawned
-LOGOUTs (three rare paths, bounded at 3 s) · E2 option (d) · the logging pass (#39 finding 5).
+**Deliberately deferred + reason:** **CalDAV recurrence expansion** (larger than the feature it
+would unblock; its own brief) · **a keyboard shortcut for Share Availability** (the vault's
+`⌘⇧A` collides with `action.selectFromHere`, and Ctrl combos fire while typing in the composer;
+rebinding a shipped shortcut is its own decision) · **the four hand-written reply-all copies**
+(#90 left `replyAllRecipients` as the shared rule; consolidating them is behaviour-preserving
+work of its own) · **the `loadThreads` row race** (#92: two loads on a fast folder switch, the
+older can land its rows last — pre-existing, the new state is sequence-guarded) ·
+**`getThreadLabelIds` N+1 per page** · per-window session binding (ADR-003) · LOGOUT on the
+error path (protocol state unknown; a destructor cannot await) · a join set for spawned LOGOUTs
+(three rare paths, bounded at 3 s) · E2 option (d) · the logging pass (#39 finding 5).
 
 **Operational notes that bit us:** `cd src-tauri && …` in one Bash call **persists the cwd**
 into the next call — use `(cd src-tauri && …)` subshells · the worktree guard refuses `for`
@@ -338,9 +400,11 @@ merge can still be wrong — including ours.
 
 **Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `2c235a5`** (#94,
 SPEC-FUI; the only SHA pinned — `git log --oneline 2c235a5..origin/main` shows what is above it) ·
-**one open PR: #95**, the approved Share Availability brief (no code yet) · CI green ·
-185 files / 2,462 tests / Rust 206 + 4 ignored · **29** migrations · npm audit 0 · one
-dependency added this session, pre-approved: `@tanstack/react-virtual` 3.14.10 exact.
+**two open PRs: #95** the approved Share Availability brief (no code yet — build here) and
+**#96** this docs pin (**green but for `npm audit`, which is failing on a registry 503, not a
+finding — re-run it, do not merge red**) · main CI green · 185 files / 2,462 tests / Rust 206 +
+4 ignored · **29** migrations · npm audit 0 locally · one dependency added this session,
+pre-approved: `@tanstack/react-virtual` 3.14.10 exact.
 
 **Jim confirmed those approvals in-session on 2026-09-03 and the build seat ran his prompt to the
 end:** SPEC-QSR (#82), **PR D (#83, six rebase-merged commits)**, **PR E (#84, seven rebase-merged
@@ -404,3 +468,17 @@ and the file tools; the rustfmt hook reformats any `.rs` file you Edit.
 
 **Read §6:** verify numbers, check which side is stale, treat review lanes as independent, and
 remember a clean merge can still be wrong — including ours.
+
+---
+
+### THE NEXT ACTION, in one place
+
+1. **Build Share Availability** on branch `share-availability` (PR #95), from the approved
+   brief `docs/briefs/2026-09-03-share-availability.md`. Scope is settled: **Google-backed
+   calendars only, the button disabled for CalDAV.** Tests first, per the brief's task list.
+   Rebase on `origin/main` first if #96 has landed.
+2. **Before writing anything**, run the re-verification list in **§1** — above all
+   `git log --oneline 2c235a5..origin/main`, because a non-`docs:` commit there means every
+   line number the brief cites must be re-grepped.
+3. **Also outstanding:** re-run PR #96's `npm audit` job and merge it when green (§2). It is
+   failing on an npm registry 503, not a finding — `found 0 vulnerabilities` locally.
