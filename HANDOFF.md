@@ -4,8 +4,8 @@
 > **The last 30 lines are a self-contained resume card** — `tail -30 HANDOFF.md` is enough to pick
 > up work without reading the rest.
 
-- **Code pin: `ca4ba28`** (#92, SPEC-SB the speed budget — the last commit on `main` that changed
-  `src/` or `src-tauri/`). **The only SHA this file pins.** `git log --oneline ca4ba28..origin/main` —
+- **Code pin: `2c235a5`** (#94, SPEC-FUI migration 29 — the last commit on `main` that changed
+  `src/` or `src-tauri/`). **The only SHA this file pins.** `git log --oneline 2c235a5..origin/main` —
   anything there that is not `docs:` means the pin is stale and every line number in the briefs
   must be re-grepped before citing.
 - **Open PRs: none at writing** (this docs PR excepted). Never trust this line — run
@@ -39,8 +39,8 @@
     is not rustfmt-clean.** A stray `cargo fmt` reformats twelve untouched files. Patch
     `commands.rs`-sized files by script (`python3` from the scratchpad) when you want a clean
     reviewer diff; `pool.rs` is clean and safe to Edit.
-- **State on `main` @ `ca4ba28`:** frontend **185** files / **2,458** tests · Rust **206** +
-  4 ignored (the live Dovecot tests) · **28** migrations / 32 tables · npm audit 0 · 0 service
+- **State on `main` @ `2c235a5`:** frontend **185** files / **2,462** tests · Rust **206** +
+  4 ignored (the live Dovecot tests) · **29** migrations / 32 tables · npm audit 0 · 0 service
   import cycles. **One dependency added since the last pin, pre-approved:**
   `@tanstack/react-virtual` 3.14.10 exact (LOG.md 2026-09-02 decision 3; SLSA provenance on it
   and `@tanstack/virtual-core`; no transitive deps). **Dependencies changed this session, each on Jim's explicit approval:** the
@@ -58,10 +58,25 @@ is complete — PR D (#83) and PR E (#84) built from their approved plans**, the
 reminder (#82) and the `urlpattern` scope test (#85) landed, and enhancement wave 1 is three
 items in: Auto Reminders (#80), **custom split-inbox tabs (#87)** and **Instant Intro (#90)**,
 with the follow-up reminder insert repaired on the way (#88 — it had never worked since
-upstream's migration v6). **Enhancement wave 1 is now complete: the speed budget landed as
-#92.** **Next: the Tier 2 partial-unique-index migration from #88** (plan, threat pass and
-rollback committed and approved before code), then wave 2 (Share Availability, Instant Event,
-list summaries).
+upstream's migration v6). **Enhancement wave 1 is complete (the speed budget, #92) and #88's
+Tier 2 follow-up has landed (#94, migration 29).** **Next: build Share Availability from the
+approved brief in PR #95** — Google-backed calendars only, the button disabled for CalDAV
+(see the next-action block in §7 for why) — then the rest of wave 2: Instant Event, one-line
+list summaries. **CalDAV recurrence expansion is a recorded next calendar brief.**
+
+**SPEC-FUI landed as #94 (`2c235a5`) — migration 29, the pending-reminder index.** Brief
+`docs/briefs/2026-09-03-followup-pending-unique-index.md`, **approved by Jim before any code**
+as Tier 2 requires. The migration demotes any older duplicate pending row to `'cancelled'`
+(nothing is deleted) and then creates
+`idx_followup_pending_unique ON follow_up_reminders(account_id, thread_id) WHERE status =
+'pending'`. **It fixes no live bug** — #88 already holds the invariant in one pinned
+transaction — and the brief says so plainly; the index is the backstop for a future caller
+that skips that transaction. Every SQL claim was measured on real SQLite before the plan was
+written. The demotion is keyed on `rowid`, not `id`, because `TEXT PRIMARY KEY` does not imply
+`NOT NULL` and one NULL in a `NOT IN` list would silently demote nobody and leave the index to
+throw — which, since `runMigrations` is step 1 of app init and its catch surfaces only
+credential errors, would mean a quietly un-migrated database. The contract step (`DROP INDEX`)
+is named in the migration's comment and not run, per the pairing gate.
 
 **SPEC-SB landed as #92 (`ca4ba28`) — the speed budget, in three commits.** Brief
 `docs/briefs/2026-09-03-speed-budget.md` (Tier 1, committed before code; one correction made
@@ -256,6 +271,7 @@ merged #73 under the standing rule.
 
 | PR | Merged | What |
 |---|---|---|
+| #94 `2c235a5` | build seat | **SPEC-FUI.** Migration 29: a partial unique index on `follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, preceded by a demotion of any older duplicate pending row to `'cancelled'` so the creation can never throw. Tier 2 — plan, threat pass and rollback approved by Jim before any code. Two legs both APPROVE, then a follow-up pass found the NULL-id test proved nothing (the NULL has to be on the *survivor*) — fixed and verified red against the old query |
 | #92 `ca4ba28` | build seat | **SPEC-SB.** The speed budget in three commits: Reduce effects (every backdrop-filter and the hover/stagger animations, on by default on Linux), a 30-entry stale-while-revalidate message cache warmed for the selected thread's neighbours, and the virtualized list over a flat item model with `@tanstack/react-virtual` 3.14.10; five review rounds, nine legs, each round finding a real defect in the previous fix |
 | #90 `91e01f6` | build seat | **SPEC-II.** Instant Intro: `b` / handshake → reply-all with the introducer in Bcc, own addresses out, "Thanks {name}, moving you to Bcc." above the quote; pure module + 28 tests, `b` dispatch (2), action-bar button (3), store `fromEmail` on open (1); three review passes, two Highs declined against source, five findings adopted |
 | #88 `3b63d73` | build seat | **SPEC-FUR.** Follow-up reminders could never be inserted (upstream's `ON CONFLICT` upsert aimed at a plain index); select-then-update-or-insert in one pinned transaction, on the SQLite harness; sibling audit of all 19 ON CONFLICT statements clean; partial unique index recorded as the Tier 2 follow-up |
@@ -320,10 +336,11 @@ merge can still be wrong — including ours.
 
 ## 7. Resume card
 
-**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `ca4ba28`** (#92,
-SPEC-SB; the only SHA pinned — `git log --oneline ca4ba28..origin/main` shows what is above it) ·
-**no open PRs** · CI green · 185 files / 2,458 tests / Rust 206 + 4 ignored · 28 migrations ·
-npm audit 0 · one dependency added, pre-approved: `@tanstack/react-virtual` 3.14.10 exact.
+**Where:** `cd /Users/jpepper/Developer/Claude/Velo-Build/velo` · **code pin `2c235a5`** (#94,
+SPEC-FUI; the only SHA pinned — `git log --oneline 2c235a5..origin/main` shows what is above it) ·
+**one open PR: #95**, the approved Share Availability brief (no code yet) · CI green ·
+185 files / 2,462 tests / Rust 206 + 4 ignored · **29** migrations · npm audit 0 · one
+dependency added this session, pre-approved: `@tanstack/react-virtual` 3.14.10 exact.
 
 **Jim confirmed those approvals in-session on 2026-09-03 and the build seat ran his prompt to the
 end:** SPEC-QSR (#82), **PR D (#83, six rebase-merged commits)**, **PR E (#84, seven rebase-merged
@@ -331,16 +348,21 @@ commits)** and **SPEC-280-U (#85, the `urlpattern` dev-dependency test)** are on
 Approval lines are filled in. Toolchain now: TypeScript 7.0.2 (native), Vite 8.2.2, mail-parser
 0.11.8, async-imap 0.11.3, socket2 0.6.5, reqwest 0.13.4 with native-tls pinned.
 
-**Next action: the Tier 2 follow-up from #88** — a partial unique index on
-`follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, a migration: plan, threat
-pass and rollback committed **and approved before any code**, full-diff review, two legs. Then
-wave 2 (ROADMAP §4): Share Availability in the composer, Instant Event, one-line list summaries.
-**Enhancement wave 1 is complete.** Landed since the last pin: **#92 the speed budget**
-(`ca4ba28`) — Reduce effects (every `backdrop-filter` and the hover/stagger animations, on by
-default on Linux), a 30-entry stale-while-revalidate message cache warmed for the selected
-thread's neighbours (no skeleton on `j`/`k`), and the virtualized list over a flat item model
-with `@tanstack/react-virtual` 3.14.10. Before it, same day: #90 Instant Intro, #87 split-inbox
-tabs, #88 the reminder-insert repair, #82, #83 (PR D), #84 (PR E), #85. **Review legs:** Gemini
+**Next action: build Share Availability from the approved brief in PR #95** — Jim approved the
+scope on 2026-09-03: **Google-backed calendars only; the button is present but disabled for a
+CalDAV calendar**, because `parseVEvent` expands no recurrence (`icalHelper.ts:56-122` — no
+`RRULE`/`EXDATE`/`RECURRENCE-ID`), so a weekly standup is stored once and every later
+occurrence would compute as *free*. The brief's tasks are risk-first and its two in-scope
+defect fixes stand: the panel fetches fresh (nothing keeps the calendar cache warm — there is
+no background calendar sync) and non-confirmed events do not block a slot. **CalDAV recurrence
+expansion is the next calendar brief.** Then the rest of wave 2: Instant Event, one-line list
+summaries. **Wave 1 is complete and #88's Tier 2 follow-up has landed.** Landed since the last
+pin: **#94 migration 29** (`2c235a5`) — a partial unique index on
+`follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`, preceded by a demotion
+of any older duplicate pending row to `'cancelled'` so the creation can never throw (nothing is
+deleted). It fixes no live bug — #88 already holds the invariant in one pinned transaction —
+and the plan says so. Before it: **#92 the speed budget** (`ca4ba28`), #90 Instant Intro, #87
+split-inbox tabs, #88 the reminder-insert repair, #82, #83 (PR D), #84 (PR E), #85. **Review legs:** Gemini
 **3.8 Flash High** via `agy` **and** Grok 4.6 via the `grok` CLI; diffs from committed SHAs;
 verify every finding against source — and **review every fix you write**: #92 took five rounds
 and *each one found a real defect in the previous round's fix*, three of them the same shape
@@ -364,11 +386,12 @@ Mac answers EOF; the app lives in a quarantine folder).
 
 **Seats:** one build seat. Don't merge Tier 2 on one pair of eyes.
 
-**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **six** worktrees
+**Jim only:** `rust MSRV` required-check `gh api` (§2) · remove the **eight** worktrees
 (`f1-decisions` locked — unlock first; `f2-email-links-open`; `f5-move-hygiene`;
-`e2-part3-pool-carry`, locked, which also carried P11; `instant-intro`; `speed-budget`, this
-session's — everything in the last two landed via #90, #92 and their docs PRs) · glance at the
-vault edits to `SPEC-F-4`.
+`e2-part3-pool-carry`, locked, which also carried P11; `instant-intro`; `speed-budget`;
+`followup-index`; and `share-availability`, which is the **live** one — its branch holds the
+approved brief and is where the build continues. Everything in the others landed via #90, #92,
+#94 and their docs PRs) · glance at the vault edits to `SPEC-F-4`.
 
 **Verify first:** `git worktree list` · `gh pr list` · `ListAgents` · `gh run list --branch main --limit 2`.
 
