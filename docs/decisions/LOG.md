@@ -2151,3 +2151,67 @@
   split-mode queries go through `loadTabThreads(activeAccountId, activeCategory, …)` (`:375`)
   — category filtering has been server-side since Phase 4. Raw output in
   `docs/reviews/2026-09-03-pr92-sb3-delta4-gemini38-raw.md`.
+- **2026-09-03 — SPEC-FUI (the pending-reminder index), Tier 2, PR #94.** Plan
+  `docs/briefs/2026-09-03-followup-pending-unique-index.md` committed and **approved by Jim
+  before any code** ("Build it as planned"), as Tier 2 requires. Migration 29: demote any older
+  duplicate pending row to `'cancelled'` (nothing is deleted — `'cancelled'` is the status the
+  code already uses for history), then `CREATE UNIQUE INDEX idx_followup_pending_unique ON
+  follow_up_reminders(account_id, thread_id) WHERE status = 'pending'`. **It fixes no live
+  bug** and the brief says so: #88 already holds the invariant in one pinned transaction, and
+  the index is the backstop for a future caller that skips it. **Every SQL claim was measured
+  on real SQLite 3.53.4 before the plan was written**, not asserted — the index refuses
+  duplicates, the demotion keeps the newest pending row, history stays unconstrained, #88's
+  select path is unaffected, and the pre-#88 `ON CONFLICT` remains invalid even with a partial
+  index (its target must repeat the `WHERE`), which is what makes rolling back past #88 no
+  worse than today. **Why the demotion exists at all:** the only pre-#88 writer errored at
+  prepare time and never inserted, so no real database should hold a duplicate — but
+  `runMigrations` is step 1 of `App.tsx`'s init and its catch surfaces only credential errors,
+  so a migration that can throw would leave a quietly un-migrated database and block every
+  later migration for that user. The demotion makes 29 total without deleting anything.
+  **The one test it breaks, as the plan predicted:** `threads.splitTabs.test.ts` seeded two
+  pending rows for one thread to prove the readers de-duplicate; the index makes that state
+  impossible. Per Jim's choice (option 1) it is re-framed — one pending row beside cancelled
+  and triggered history, which is what the readers can legitimately meet — with a comment
+  pointing at the new migration test that covers the forbidden state. Tests: the demotion, the
+  UNIQUE refusal (the repo's first constraint-violation assertion), and the empty-database case.
+- **2026-09-03 — PR #94 (SPEC-FUI) review, two legs: both APPROVE.** Gemini 3.8 Flash High
+  (2L 2N) and Grok 4.6 (3L 3N); no High or Medium from either. **Adopted — the NULL-id trap**
+  (Gemini SEC-FUI-01): `id TEXT PRIMARY KEY` does not imply NOT NULL in SQLite, and one NULL
+  inside `id NOT IN (…)` makes the predicate UNKNOWN for every row — the UPDATE would touch
+  nothing and `CREATE UNIQUE INDEX` would then throw, which for this migration means a silently
+  un-migrated database. The demotion is now keyed on `rowid`, which is always present and
+  unique. **Adopted — the tests could not tell a regression from a fix** (Gemini SEC-FUI-02,
+  Grok F1/F2): the seeds had `created_at` order matching insertion order, only ever one
+  account, no NULL status, and asserted the index by *name*, so an index that dropped
+  `account_id`, or a same-named non-unique leftover, would have passed. The demotion test now
+  seeds a second account holding the *same* thread id, a NULL-status row, and proves uniqueness
+  by its effect in the same sequence; a separate test pins a `created_at` tie (broken by
+  `rowid DESC`) with a NULL id in the mix. **Verified red:** weakening the index to
+  `(thread_id)` alone fails these tests; restored, they pass. **Adopted (Gemini SEC-FUI-04):**
+  the UNIQUE assertion names the qualified constraint rather than matching any unique failure.
+  **Noted, accepted (Gemini SEC-FUI-03, Grok F3):** the re-framed `threads.splitTabs.test.ts`
+  no longer exercises the readers' `COUNT(DISTINCT …)`/`GROUP BY` de-duplication, because the
+  state that exercised it is now unreachable. That is the cost of Jim's option 1 and it is
+  recorded rather than papered over. **Notes, no change:** `IF NOT EXISTS` on the index is
+  redundant under the transactional runner but is the right belt given App init swallows a
+  failure (Grok F6); the keep rule is newest `created_at`, not soonest `remind_at`, so a real
+  duplicate would lose the earlier time — disclosed in the plan, expected to touch zero rows
+  (Grok F5). Raw outputs in `docs/reviews/2026-09-03-pr94-followup-index-{gemini38,grok}-raw.md`.
+- **2026-09-03 — PR #94 follow-up pass on `7c61348..910325b` (Gemini 3.8 Flash High): CHANGES
+  REQUESTED (2M 1L 1N)** — and the pattern held for the fifth time this week: the pass on a fix
+  found a real defect in that fix. **Adopted — M SEC-FUI-04, the NULL-id test proved nothing:**
+  it put the NULL on a row that gets *demoted*, but the failure mode it claims to cover only
+  bites when the **survivor** carries the NULL — that is when the subquery yields NULL, `NOT IN`
+  goes UNKNOWN for every row, nobody is demoted and the index throws. The NULL is now on the
+  surviving row, and the test is **verified red** against the old `id`-keyed demotion (the
+  migration throws `UNIQUE constraint failed`) and green against the shipped `rowid` one.
+  **Adopted — M SEC-FUI-03:** the new "prove uniqueness by its effect" assertion in the demotion
+  test was unqualified, so an index missing `account_id` or missing the `WHERE` would still have
+  satisfied it; it now names the qualified constraint like its sibling. **Declined, verified —
+  L SEC-FUI-05** ("`threads` may have a single-column primary key, so seeding the same thread id
+  under two accounts would fail"): `threads` is `PRIMARY KEY (account_id, id)`
+  (`migrations.ts:52`), which is why the seed works and why the index needs both columns.
+  **Declined, verified — N SEC-FUI-06** ("the `runMigrations()` before `seedBefore29()` is dead
+  code, or the tests share state"): `beforeEach` builds a fresh in-memory harness per test
+  (`migrations.test.ts:199-207`), so each starts empty and the call is what creates the schema.
+  Raw output in `docs/reviews/2026-09-03-pr94-followup-index-delta-gemini38-raw.md`.

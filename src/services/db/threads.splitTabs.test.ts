@@ -132,14 +132,27 @@ describe("split-inbox tab queries (SPEC-SIT)", () => {
     expect(counts.get("reminders")).toEqual({ total: 2, unread: 1 });
   });
 
-  it("counts a thread once however many pending reminders it carries, and lists it once (Gemini H1)", async () => {
+  // Originally (Gemini H1 on #87) this seeded two *pending* reminders for one
+  // thread to prove the readers de-duplicate — `COUNT(DISTINCT t.id)` in
+  // `getSplitTabCounts` and the GROUP BY in `getThreadsWithPendingReminders`.
+  // Migration 29 (SPEC-FUI) makes that state impossible: the partial unique
+  // index refuses a second pending row per thread, so the seed itself now
+  // throws. The reader SQL is unchanged and still de-duplicates; what it can
+  // legitimately meet is one pending row beside any number of history rows,
+  // which is what this seeds. The forbidden state is covered by
+  // `migrations.test.ts` → "refuses a second pending row for a thread".
+  it("counts a thread once when its pending reminder sits beside cancelled history, and lists it once (Gemini H1 on #87; reshaped by SPEC-FUI)", async () => {
     await seedThread(ACC, "twice", { labels: ["SENT"] });
     await harness.db.execute(
       "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status) VALUES ('fu-a', $1, 'twice', 'm-a', 500, 'pending')",
       [ACC],
     );
     await harness.db.execute(
-      "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status) VALUES ('fu-b', $1, 'twice', 'm-b', 100, 'pending')",
+      "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status) VALUES ('fu-b', $1, 'twice', 'm-b', 100, 'cancelled')",
+      [ACC],
+    );
+    await harness.db.execute(
+      "INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status) VALUES ('fu-c', $1, 'twice', 'm-c', 200, 'triggered')",
       [ACC],
     );
     const counts = await getSplitTabCounts(ACC, { categories: [], labelIds: [], reminders: true });

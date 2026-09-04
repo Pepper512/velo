@@ -195,6 +195,158 @@ describe("runMigrations against real SQLite", () => {
   });
 });
 
+// SPEC-FUI: migration 29 makes "one pending follow-up reminder per thread" the
+// database's rule. #88 already holds it in one pinned transaction; the index is
+// the backstop for a future caller that writes the table without it.
+describe("the pending follow-up reminder index (SPEC-FUI, migration 29)", () => {
+  let harness: ReturnType<typeof createSqliteHarness>;
+
+  beforeEach(() => {
+    harness = createSqliteHarness();
+    harnessRef.current = harness;
+  });
+
+  afterEach(() => {
+    harness.close();
+    harnessRef.current = null;
+  });
+
+  /** Bring the database to the state just before 29, with rows already in place. */
+  function seedBefore29(): void {
+    harness.raw.exec("DELETE FROM _migrations WHERE version = 29");
+    harness.raw.exec("DROP INDEX IF EXISTS idx_followup_pending_unique");
+    harness.raw.exec(`
+      INSERT INTO accounts (id, email, provider) VALUES ('acct-1', 'a@example.com', 'imap');
+      INSERT INTO accounts (id, email, provider) VALUES ('acct-b', 'b@example.com', 'imap');
+      INSERT INTO threads (id, account_id) VALUES ('t1', 'acct-1');
+      INSERT INTO threads (id, account_id) VALUES ('t2', 'acct-1');
+      INSERT INTO threads (id, account_id) VALUES ('t1', 'acct-b');
+    `);
+  }
+
+  it("demotes an older duplicate pending row and leaves the newest pending", async () => {
+    await runMigrations();
+    seedBefore29();
+
+    // The state the index forbids: two pending rows for one thread, plus a
+    // cancelled row that is history and must survive untouched. `r-cross` is
+    // another account's row for the *same* thread id — it must be left alone,
+    // which an index that forgot `account_id` would not do. `r-null` has no
+    // status: outside the index and outside the demotion.
+    harness.raw.exec(`
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status, created_at)
+        VALUES ('r-old',  'acct-1', 't1', 'm1', 100, 'pending',   10),
+               ('r-new',  'acct-1', 't1', 'm2', 200, 'pending',   20),
+               ('r-hist', 'acct-1', 't1', 'm0',  50, 'cancelled',  5),
+               ('r-other','acct-1', 't2', 'm3', 300, 'pending',   30),
+               ('r-cross','acct-b', 't1', 'm4', 400, 'pending',   40),
+               ('r-null', 'acct-1', 't2', 'm5', 500, NULL,        50);
+    `);
+
+    await runMigrations();
+
+    const rows = harness.raw
+      .prepare<{ id: string; status: string }>(
+        "SELECT id, status FROM follow_up_reminders ORDER BY id",
+      )
+      .all();
+    expect(rows).toEqual([
+      { id: "r-cross", status: "pending" },
+      { id: "r-hist", status: "cancelled" },
+      { id: "r-new", status: "pending" },
+      { id: "r-null", status: null },
+      { id: "r-old", status: "cancelled" },
+      { id: "r-other", status: "pending" },
+    ]);
+
+    // The index exists *and* is unique — a same-named non-unique leftover would
+    // satisfy a name lookup alone (Grok F2), so prove it by its effect, in the
+    // same sequence that just demoted.
+    expect(() =>
+      harness.raw.exec(`
+        INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+          VALUES ('r-again', 'acct-1', 't1', 'm9', 900, 'pending');
+      `),
+    ).toThrow(/UNIQUE constraint failed: follow_up_reminders\.account_id, follow_up_reminders\.thread_id/);
+  });
+
+  it("breaks a created_at tie by insertion order, and survives a NULL id (Gemini SEC-FUI-01/02)", async () => {
+    await runMigrations();
+    seedBefore29();
+
+    // Same created_at on every row: only `rowid DESC` can decide, so the last
+    // one inserted is the survivor — and it is deliberately the row whose `id`
+    // is NULL. That is the shape SEC-FUI-01 is about: keyed on `id`, the
+    // survivor's NULL would enter the `NOT IN` list, make the predicate UNKNOWN
+    // for every row, demote nobody, and leave `CREATE UNIQUE INDEX` to throw.
+    // Keyed on `rowid` it simply works.
+    harness.raw.exec(`
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status, created_at)
+        VALUES ('first', 'acct-1', 't1', 'm1', 100, 'pending', 77),
+               ('mid',   'acct-1', 't1', 'm2', 200, 'pending', 77),
+               (NULL,    'acct-1', 't1', 'm3', 300, 'pending', 77);
+    `);
+
+    await runMigrations();
+
+    const pending = harness.raw
+      .prepare<{ id: string | null }>(
+        "SELECT id FROM follow_up_reminders WHERE status = 'pending' ORDER BY rowid",
+      )
+      .all();
+    expect(pending).toEqual([{ id: null }]);
+    expect(
+      harness.raw
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders WHERE status = 'cancelled'")
+        .get()!.n,
+    ).toBe(2);
+  });
+
+  it("refuses a second pending row for a thread, but not a second cancelled one", async () => {
+    await runMigrations();
+    harness.raw.exec(`
+      INSERT INTO accounts (id, email, provider) VALUES ('acct-2', 'b@example.com', 'imap');
+      INSERT INTO threads (id, account_id) VALUES ('t9', 'acct-2');
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+        VALUES ('p1', 'acct-2', 't9', 'm1', 100, 'pending');
+    `);
+
+    expect(() =>
+      harness.raw.exec(`
+        INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+          VALUES ('p2', 'acct-2', 't9', 'm2', 200, 'pending');
+      `),
+    ).toThrow(/UNIQUE constraint failed: follow_up_reminders\.account_id, follow_up_reminders\.thread_id/);
+
+    // History is not constrained: any number of cancelled/triggered rows may sit
+    // beside the one pending row.
+    harness.raw.exec(`
+      INSERT INTO follow_up_reminders (id, account_id, thread_id, message_id, remind_at, status)
+        VALUES ('c1', 'acct-2', 't9', 'm3', 300, 'cancelled'),
+               ('c2', 'acct-2', 't9', 'm4', 400, 'cancelled'),
+               ('g1', 'acct-2', 't9', 'm5', 500, 'triggered');
+    `);
+    const n = harness.raw
+      .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders WHERE thread_id = 't9'")
+      .get()!.n;
+    expect(n).toBe(4);
+  });
+
+  it("applies to a database with no reminders at all (the expected case)", async () => {
+    await runMigrations();
+    expect(
+      harness.raw
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM _migrations WHERE version = 29")
+        .get()!.n,
+    ).toBe(1);
+    expect(
+      harness.raw
+        .prepare<{ n: number }>("SELECT COUNT(*) AS n FROM follow_up_reminders")
+        .get()!.n,
+    ).toBe(0);
+  });
+});
+
 describe("the IMAP attachment repair (audit P6)", () => {
   let harness: ReturnType<typeof createSqliteHarness>;
 

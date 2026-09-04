@@ -894,6 +894,56 @@ const MIGRATIONS = [
       ALTER TABLE accounts ADD COLUMN smtp_password TEXT;
     `,
   },
+  {
+    version: 29,
+    description: "One pending follow-up reminder per thread (SPEC-FUI): partial unique index",
+    // Expand step. `insertFollowUpReminder` has held this invariant since #88
+    // (select-then-update-or-insert inside one pinned transaction), so the
+    // index changes no behaviour today; it is the backstop for a future caller
+    // that writes the table without that transaction, and it makes
+    // `ON CONFLICT(account_id, thread_id) WHERE status = 'pending'` a legal
+    // upsert target again. `idx_followup_thread` from v6 stays — it is not
+    // unique (which is what made upstream's ON CONFLICT invalid at prepare
+    // time) and still serves the plain (account_id, thread_id) lookups.
+    //
+    // The UPDATE is a safety net, not a repair: the only pre-#88 writer errored
+    // at prepare time and never inserted a row, so no real database should hold
+    // a duplicate. It demotes rather than deletes — 'cancelled' is the status
+    // the code already uses for history, every reader filters on
+    // `status = 'pending'`, and nothing a user created is destroyed. Without it
+    // a single unexpected duplicate would fail this migration on every launch,
+    // and App.tsx's init catch surfaces only credential errors, so the user
+    // would see a quietly un-migrated database rather than an error.
+    //
+    // Contract step (not run here, per the pairing gate): `DROP INDEX
+    // idx_followup_pending_unique;`. Reverting the app does not remove the
+    // index, and does not need to: post-#88 code never writes a second pending
+    // row for a thread, so the N-1 app runs green against this schema.
+    // Keyed on `rowid`, not `id`: SQLite's `TEXT PRIMARY KEY` does not imply
+    // NOT NULL, and a single NULL inside a `NOT IN` list makes the whole
+    // predicate UNKNOWN — the UPDATE would silently touch nothing and the
+    // index would then throw (Gemini SEC-FUI-01). `rowid` is always present
+    // and unique.
+    sql: `
+      UPDATE follow_up_reminders
+         SET status = 'cancelled'
+       WHERE status = 'pending'
+         AND rowid NOT IN (
+           SELECT rowid FROM (
+             SELECT rowid,
+                    ROW_NUMBER() OVER (
+                      PARTITION BY account_id, thread_id
+                      ORDER BY created_at DESC, rowid DESC
+                    ) AS rn
+               FROM follow_up_reminders
+              WHERE status = 'pending'
+           ) WHERE rn = 1
+         );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_followup_pending_unique
+        ON follow_up_reminders(account_id, thread_id)
+        WHERE status = 'pending';
+    `,
+  },
 ];
 
 /**
